@@ -47,16 +47,20 @@ W3C trace context.
 
 **Verified locally (2026-06-23):**
 - Rust workspace compiles (`cargo build`, fmt + clippy clean).
-- `/checkout` orchestrates **pricing (gRPC) + inventory (HTTP) + recommendation
-  (HTTP)** in one request — real multi-service distributed trace, `otel.kind`
-  server/client spans, correct aggregated response (HTTP 200).
-- **Chaos** verified: `?fail=1`→502 error issue (B1), `?slow=ms`→latency (B11).
-- **Canary** verified: `?canary=1` plants a redaction corpus (email/token/card/
-  jwt) in span attrs + log body (A18).
-- **Async branch** verified: orders PRODUCER→CONSUMER spans with a span LINK
-  carrying the producer's trace_id (A3).
-- All three Java services compile (`gradlew compileJava`).
-- web builds (`bun run build`, 642 modules → dist).
+- **Integrated end-to-end**: the four Rust services emit OTLP → the fan-out lab's
+  **Rotel** → **OpenObserve**; a trace search returns all four services
+  (`checkout=25, pricing=5, inventory=5, recommendation=5` spans). This is the
+  whole pipeline working, not just stdout.
+- `/checkout` orchestrates **pricing (gRPC) + inventory + recommendation (HTTP)**
+  in one request — `otel.kind` server/client spans, correct aggregation.
+- **A7 streaming**: gRPC server-streaming (`/quote-stream?quantity=4` → 4 quotes).
+- **A3 async**: orders PRODUCER→CONSUMER with a span LINK to the producer.
+- **A10 baggage**, **A18 canary** corpus in span/log.
+- **Chaos verified**: B1 fail→502, B2 inventory 503, B3 retry/timeout, B5 high-CPU,
+  B6 cache-leak, B7 consumer-lag, B8 poison→dead-letter, B9 N+1, B10 lock
+  contention, B11 latency, B17 cron (success/fail/stuck).
+- All three Java services compile (`gradlew compileJava`); web builds (`bun run
+  build`).
 
 ## Run
 
