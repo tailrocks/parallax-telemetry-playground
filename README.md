@@ -36,21 +36,27 @@ W3C trace context.
 | `services/checkout` | Rust axum | ✅ HTTP→gRPC orchestrator — **builds + runs** (verified) |
 | `services/pricing` | Rust tonic | ✅ gRPC server — **builds + runs** (verified) |
 | `services/inventory` `recommendation` | Rust | ✅ HTTP services in the checkout trace — **build + run** (verified) |
+| `services/orders` | Rust | ✅ async branch: producer/consumer spans + **span link** — **builds + runs** (verified) |
 | `services/notifications` | Rust | ✅ reverse-hop target — **builds** |
 | `cli` | Rust | ✅ run driver — **builds** |
 | `services/catalog` | Java Spring GraphQL | ✅ app + schema + Sentry/OTel config — **compiles** (gradlew) |
 | `services/payment` | Java Spring | ✅ Spring Boot — **compiles**; gRPC proto codegen is the next step |
 | `services/fulfillment` | Java Spring (Kafka) | ✅ consumer + reverse Java→Rust hop — **compiles** |
-| `web` | TanStack Start / TS | 🟡 Sentry init + OTel deps — **deps resolve** (bun); provider wiring TODO |
-| `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd config, k6 load, A1/A12 drivers, compose |
+| `web` | Vite/React (TanStack deps) / TS | ✅ OTel browser provider + Sentry — **builds** (`bun run build`); TanStack router TODO |
+| `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd, k6, scenarios (A1/A3/A12/A18/B1/B11/A13), compose |
 
 **Verified locally (2026-06-23):**
 - Rust workspace compiles (`cargo build`, fmt + clippy clean).
 - `/checkout` orchestrates **pricing (gRPC) + inventory (HTTP) + recommendation
   (HTTP)** in one request — real multi-service distributed trace, `otel.kind`
   server/client spans, correct aggregated response (HTTP 200).
+- **Chaos** verified: `?fail=1`→502 error issue (B1), `?slow=ms`→latency (B11).
+- **Canary** verified: `?canary=1` plants a redaction corpus (email/token/card/
+  jwt) in span attrs + log body (A18).
+- **Async branch** verified: orders PRODUCER→CONSUMER spans with a span LINK
+  carrying the producer's trace_id (A3).
 - All three Java services compile (`gradlew compileJava`).
-- web dependencies resolve under Bun (TanStack Start + Sentry + OTel web).
+- web builds (`bun run build`, 642 modules → dist).
 
 ## Run
 
