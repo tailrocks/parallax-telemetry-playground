@@ -261,6 +261,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
+ "opentelemetry",
  "playground-proto",
  "playground-telemetry",
  "reqwest",
@@ -270,6 +271,7 @@ dependencies = [
  "tokio-stream",
  "tonic 0.12.3",
  "tracing",
+ "tracing-opentelemetry",
 ]
 
 [[package]]

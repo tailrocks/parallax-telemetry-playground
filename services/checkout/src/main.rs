@@ -216,18 +216,35 @@ async fn quote_with_retry(
     last
 }
 
+/// Injects the active span's W3C context into gRPC metadata so the downstream
+/// (Rust or Java) continues the SAME trace — cross-language trace stitching.
+struct MetadataInjector<'a>(&'a mut tonic::metadata::MetadataMap);
+impl opentelemetry::propagation::Injector for MetadataInjector<'_> {
+    fn set(&mut self, key: &str, value: String) {
+        if let Ok(k) = tonic::metadata::MetadataKey::from_bytes(key.as_bytes())
+            && let Ok(v) = value.parse()
+        {
+            self.0.insert(k, v);
+        }
+    }
+}
+
 #[tracing::instrument(fields(otel.kind = "client"))]
 async fn quote(sku: &str, quantity: u32) -> anyhow::Result<(u64, String)> {
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
     let endpoint =
         std::env::var("PRICING_ENDPOINT").unwrap_or_else(|_| "http://pricing:50051".into());
     let mut client = PricingClient::connect(endpoint).await?;
-    let response = client
-        .quote(QuoteRequest {
-            sku: sku.to_string(),
-            quantity,
-        })
-        .await?
-        .into_inner();
+    let mut request = tonic::Request::new(QuoteRequest {
+        sku: sku.to_string(),
+        quantity,
+    });
+    // Inject traceparent/tracestate/baggage into the gRPC metadata.
+    let cx = tracing::Span::current().context();
+    opentelemetry::global::get_text_map_propagator(|prop| {
+        prop.inject_context(&cx, &mut MetadataInjector(request.metadata_mut()));
+    });
+    let response = client.quote(request).await?.into_inner();
     Ok((response.total_minor, response.currency))
 }
 
