@@ -1,5 +1,8 @@
 //! Pricing gRPC service (tonic). Quotes a price for a SKU; instrumented so each
 //! Quote is a SERVER span stitched into the caller's trace.
+// tonic's `Status` is intentionally large; the gRPC trait signatures return it
+// by value, so this lint is unavoidable for generated service impls.
+#![allow(clippy::result_large_err)]
 use playground_proto::pricing::v1::pricing_server::{Pricing, PricingServer};
 use playground_proto::pricing::v1::{QuoteRequest, QuoteResponse};
 use std::pin::Pin;
