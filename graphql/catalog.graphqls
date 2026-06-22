@@ -1,3 +1,4 @@
-type Product { id: ID!, sku: String!, name: String!, priceMinor: Int! }
+type Product { id: ID!, sku: String!, name: String!, priceMinor: Int!, reviews: [Review!]! }
+type Review { text: String!, stars: Int! }
 type Query { product(sku: String!): Product, products: [Product!]! }
 type Subscription { priceChanges: Product! }
