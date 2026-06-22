@@ -54,6 +54,12 @@ struct CheckoutParams {
     tenant: Option<String>,
     #[serde(default = "default_tier")]
     tier: String,
+    /// B4: on a pricing failure, degrade to a partial 200 instead of 502.
+    #[serde(default, deserialize_with = "de_flag")]
+    degrade: bool,
+    /// B18: emit a span event with a deliberately skewed timestamp.
+    #[serde(default, deserialize_with = "de_flag")]
+    skew: bool,
 }
 
 fn default_tier() -> String {
@@ -117,9 +123,31 @@ async fn checkout(Query(p): Query<CheckoutParams>) -> impl IntoResponse {
             "canary payload planted for redaction comparison"
         );
     }
-    if p.fail || flag("PAYMENT_FAILURE") {
-        // B1: deliberate failure → error issue + ERROR span status (502).
-        tracing::error!(sku = %p.sku, "payment failure (chaos flag)");
+    if p.skew {
+        // B18: a span event timestamped far in the past (clock skew across hops).
+        let skewed = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        let skewed = skewed
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        tracing::warn!(skewed_unix_s = skewed, "clock-skew event (1h in the past)");
+    }
+    // B12: release-attributed regression — RELEASE=v2 fails (vs v1 clean).
+    let release_regressed = std::env::var("RELEASE").as_deref() == Ok("v2");
+    if p.fail || flag("PAYMENT_FAILURE") || release_regressed {
+        // B1/B12: deliberate failure → error issue + ERROR span status.
+        tracing::error!(sku = %p.sku, release_regressed, "payment failure (chaos)");
+        // B4: cascading failure → degrade to a partial 200 when asked, else 502.
+        if p.degrade {
+            tracing::warn!("degraded: returning partial result without pricing");
+            let inventory = reserve(&p.sku, p.quantity)
+                .await
+                .unwrap_or(json!({"error": "unavailable"}));
+            return (
+                StatusCode::OK,
+                Json(json!({ "sku": p.sku, "degraded": true, "inventory": inventory })),
+            );
+        }
         return (
             StatusCode::BAD_GATEWAY,
             Json(json!({ "error": "payment failed", "sku": p.sku })),

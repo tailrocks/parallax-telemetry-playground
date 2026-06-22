@@ -16,10 +16,16 @@ struct Recommend {
     sku: String,
     #[serde(default)]
     leak: usize,
+    /// B13: slow "asset"/response latency.
+    #[serde(default)]
+    slow: u64,
 }
 
 #[tracing::instrument(skip(p), fields(otel.kind = "server"))]
 async fn recommend(Query(p): Query<Recommend>) -> Json<Value> {
+    if p.slow > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(p.slow)).await;
+    }
     if p.leak > 0 {
         let mut store = leak_store().lock().unwrap();
         store.push(vec![0u8; p.leak * 1024]); // never freed → leak
