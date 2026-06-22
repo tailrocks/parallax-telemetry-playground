@@ -39,11 +39,11 @@ W3C trace context.
 | `services/orders` | Rust | ✅ async branch: producer/consumer spans + **span link** — **builds + runs** (verified) |
 | `services/notifications` | Rust | ✅ reverse-hop target — **builds** |
 | `cli` | Rust | ✅ run driver — **builds** |
-| `services/catalog` | Java Spring GraphQL | ✅ app + schema + Sentry/OTel config — **compiles** (gradlew) |
-| `services/payment` | Java Spring **gRPC** | ✅ real Spring gRPC server from the shared proto — **compiles + runs**; Rust→Java gRPC call verified |
-| `services/fulfillment` | Java Spring (Kafka) | ✅ consumer + reverse Java→Rust hop — **compiles** |
-| `web` | Vite/React (TanStack deps) / TS | ✅ OTel browser provider + Sentry — **builds** (`bun run build`); TanStack router TODO |
-| `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd, k6, scenarios (A1/A3/A12/A18/B1/B11/A13), compose |
+| `services/catalog` | Java Spring GraphQL | ✅ **A6 DataLoader** (`@BatchMapping`) + **A14 OpenFeature/flagd** flag eval — **compiles** |
+| `services/payment` | Java Spring **gRPC** | ✅ real Spring gRPC server from the shared proto — **compiles + runs**; Rust→Java gRPC verified |
+| `services/fulfillment` | Java Spring (Kafka) | ✅ **real Kafka producer + consumer** round-trip + reverse Java→Rust hop — **compiles** |
+| `web` | Vite/React (TanStack deps) / TS | ✅ OTel browser provider + Sentry — **builds** (`bun run build`); full TanStack router TODO |
+| `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd, k6, scenarios, compose (all services) |
 
 **Verified locally (2026-06-23):**
 - Rust workspace compiles (`cargo build`, fmt + clippy clean).
