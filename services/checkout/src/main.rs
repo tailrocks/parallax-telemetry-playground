@@ -1,6 +1,7 @@
-//! Checkout HTTP service (axum) — the orchestrator. A `GET /checkout` call
-//! quotes a price from the pricing gRPC service, producing a distributed trace
-//! (HTTP SERVER span → gRPC CLIENT span → pricing SERVER span).
+//! Checkout HTTP service (axum) — the orchestrator / trace spine. One
+//! `GET /checkout` fans out to pricing (gRPC), inventory (HTTP) and
+//! recommendation (HTTP), producing a multi-service distributed trace
+//! (HTTP SERVER → gRPC CLIENT + HTTP CLIENT spans → each downstream SERVER span).
 
 use axum::{Json, Router, extract::Query, routing::get};
 use playground_proto::pricing::v1::QuoteRequest;
@@ -25,7 +26,12 @@ fn default_qty() -> u32 {
 
 #[tracing::instrument(skip(params), fields(otel.kind = "server"))]
 async fn checkout(Query(params): Query<CheckoutParams>) -> Json<Value> {
-    match quote(&params.sku, params.quantity).await {
+    // Fan out to the three downstreams; each is its own child span.
+    let pricing = quote(&params.sku, params.quantity).await;
+    let inventory = reserve(&params.sku, params.quantity).await;
+    let recommendation = recommend(&params.sku).await;
+
+    match pricing {
         Ok((total, currency)) => {
             tracing::info!(sku = %params.sku, total, "checkout ok");
             Json(json!({
@@ -33,6 +39,8 @@ async fn checkout(Query(params): Query<CheckoutParams>) -> Json<Value> {
                 "quantity": params.quantity,
                 "total_minor": total,
                 "currency": currency,
+                "inventory": inventory.unwrap_or(json!({"error": "unavailable"})),
+                "recommendation": recommendation.unwrap_or(json!({"error": "unavailable"})),
             }))
         }
         Err(err) => {
@@ -44,8 +52,8 @@ async fn checkout(Query(params): Query<CheckoutParams>) -> Json<Value> {
 
 #[tracing::instrument(fields(otel.kind = "client"))]
 async fn quote(sku: &str, quantity: u32) -> anyhow::Result<(u64, String)> {
-    let endpoint = std::env::var("PRICING_ENDPOINT")
-        .unwrap_or_else(|_| "http://pricing:50051".into());
+    let endpoint =
+        std::env::var("PRICING_ENDPOINT").unwrap_or_else(|_| "http://pricing:50051".into());
     let mut client = PricingClient::connect(endpoint).await?;
     let response = client
         .quote(QuoteRequest {
@@ -55,6 +63,21 @@ async fn quote(sku: &str, quantity: u32) -> anyhow::Result<(u64, String)> {
         .await?
         .into_inner();
     Ok((response.total_minor, response.currency))
+}
+
+#[tracing::instrument(fields(otel.kind = "client"))]
+async fn reserve(sku: &str, quantity: u32) -> anyhow::Result<Value> {
+    let base = std::env::var("INVENTORY_URL").unwrap_or_else(|_| "http://inventory:8089".into());
+    let url = format!("{base}/reserve?sku={sku}&quantity={quantity}");
+    Ok(reqwest::get(&url).await?.json::<Value>().await?)
+}
+
+#[tracing::instrument(fields(otel.kind = "client"))]
+async fn recommend(sku: &str) -> anyhow::Result<Value> {
+    let base =
+        std::env::var("RECOMMENDATION_URL").unwrap_or_else(|_| "http://recommendation:8090".into());
+    let url = format!("{base}/recommend?sku={sku}");
+    Ok(reqwest::get(&url).await?.json::<Value>().await?)
 }
 
 #[tokio::main]

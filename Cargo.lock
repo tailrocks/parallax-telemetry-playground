@@ -263,6 +263,7 @@ dependencies = [
  "axum 0.8.9",
  "playground-proto",
  "playground-telemetry",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
@@ -840,6 +841,8 @@ dependencies = [
  "anyhow",
  "axum 0.8.9",
  "playground-telemetry",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
@@ -1706,6 +1709,8 @@ dependencies = [
  "anyhow",
  "axum 0.8.9",
  "playground-telemetry",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
