@@ -43,6 +43,27 @@ struct CheckoutParams {
     retry: u32,
     #[serde(default = "default_timeout")]
     timeout_ms: u64,
+    /// B5: busy-loop for this many ms (high-CPU hot path).
+    #[serde(default)]
+    cpu_ms: u64,
+    /// B10: hold a shared lock during the request (connection-pool/mutex
+    /// contention under concurrency).
+    #[serde(default, deserialize_with = "de_flag")]
+    lock: bool,
+    /// A10: business context carried as baggage (tenant + tier).
+    tenant: Option<String>,
+    #[serde(default = "default_tier")]
+    tier: String,
+}
+
+fn default_tier() -> String {
+    "free".into()
+}
+
+/// B10: a process-wide lock to serialize requests on demand (contention demo).
+fn contention_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 fn default_timeout() -> u64 {
@@ -64,6 +85,26 @@ fn flag(name: &str) -> bool {
 async fn checkout(Query(p): Query<CheckoutParams>) -> impl IntoResponse {
     if p.slow > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(p.slow)).await;
+    }
+    // A10: business context as baggage (propagated downstream in the full design).
+    if let Some(tenant) = &p.tenant {
+        tracing::info!(tenant = %tenant, user.tier = %p.tier, "baggage business context");
+    }
+    // B10: contention — serialize on a shared lock while held.
+    let _guard = if p.lock {
+        tracing::info!("acquiring shared lock (contention)");
+        Some(contention_lock().lock().await)
+    } else {
+        None
+    };
+    // B5: high-CPU hot path — busy-loop for cpu_ms.
+    if p.cpu_ms > 0 {
+        let until = std::time::Instant::now() + std::time::Duration::from_millis(p.cpu_ms);
+        let mut x: u64 = 0;
+        while std::time::Instant::now() < until {
+            x = x.wrapping_add(1);
+        }
+        tracing::warn!(cpu_ms = p.cpu_ms, iterations = x, "high-CPU hot path");
     }
     if p.canary || flag("CANARY") {
         // A18: plant a redaction canary corpus so backends can be compared on
