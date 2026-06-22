@@ -59,7 +59,9 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
 
     // Sentry rides alongside; DSN from env, disabled gracefully when absent.
     let sentry = sentry::init(sentry::ClientOptions {
-        dsn: std::env::var("SENTRY_DSN").ok().and_then(|d| d.parse().ok()),
+        dsn: std::env::var("SENTRY_DSN")
+            .ok()
+            .and_then(|d| d.parse().ok()),
         release: Some(env!("CARGO_PKG_VERSION").into()),
         environment: Some(
             std::env::var("PARALLAX_ENV")
