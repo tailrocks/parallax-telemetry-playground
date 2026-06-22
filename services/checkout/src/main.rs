@@ -203,6 +203,34 @@ async fn quote(sku: &str, quantity: u32) -> anyhow::Result<(u64, String)> {
     Ok((response.total_minor, response.currency))
 }
 
+/// A7: consume the pricing server-stream (a long-lived streaming CLIENT span).
+#[tracing::instrument(skip(p), fields(otel.kind = "server"))]
+async fn quote_stream(Query(p): Query<CheckoutParams>) -> Json<Value> {
+    use tokio_stream::StreamExt as _;
+    let endpoint =
+        std::env::var("PRICING_ENDPOINT").unwrap_or_else(|_| "http://pricing:50051".into());
+    let count = async {
+        let mut client = PricingClient::connect(endpoint).await.ok()?;
+        let mut stream = client
+            .quote_stream(QuoteRequest {
+                sku: p.sku.clone(),
+                quantity: p.quantity,
+            })
+            .await
+            .ok()?
+            .into_inner();
+        let mut n = 0u32;
+        while let Some(Ok(_item)) = stream.next().await {
+            n += 1;
+        }
+        Some(n)
+    }
+    .await
+    .unwrap_or(0);
+    tracing::info!(sku = %p.sku, count, "consumed pricing stream");
+    Json(json!({ "sku": p.sku, "streamed_quotes": count }))
+}
+
 #[tracing::instrument(fields(otel.kind = "client"))]
 async fn reserve(sku: &str, quantity: u32) -> anyhow::Result<Value> {
     let base = std::env::var("INVENTORY_URL").unwrap_or_else(|_| "http://inventory:8089".into());
@@ -223,6 +251,7 @@ async fn main() -> anyhow::Result<()> {
     let telemetry = playground_telemetry::init("checkout")?;
     let app = Router::new()
         .route("/checkout", get(checkout))
+        .route("/quote-stream", get(quote_stream))
         .route("/healthz", get(|| async { "ok" }));
     let addr = std::env::var("CHECKOUT_ADDR").unwrap_or_else(|_| "0.0.0.0:8088".into());
     tracing::info!(%addr, "checkout HTTP listening");

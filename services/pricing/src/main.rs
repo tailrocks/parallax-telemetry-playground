@@ -2,10 +2,13 @@
 //! Quote is a SERVER span stitched into the caller's trace.
 use playground_proto::pricing::v1::pricing_server::{Pricing, PricingServer};
 use playground_proto::pricing::v1::{QuoteRequest, QuoteResponse};
+use std::pin::Pin;
 use tonic::{Request, Response, Status, transport::Server};
 
 #[derive(Default)]
 struct PricingSvc;
+
+type QuoteStreamS = Pin<Box<dyn tokio_stream::Stream<Item = Result<QuoteResponse, Status>> + Send>>;
 
 #[tonic::async_trait]
 impl Pricing for PricingSvc {
@@ -24,6 +27,31 @@ impl Pricing for PricingSvc {
             total_minor,
             currency: "USD".into(),
         }))
+    }
+
+    type QuoteStreamStream = QuoteStreamS;
+
+    /// A7: server-streaming — one QuoteResponse per unit (a long-lived stream span).
+    #[tracing::instrument(skip(self, request), fields(otel.kind = "server"))]
+    async fn quote_stream(
+        &self,
+        request: Request<QuoteRequest>,
+    ) -> Result<Response<Self::QuoteStreamStream>, Status> {
+        let req = request.into_inner();
+        let n = req.quantity.max(1);
+        tracing::info!(sku = %req.sku, n, "streaming quotes");
+        let items: Vec<Result<QuoteResponse, Status>> = (1..=n)
+            .map(|i| {
+                Ok(QuoteResponse {
+                    sku: req.sku.clone(),
+                    quantity: i,
+                    total_minor: 1999u64 * u64::from(i),
+                    currency: "USD".into(),
+                })
+            })
+            .collect();
+        let stream: QuoteStreamS = Box::pin(tokio_stream::iter(items));
+        Ok(Response::new(stream))
     }
 }
 

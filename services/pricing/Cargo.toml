@@ -10,4 +10,5 @@ playground-proto = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
+tokio-stream = { workspace = true }
 tracing = { workspace = true }

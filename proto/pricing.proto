@@ -5,6 +5,8 @@ package playground.pricing.v1;
 // reimplementation); cross-service distributed tracing flows through it.
 service Pricing {
   rpc Quote(QuoteRequest) returns (QuoteResponse);
+  // A7: server-streaming — emits a quote per unit (long-lived streaming span).
+  rpc QuoteStream(QuoteRequest) returns (stream QuoteResponse);
 }
 
 message QuoteRequest {
