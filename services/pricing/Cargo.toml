@@ -1,0 +1,13 @@
+[package]
+name = "pricing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+playground-telemetry = { workspace = true }
+playground-proto = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }

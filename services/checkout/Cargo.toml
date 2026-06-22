@@ -1,0 +1,16 @@
+[package]
+name = "checkout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+playground-telemetry = { workspace = true }
+playground-proto = { workspace = true }
+anyhow = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

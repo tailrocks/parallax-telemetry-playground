@@ -1,0 +1,3 @@
+type Product { id: ID!, sku: String!, name: String!, priceMinor: Int! }
+type Query { product(sku: String!): Product, products: [Product!]! }
+type Subscription { priceChanges: Product! }

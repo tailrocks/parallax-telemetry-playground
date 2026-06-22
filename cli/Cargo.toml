@@ -1,0 +1,16 @@
+[package]
+name = "playground-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "playground"
+path = "src/main.rs"
+
+[dependencies]
+playground-telemetry = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }

@@ -1,0 +1,15 @@
+# Build any Rust service from the workspace: --build-arg BIN=<crate-bin>.
+FROM rust:1-slim AS build
+ARG BIN
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
+RUN cargo build --release --bin ${BIN}
+RUN cp target/release/${BIN} /out
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out /usr/local/bin/service
+ENTRYPOINT ["/usr/local/bin/service"]

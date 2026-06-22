@@ -1,0 +1,77 @@
+# Telemetry Playground — all services. Emits OTLP to the fan-out lab's Rotel.
+#
+# The lab (separate repo: parallax bench/otlp-fanout) owns Rotel + the backends.
+# Here every service exports to OTEL_EXPORTER_OTLP_ENDPOINT, default the lab's
+# Rotel reached from a container via host.docker.internal:4317. Run the lab
+# first, then `docker compose up` here.
+#
+# Status: Rust services (checkout, pricing, inventory, recommendation,
+# notifications) build + run. Java (catalog, payment, fulfillment) and web are
+# scaffolds — finalize their Dockerfiles before enabling. Pin image tags.
+
+name: telemetry-playground
+
+x-otlp: &otlp
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+  PARALLAX_ENV: "playground"
+
+services:
+  checkout:
+    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: checkout } }
+    environment: { <<: *otlp, PRICING_ENDPOINT: "http://pricing:50051", CHECKOUT_ADDR: "0.0.0.0:8088" }
+    ports: ["8088:8088"]
+    depends_on: [pricing]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
+  pricing:
+    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: pricing } }
+    environment: { <<: *otlp, PRICING_ADDR: "0.0.0.0:50051" }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
+  inventory:
+    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: inventory } }
+    environment: { <<: *otlp, ADDR: "0.0.0.0:8089" }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
+  recommendation:
+    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: recommendation } }
+    environment: { <<: *otlp, ADDR: "0.0.0.0:8090" }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
+  notifications:
+    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: notifications } }
+    environment: { <<: *otlp, ADDR: "0.0.0.0:8091" }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
+  postgres:
+    image: postgres:17
+    environment: { POSTGRES_PASSWORD: playground, POSTGRES_DB: playground }
+    networks: [pg]
+
+  broker:
+    image: redpandadata/redpanda:latest # Kafka-API-compatible, light
+    command: ["redpanda", "start", "--smp", "1", "--overprovisioned", "--node-id", "0", "--check=false"]
+    networks: [pg]
+
+  flagd:
+    image: ghcr.io/open-feature/flagd:latest
+    command: ["start", "--uri", "file:/etc/flagd/flagd.json"]
+    volumes: ["../flags/flagd.json:/etc/flagd/flagd.json:ro"]
+    ports: ["8013:8013"]
+    networks: [pg]
+
+  # --- Scaffolds (finalize before enabling) ---
+  # catalog:   Spring Boot + GraphQL  (services/catalog)
+  # payment:   Spring Boot + gRPC     (services/payment)
+  # fulfillment: Spring Boot consumer (services/fulfillment)
+  # web:       TanStack Start         (web/)
+
+networks:
+  pg:
+    name: telemetry-playground

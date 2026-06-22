@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: catalog
+sentry:
+  dsn: ${SENTRY_DSN:}
+  environment: ${PARALLAX_ENV:playground}
+  traces-sample-rate: 1.0
+  send-default-pii: false
+management:
+  tracing:
+    exemplars:
+      include: all
+logging:
+  pattern:
+    level: "trace_id=%mdc{trace_id} span_id=%mdc{span_id} %5p"
