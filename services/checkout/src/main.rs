@@ -35,6 +35,18 @@ struct CheckoutParams {
     slow: u64,
     #[serde(default, deserialize_with = "de_flag")]
     canary: bool,
+    /// B9: extra sequential inventory calls (N+1 hotspot).
+    #[serde(default)]
+    n1: u32,
+    /// B3: retry the pricing call up to N times with a per-attempt deadline.
+    #[serde(default)]
+    retry: u32,
+    #[serde(default = "default_timeout")]
+    timeout_ms: u64,
+}
+
+fn default_timeout() -> u64 {
+    1000
 }
 
 fn default_sku() -> String {
@@ -73,7 +85,13 @@ async fn checkout(Query(p): Query<CheckoutParams>) -> impl IntoResponse {
         );
     }
 
-    let pricing = quote(&p.sku, p.quantity).await;
+    // B9: N+1 — fire N extra sequential inventory calls (a classic hotspot).
+    for i in 0..p.n1 {
+        let _ = reserve(&p.sku, 1).await;
+        tracing::debug!(i, "n+1 inventory call");
+    }
+
+    let pricing = quote_with_retry(&p.sku, p.quantity, p.retry, p.timeout_ms).await;
     let inventory = reserve(&p.sku, p.quantity).await;
     let recommendation = recommend(&p.sku).await;
 
@@ -100,6 +118,33 @@ async fn checkout(Query(p): Query<CheckoutParams>) -> impl IntoResponse {
             )
         }
     }
+}
+
+/// B3: bounded retry with a per-attempt deadline around the pricing call.
+#[tracing::instrument]
+async fn quote_with_retry(
+    sku: &str,
+    quantity: u32,
+    retry: u32,
+    timeout_ms: u64,
+) -> anyhow::Result<(u64, String)> {
+    let attempts = retry.saturating_add(1);
+    let mut last: anyhow::Result<(u64, String)> = Err(anyhow::anyhow!("no attempt"));
+    for attempt in 1..=attempts {
+        let deadline = std::time::Duration::from_millis(timeout_ms);
+        match tokio::time::timeout(deadline, quote(sku, quantity)).await {
+            Ok(Ok(ok)) => return Ok(ok),
+            Ok(Err(err)) => {
+                tracing::warn!(attempt, error = %err, "pricing attempt failed");
+                last = Err(err);
+            }
+            Err(_) => {
+                tracing::warn!(attempt, timeout_ms, "pricing attempt timed out");
+                last = Err(anyhow::anyhow!("pricing deadline exceeded"));
+            }
+        }
+    }
+    last
 }
 
 #[tracing::instrument(fields(otel.kind = "client"))]
