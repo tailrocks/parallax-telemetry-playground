@@ -6,6 +6,8 @@ import org.springframework.graphql.data.method.annotation.Argument;
 import org.springframework.graphql.data.method.annotation.BatchMapping;
 import org.springframework.graphql.data.method.annotation.QueryMapping;
 import org.springframework.stereotype.Controller;
+import dev.openfeature.sdk.OpenFeatureAPI;
+import dev.openfeature.sdk.Client;
 
 import java.util.List;
 import java.util.Map;
@@ -34,8 +36,15 @@ class ProductController {
         return CATALOG.stream().filter(p -> p.sku().equals(sku)).findFirst().orElse(null);
     }
 
+    // A14: OpenFeature flag evaluation (flagd provider) — the evaluation is
+    // surfaced as feature_flag.* telemetry by the OTel hook at runtime.
+    private final Client flags = OpenFeatureAPI.getInstance().getClient();
+
     @QueryMapping
-    List<Product> products() { return CATALOG; }
+    List<Product> products() {
+        boolean promo = flags.getBooleanValue("catalogPromo", false);
+        return promo ? CATALOG : CATALOG;
+    }
 
     // A6: per-product `reviews` resolved via a @BatchMapping — Spring GraphQL
     // batches all products' review fetches into ONE DataLoader call, so the

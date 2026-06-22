@@ -16,4 +16,6 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation(platform("io.sentry:sentry-bom:8.44.0"))
     implementation("io.sentry:sentry-spring-boot-starter-jakarta")
+    implementation("dev.openfeature:sdk:1.12.0")
+    implementation("dev.openfeature.contrib.providers:flagd:0.11.4")
 }
