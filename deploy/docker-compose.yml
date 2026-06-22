@@ -49,6 +49,13 @@ services:
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
+  orders:
+    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: orders } }
+    environment: { <<: *otlp, ADDR: "0.0.0.0:8092" }
+    ports: ["8092:8092"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
   postgres:
     image: postgres:17
     environment: { POSTGRES_PASSWORD: playground, POSTGRES_DB: playground }

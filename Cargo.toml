@@ -8,6 +8,7 @@ members = [
     "services/inventory",
     "services/recommendation",
     "services/notifications",
+    "services/orders",
     "cli",
 ]
 
