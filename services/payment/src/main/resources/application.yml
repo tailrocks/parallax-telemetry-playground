@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: payment
+sentry:
+  dsn: ${SENTRY_DSN:}
+  environment: ${PARALLAX_ENV:playground}
+  traces-sample-rate: 1.0
+management:
+  tracing:
+    exemplars:
+      include: all

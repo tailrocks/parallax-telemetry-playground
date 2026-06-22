@@ -35,16 +35,22 @@ W3C trace context.
 | `proto` | Rust | ✅ pricing gRPC contract — **builds** |
 | `services/checkout` | Rust axum | ✅ HTTP→gRPC orchestrator — **builds + runs** (verified) |
 | `services/pricing` | Rust tonic | ✅ gRPC server — **builds + runs** (verified) |
-| `services/inventory` `recommendation` `notifications` | Rust | ✅ telemetry-wired scaffolds — **build** |
+| `services/inventory` `recommendation` | Rust | ✅ HTTP services in the checkout trace — **build + run** (verified) |
+| `services/notifications` | Rust | ✅ reverse-hop target — **builds** |
 | `cli` | Rust | ✅ run driver — **builds** |
-| `services/catalog` | Java Spring GraphQL | 🟡 scaffold (Application + schema + Sentry/OTel config) |
-| `services/payment` `fulfillment` | Java Spring | 🟡 scaffold (README + build plan) |
-| `web` | TanStack Start / TS | 🟡 scaffold (Sentry init + deps; provider wiring TODO) |
+| `services/catalog` | Java Spring GraphQL | ✅ app + schema + Sentry/OTel config — **compiles** (gradlew) |
+| `services/payment` | Java Spring | ✅ Spring Boot — **compiles**; gRPC proto codegen is the next step |
+| `services/fulfillment` | Java Spring (Kafka) | ✅ consumer + reverse Java→Rust hop — **compiles** |
+| `web` | TanStack Start / TS | 🟡 Sentry init + OTel deps — **deps resolve** (bun); provider wiring TODO |
 | `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd config, k6 load, A1/A12 drivers, compose |
 
-**Verified locally:** the Rust workspace compiles (`cargo build`, 0 warnings) and
-the checkout→pricing distributed call returns correctly (`total_minor` = unit ×
-qty), with `otel.kind` server/client spans on both sides.
+**Verified locally (2026-06-23):**
+- Rust workspace compiles (`cargo build`, fmt + clippy clean).
+- `/checkout` orchestrates **pricing (gRPC) + inventory (HTTP) + recommendation
+  (HTTP)** in one request — real multi-service distributed trace, `otel.kind`
+  server/client spans, correct aggregated response (HTTP 200).
+- All three Java services compile (`gradlew compileJava`).
+- web dependencies resolve under Bun (TanStack Start + Sentry + OTel web).
 
 ## Run
 

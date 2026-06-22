@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: fulfillment
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:broker:9092}
+sentry:
+  dsn: ${SENTRY_DSN:}
+  environment: ${PARALLAX_ENV:playground}
+  traces-sample-rate: 1.0
