@@ -8,6 +8,8 @@ import org.springframework.graphql.data.method.annotation.QueryMapping;
 import org.springframework.stereotype.Controller;
 import dev.openfeature.sdk.OpenFeatureAPI;
 import dev.openfeature.sdk.Client;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 
 import java.util.List;
 import java.util.Map;
@@ -39,9 +41,21 @@ class ProductController {
     // A14: OpenFeature flag evaluation (flagd provider) — the evaluation is
     // surfaced as feature_flag.* telemetry by the OTel hook at runtime.
     private final Client flags = OpenFeatureAPI.getInstance().getClient();
+    // A2: a Micrometer counter — exported via OTLP with trace exemplars
+    // (management.tracing.exemplars.include=all) so a metric data point links to
+    // the trace that produced it. Exemplars are real on the JVM tier (the Rust
+    // SDK has none yet).
+    private final Counter productQueries;
+
+    ProductController(MeterRegistry meters) {
+        this.productQueries = Counter.builder("catalog.product.queries")
+            .description("product list queries")
+            .register(meters);
+    }
 
     @QueryMapping
     List<Product> products() {
+        productQueries.increment();
         boolean promo = flags.getBooleanValue("catalogPromo", false);
         return promo ? CATALOG : CATALOG;
     }

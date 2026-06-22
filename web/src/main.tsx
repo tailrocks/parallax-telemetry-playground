@@ -28,6 +28,15 @@ function App() {
     <main style={{ fontFamily: "monospace", padding: 24 }}>
       <h1>Telemetry Playground</h1>
       <button onClick={checkout}>checkout</button>
+      {/* B15: an unresponsive control — rapid repeated clicks register as a
+          "rage click" in Sentry Session Replay. */}
+      <button onClick={() => { /* intentionally does nothing (rage-click demo) */ }}>
+        apply promo (unresponsive)
+      </button>
+      {/* A5: a button that throws so Sentry captures the error + replay (RUM). */}
+      <button onClick={() => { throw new Error("intentional RUM error (A5)"); }}>
+        break (RUM error)
+      </button>
       <pre>{out}</pre>
     </main>
   );
