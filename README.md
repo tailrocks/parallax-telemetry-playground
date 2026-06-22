@@ -40,7 +40,7 @@ W3C trace context.
 | `services/notifications` | Rust | ✅ reverse-hop target — **builds** |
 | `cli` | Rust | ✅ run driver — **builds** |
 | `services/catalog` | Java Spring GraphQL | ✅ app + schema + Sentry/OTel config — **compiles** (gradlew) |
-| `services/payment` | Java Spring | ✅ Spring Boot — **compiles**; gRPC proto codegen is the next step |
+| `services/payment` | Java Spring **gRPC** | ✅ real Spring gRPC server from the shared proto — **compiles + runs**; Rust→Java gRPC call verified |
 | `services/fulfillment` | Java Spring (Kafka) | ✅ consumer + reverse Java→Rust hop — **compiles** |
 | `web` | Vite/React (TanStack deps) / TS | ✅ OTel browser provider + Sentry — **builds** (`bun run build`); TanStack router TODO |
 | `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd, k6, scenarios (A1/A3/A12/A18/B1/B11/A13), compose |
@@ -59,8 +59,14 @@ W3C trace context.
 - **Chaos verified**: B1 fail→502, B2 inventory 503, B3 retry/timeout, B5 high-CPU,
   B6 cache-leak, B7 consumer-lag, B8 poison→dead-letter, B9 N+1, B10 lock
   contention, B11 latency, B17 cron (success/fail/stuck).
-- All three Java services compile (`gradlew compileJava`); web builds (`bun run
-  build`).
+- All three Java services compile; web builds (`bun run build`).
+- **Cross-language gRPC verified**: Rust `checkout` (tonic client) → **Java
+  `payment`** (Spring gRPC server, Boot 4 + spring-grpc 1.0.3, generated from the
+  shared proto) returns the Java-computed price (`3998`); the OTel Java agent
+  produces a proper `playground.pricing.v1.Pricing/Quote` SERVER span (rpc
+  semconv). *(Note: the Java agent's OTLP→Rotel→OpenObserve delivery has an
+  environment-specific snag still being chased — the Rust path into OpenObserve is
+  verified; Java instrumentation is verified via the logging exporter.)*
 
 ## Run
 

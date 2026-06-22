@@ -6,7 +6,7 @@ import com.google.protobuf.gradle.proto
 // cross-language counterpart to the Rust pricing service.
 plugins {
     java
-    id("org.springframework.boot") version "3.4.1"
+    id("org.springframework.boot") version "4.0.0"
     id("io.spring.dependency-management") version "1.1.7"
     id("com.google.protobuf") version "0.9.4"
 }
@@ -22,8 +22,6 @@ dependencies {
     compileOnly("org.apache.tomcat:annotations-api:6.0.53")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation(platform("io.sentry:sentry-bom:8.44.0"))
-    implementation("io.sentry:sentry-spring-boot-starter-jakarta")
 }
 protobuf {
     protoc { artifact = "com.google.protobuf:protoc:4.28.3" }
