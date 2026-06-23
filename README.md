@@ -42,8 +42,8 @@ W3C trace context.
 | `services/catalog` | Java Spring GraphQL | ✅ **A6 DataLoader** (`@BatchMapping`) + **A14 OpenFeature/flagd** flag eval — **compiles** |
 | `services/payment` | Java Spring **gRPC** | ✅ real Spring gRPC server from the shared proto — **compiles + runs**; Rust→Java gRPC verified |
 | `services/fulfillment` | Java Spring (Kafka) | ✅ **real Kafka producer + consumer** round-trip + reverse Java→Rust hop — **compiles** |
-| `web` | Vite/React (TanStack deps) / TS | ✅ OTel browser provider + Sentry — **builds** (`bun run build`); full TanStack router TODO |
-| `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd, k6, scenarios, compose (all services) |
+| `web` | TanStack Start / TS | ✅ real TanStack Start app (file routing + Nitro): same-origin `/v1/traces` OTLP proxy, SSR `<meta traceparent>`, OTel browser + Sentry RUM — **builds + type-checks** (`bun run build`) |
+| `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd, k6, scenarios, compose (all services incl. Java + web; `Dockerfile.java`/`Dockerfile.web`) |
 
 **Verified locally (2026-06-23):**
 - Rust workspace compiles (`cargo build`, fmt + clippy clean).

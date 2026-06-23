@@ -1,0 +1,31 @@
+# Shared Dockerfile for the Spring Boot (Java) services. Parameterized by SERVICE
+# (the services/<SERVICE> directory). Each service is its own Gradle build with
+# its own wrapper.
+#
+# One agent for both OTel and Sentry: io.sentry:sentry-opentelemetry-agent run as
+# -javaagent with SENTRY_AUTO_INIT=false; the Spring Boot starter inits the SDK
+# (spec §8). Agent version MUST equal the Sentry SDK version (sentry-bom 8.44.0).
+ARG SERVICE
+ARG JDK=21
+ARG SENTRY_AGENT_VERSION=8.44.0
+
+FROM eclipse-temurin:${JDK}-jdk AS build
+ARG SERVICE
+WORKDIR /src
+COPY services/${SERVICE} /src/service
+COPY proto /src/proto
+COPY graphql /src/graphql
+WORKDIR /src/service
+RUN ./gradlew --no-daemon bootJar
+
+FROM eclipse-temurin:${JDK}-jre AS run
+ARG SENTRY_AGENT_VERSION
+WORKDIR /app
+# OTel + Sentry agent (single javaagent). Pinned to the SDK version.
+ADD https://repo1.maven.org/maven2/io/sentry/sentry-opentelemetry-agent/${SENTRY_AGENT_VERSION}/sentry-opentelemetry-agent-${SENTRY_AGENT_VERSION}.jar /app/sentry-otel-agent.jar
+COPY --from=build /src/service/build/libs/*.jar /app/app.jar
+# Spring starter owns SDK init; agent provides OTel auto-instrumentation + bridges.
+ENV SENTRY_AUTO_INIT=false \
+    JAVA_TOOL_OPTIONS="-javaagent:/app/sentry-otel-agent.jar" \
+    OTEL_PROPAGATORS="tracecontext,baggage"
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

@@ -6,7 +6,12 @@ multi-runtime environment (Sentry self-hosted, a browser, a collector with a
 short flush) that a sandbox can't provision.
 
 ## Verified here (build/run/execute)
-- Rust workspace builds (fmt + clippy clean); Java services compile; web builds.
+- Rust workspace builds (fmt + clippy clean); Java services compile; web builds
+  (`bun run build`: Vite client + SSR + Nitro server) and type-checks
+  (`tsc --noEmit`); routes `/` and `/v1/traces` register. The live SSR/browser
+  run needs a host with working DNS (this sandbox's node `fetch`/undici has
+  none — `node -e fetch(...)` fails on any host), so the Nitro prod server's
+  per-request render can't complete here; it's a host concern, not a code defect.
 - `parallax run start` compare-mode forward (Parallax repo, 11 tests).
 - Lab fan-out: trace → Rotel → OpenObserve (queried back by service).
 - Multi-service Rust distributed trace (checkout → pricing/inventory/recommendation).

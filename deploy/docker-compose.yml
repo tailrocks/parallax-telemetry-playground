@@ -6,14 +6,18 @@
 # first, then `docker compose up` here.
 #
 # Status: Rust services (checkout, pricing, inventory, recommendation,
-# notifications) build + run. Java (catalog, payment, fulfillment) and web are
-# scaffolds — finalize their Dockerfiles before enabling. Pin image tags.
+# notifications, orders) + Java (catalog GraphQL, payment gRPC, fulfillment
+# Kafka) + web (TanStack Start) all wired. Java uses the single Sentry+OTel
+# javaagent (deploy/Dockerfile.java); web is the Nitro server (deploy/
+# Dockerfile.web). Pin image tags at a real deploy.
 
 name: telemetry-playground
 
 x-otlp: &otlp
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
   OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+  OTEL_PROPAGATORS: "tracecontext,baggage"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=playground"
   PARALLAX_ENV: "playground"
 
 services:
@@ -73,11 +77,52 @@ services:
     ports: ["8013:8013"]
     networks: [pg]
 
-  # --- Scaffolds (finalize before enabling) ---
-  # catalog:   Spring Boot + GraphQL  (services/catalog)
-  # payment:   Spring Boot + gRPC     (services/payment)
-  # fulfillment: Spring Boot consumer (services/fulfillment)
-  # web:       TanStack Start         (web/)
+  # --- Java (single Sentry+OTel javaagent) ---
+  catalog:
+    build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: catalog } }
+    environment:
+      <<: *otlp
+      OTEL_SERVICE_NAME: "catalog"
+      SENTRY_DSN: "${SENTRY_DSN:-}"
+      FLAGD_HOST: "flagd"
+      SERVER_PORT: "8080"
+    ports: ["8080:8080"] # GraphQL (browser → catalog)
+    depends_on: [flagd]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
+  payment:
+    build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: payment } }
+    environment:
+      <<: *otlp
+      OTEL_SERVICE_NAME: "payment"
+      SENTRY_DSN: "${SENTRY_DSN:-}"
+      SPRING_GRPC_SERVER_PORT: "9090"
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
+  fulfillment:
+    build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: fulfillment } }
+    environment:
+      <<: *otlp
+      OTEL_SERVICE_NAME: "fulfillment"
+      SENTRY_DSN: "${SENTRY_DSN:-}"
+      KAFKA_BROKERS: "broker:9092"
+      NOTIFICATIONS_URL: "http://notifications:8091"
+    depends_on: [broker, notifications]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
+  # --- Frontend (TanStack Start, Nitro server) ---
+  web:
+    build: { context: .., dockerfile: deploy/Dockerfile.web }
+    environment:
+      # Server-side OTLP proxy target (browser → /v1/traces → Rotel HTTP).
+      ROTEL_OTLP_HTTP_ENDPOINT: "http://host.docker.internal:4318"
+      PORT: "3000"
+    ports: ["5173:3000"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
 
 networks:
   pg:

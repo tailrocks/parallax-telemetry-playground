@@ -1,0 +1,17 @@
+# web (TanStack Start). Build with Bun (repo policy: Bun-only for JS/TS), run the
+# Nitro node-server output. The same-origin /v1/traces proxy forwards browser
+# OTLP to Rotel server-side (ROTEL_OTLP_HTTP_ENDPOINT).
+FROM oven/bun:1 AS build
+WORKDIR /app
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile
+COPY web/ ./
+RUN bun run build
+
+FROM node:22-slim AS run
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=3000
+COPY --from=build /app/.output ./.output
+EXPOSE 3000
+CMD ["node", ".output/server/index.mjs"]
