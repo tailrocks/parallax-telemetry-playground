@@ -1,2 +1,31 @@
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import { defineConfig } from "vite";
-export default defineConfig({ build: { sourcemap: "hidden" } });
+import viteReact from "@vitejs/plugin-react";
+import { nitro } from "nitro/vite";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
+
+// TanStack Start app. `tanstackStart` provides file-based routing + the server
+// (server routes like /v1/traces run on the Nitro server). Sentry source-map
+// upload (Debug IDs) is gated on an auth token so a token-less build still works.
+const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
+
+export default defineConfig({
+  server: { port: 5173 },
+  build: { sourcemap: "hidden" },
+  plugins: [
+    tanstackStart({ srcDirectory: "src" }),
+    viteReact(),
+    nitro(),
+    ...(sentryAuthToken
+      ? [
+          sentryVitePlugin({
+            org: process.env.SENTRY_ORG,
+            project: process.env.SENTRY_PROJECT,
+            authToken: sentryAuthToken,
+            // Debug IDs: inject + upload source maps (not the legacy release+dist flow).
+            sourcemaps: { filesToDeleteAfterUpload: ["**/*.map"] },
+          }),
+        ]
+      : []),
+  ],
+});
