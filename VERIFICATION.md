@@ -19,6 +19,19 @@ short flush) that a sandbox can't provision.
   Java-computed price; Java OTel agent emits the `Pricing/Quote` SERVER span.
 - Scenarios A1, A3, A6, A7, A8, A9, A10, A12, A13, A14, A18 and B1–B13, B16–B18;
   real Kafka producer/consumer round-trip.
+- **Rust tier emits all three OTLP signals** (traces + metrics + logs) — was
+  traces-only; `cargo build` + fmt + clippy clean.
+- **A7 GraphQL subscription** resolver (`catalog`, WebSocket transport) compiles
+  (`gradlew compileJava`).
+- **A17 profiling** wired on the JVM services (Sentry continuous profiling
+  config); flamegraph view needs a live Sentry (below).
+
+### Known version blocker — Rust `sentry-opentelemetry` (shared trace_id)
+`sentry-opentelemetry` 0.48 pins `opentelemetry` **0.29**; the workspace is on
+**0.30**. Its `SentrySpanProcessor`/`SentryPropagator` are 0.29 types and won't
+attach to a 0.30 `SdkTracerProvider`, so it can't be added without downgrading
+the whole OTel stack (regressing logs/metrics). Rust Sentry issues therefore
+carry their own trace_id today; revisit when the crate reaches OTel 0.30+.
 
 ## Needs a real host — exact steps to verify the last scenarios
 
