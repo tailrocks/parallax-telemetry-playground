@@ -26,20 +26,21 @@ playground-proto = { path = "proto" }
 anyhow = "1"
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
-tonic = "0.12"
+tonic = "0.14"
+tonic-prost = "0.14"
 tokio-stream = "0.1"
-prost = "0.13"
-tonic-build = "0.12"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+prost = "0.14"
+tonic-prost-build = "0.14"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "http2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-opentelemetry = { version = "0.31", features = ["metrics"] }
-opentelemetry = "0.30"
-opentelemetry_sdk = { version = "0.30", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.30", features = ["grpc-tonic", "trace", "logs", "metrics"] }
-opentelemetry-appender-tracing = "0.30"
-opentelemetry-semantic-conventions = "0.30"
-sentry = "0.34"
-sentry-tracing = "0.34"
+tracing-opentelemetry = { version = "0.33", features = ["metrics"] }
+opentelemetry = "0.32"
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "trace", "logs", "metrics"] }
+opentelemetry-appender-tracing = "0.32"
+opentelemetry-semantic-conventions = "0.32"
+sentry = "0.48"
+sentry-tracing = "0.48"
