@@ -19,6 +19,13 @@ short flush) that a sandbox can't provision.
   Java-computed price; Java OTel agent emits the `Pricing/Quote` SERVER span.
 - Scenarios A1, A3, A6, A7, A8, A9, A10, A12, A13, A14, A18 and B1–B13, B16–B18;
   real Kafka producer/consumer round-trip.
+- **Live multi-service trace re-verified on the upgraded deps (2026-06-23):**
+  the four Rust services (checkout/pricing/inventory/recommendation, now on
+  otel 0.32 / tonic 0.14) run against a live Dockerized lab (Rotel +
+  OpenObserve); `/checkout` drives gRPC + HTTP fan-out, and an OpenObserve trace
+  search returns `checkout=30, pricing=6, inventory=6, recommendation=6` spans.
+  (The OO search path is `/api/{org}/_search` with the stream in the SQL FROM +
+  from/size — the lab's `smoke.sh` was fixed to match.)
 - **Rust tier emits all three OTLP signals** (traces + metrics + logs) — was
   traces-only; `cargo build` + fmt + clippy clean.
 - **A7 GraphQL subscription** resolver (`catalog`, WebSocket transport) compiles
