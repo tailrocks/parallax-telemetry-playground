@@ -13,6 +13,8 @@ repositories { mavenCentral() }
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-graphql")
     implementation("org.springframework.boot:spring-boot-starter-web")
+    // A7: GraphQL-over-WebSocket transport for the priceChanges subscription.
+    implementation("org.springframework.boot:spring-boot-starter-websocket")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation(platform("io.sentry:sentry-bom:8.44.0"))
     implementation("io.sentry:sentry-spring-boot-starter-jakarta")

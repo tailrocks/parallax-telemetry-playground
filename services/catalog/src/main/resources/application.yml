@@ -1,6 +1,10 @@
 spring:
   application:
     name: catalog
+  graphql:
+    # A7: GraphQL-over-WebSocket transport for the priceChanges subscription.
+    websocket:
+      path: /graphql
 sentry:
   dsn: ${SENTRY_DSN:}
   environment: ${PARALLAX_ENV:playground}
