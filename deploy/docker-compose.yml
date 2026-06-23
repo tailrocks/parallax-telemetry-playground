@@ -16,6 +16,13 @@ name: telemetry-playground
 x-otlp: &otlp
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
   OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+  # Force OTLP export on the Java tier: the sentry-opentelemetry agent otherwise
+  # routes spans to Sentry only and emits nothing over OTLP, so the fan-out
+  # backends never see the Java services. (Ignored by the Rust services, which
+  # build their exporters in code.)
+  OTEL_TRACES_EXPORTER: "otlp"
+  OTEL_METRICS_EXPORTER: "otlp"
+  OTEL_LOGS_EXPORTER: "otlp"
   OTEL_PROPAGATORS: "tracecontext,baggage"
   OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=playground"
   PARALLAX_ENV: "playground"
@@ -67,7 +74,12 @@ services:
 
   broker:
     image: redpandadata/redpanda:latest # Kafka-API-compatible, light
-    command: ["redpanda", "start", "--smp", "1", "--overprovisioned", "--node-id", "0", "--check=false"]
+    # Advertise the compose service name so clients in other containers reach the
+    # broker via broker:9092 (default advertises 127.0.0.1:9092 → unreachable
+    # cross-container, breaking the producer/consumer round-trip).
+    command: ["redpanda", "start", "--smp", "1", "--overprovisioned", "--node-id", "0", "--check=false",
+              "--kafka-addr", "PLAINTEXT://0.0.0.0:9092",
+              "--advertise-kafka-addr", "PLAINTEXT://broker:9092"]
     networks: [pg]
 
   flagd:
@@ -82,6 +94,10 @@ services:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: catalog } }
     environment:
       <<: *otlp
+      # Java tier exports OTLP/HTTP (the agent's okhttp gRPC sender fails to read
+      # Rotel's gRPC response; HTTP/protobuf to Rotel :4318 works).
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "catalog"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       FLAGD_HOST: "flagd"
@@ -95,6 +111,8 @@ services:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: payment } }
     environment:
       <<: *otlp
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "payment"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       SPRING_GRPC_SERVER_PORT: "9090"
@@ -105,6 +123,8 @@ services:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: fulfillment } }
     environment:
       <<: *otlp
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "fulfillment"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       KAFKA_BROKERS: "broker:9092"
