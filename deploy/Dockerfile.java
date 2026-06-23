@@ -28,8 +28,12 @@ WORKDIR /app
 # OTel + Sentry agent (single javaagent). Pinned to the SDK version.
 ADD https://repo1.maven.org/maven2/io/sentry/sentry-opentelemetry-agent/${SENTRY_AGENT_VERSION}/sentry-opentelemetry-agent-${SENTRY_AGENT_VERSION}.jar /app/sentry-otel-agent.jar
 COPY --from=build /src/services/${SERVICE}/build/libs/*.jar /app/app.jar
-# Spring starter owns SDK init; agent provides OTel auto-instrumentation + bridges.
-ENV SENTRY_AUTO_INIT=false \
+# The sentry-opentelemetry agent owns BOTH OTel auto-instrumentation and Sentry
+# SDK init (auto-inits from SENTRY_DSN). The Sentry Spring Boot starter 8.44 is
+# incompatible with Spring Boot 4.x (references the relocated
+# org.springframework.boot.web.client.RestClientCustomizer), so we do not use it
+# — the agent is the single init point. With no DSN the agent no-ops gracefully.
+ENV SENTRY_AUTO_INIT=true \
     JAVA_TOOL_OPTIONS="-javaagent:/app/sentry-otel-agent.jar" \
     OTEL_PROPAGATORS="tracecontext,baggage"
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

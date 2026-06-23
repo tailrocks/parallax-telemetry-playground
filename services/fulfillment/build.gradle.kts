@@ -12,8 +12,12 @@ repositories { mavenCentral() }
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-web")
-    implementation("org.springframework.kafka:spring-kafka")
+    // Spring Boot 4 modularized auto-configuration: plain spring-kafka no longer
+    // brings KafkaAutoConfiguration (KafkaTemplate + listener factories). The
+    // starter pulls spring-kafka + the spring-boot-kafka autoconfig module.
+    implementation("org.springframework.boot:spring-boot-starter-kafka")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation(platform("io.sentry:sentry-bom:8.44.1"))
-    implementation("io.sentry:sentry-spring-boot-starter-jakarta")
+    // Sentry initialized by the sentry-opentelemetry javaagent; the Spring Boot
+    // starter 8.44 is incompatible with Spring Boot 4.x (RestClientCustomizer
+    // relocation), so it is omitted. Agent owns OTel + Sentry init.
 }

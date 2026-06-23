@@ -16,8 +16,10 @@ dependencies {
     // A7: GraphQL-over-WebSocket transport for the priceChanges subscription.
     implementation("org.springframework.boot:spring-boot-starter-websocket")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation(platform("io.sentry:sentry-bom:8.44.1"))
-    implementation("io.sentry:sentry-spring-boot-starter-jakarta")
+    // Sentry is initialized by the sentry-opentelemetry javaagent. The Sentry
+    // Spring Boot starter 8.44 is incompatible with Spring Boot 4.x (references
+    // the relocated org.springframework.boot.web.client.RestClientCustomizer),
+    // so it is intentionally omitted; the agent owns OTel + Sentry init.
     implementation("dev.openfeature:sdk:1.21.0")
     implementation("dev.openfeature.contrib.providers:flagd:0.14.0")
 }
