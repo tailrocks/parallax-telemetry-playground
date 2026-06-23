@@ -8,7 +8,7 @@ plugins {
     // id("io.sentry.jvm.gradle") version "5.0.0" // source context upload
 }
 group = "dev.tailrocks"; version = "0.1.0"
-java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
 repositories { mavenCentral() }
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-graphql")

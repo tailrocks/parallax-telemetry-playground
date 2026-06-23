@@ -19,7 +19,7 @@ plugins {
     id("com.google.protobuf") version "0.9.4"
 }
 group = "dev.tailrocks"; version = "0.1.0"
-java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
 repositories { mavenCentral() }
 dependencies {
     // Spring Boot 4.1 graduated Spring gRPC: the starter is now Boot-owned and

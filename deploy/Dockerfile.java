@@ -6,7 +6,7 @@
 # -javaagent with SENTRY_AUTO_INIT=false; the Spring Boot starter inits the SDK
 # (spec §8). Agent version MUST equal the Sentry SDK version (sentry-bom 8.44.0).
 ARG SERVICE
-ARG JDK=21
+ARG JDK=25
 ARG SENTRY_AGENT_VERSION=8.44.0
 
 FROM eclipse-temurin:${JDK}-jdk AS build
