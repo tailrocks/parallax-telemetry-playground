@@ -11,19 +11,23 @@ ARG SENTRY_AGENT_VERSION=8.44.0
 
 FROM eclipse-temurin:${JDK}-jdk AS build
 ARG SERVICE
+# Mirror the repo layout so a service's repo-relative source dirs resolve the
+# same in the image as in the checkout (e.g. payment's protobuf srcDir
+# "../../proto" → services/<svc> up two levels to the shared proto/).
 WORKDIR /src
-COPY services/${SERVICE} /src/service
+COPY services/${SERVICE} /src/services/${SERVICE}
 COPY proto /src/proto
 COPY graphql /src/graphql
-WORKDIR /src/service
+WORKDIR /src/services/${SERVICE}
 RUN ./gradlew --no-daemon bootJar
 
 FROM eclipse-temurin:${JDK}-jre AS run
+ARG SERVICE
 ARG SENTRY_AGENT_VERSION
 WORKDIR /app
 # OTel + Sentry agent (single javaagent). Pinned to the SDK version.
 ADD https://repo1.maven.org/maven2/io/sentry/sentry-opentelemetry-agent/${SENTRY_AGENT_VERSION}/sentry-opentelemetry-agent-${SENTRY_AGENT_VERSION}.jar /app/sentry-otel-agent.jar
-COPY --from=build /src/service/build/libs/*.jar /app/app.jar
+COPY --from=build /src/services/${SERVICE}/build/libs/*.jar /app/app.jar
 # Spring starter owns SDK init; agent provides OTel auto-instrumentation + bridges.
 ENV SENTRY_AUTO_INIT=false \
     JAVA_TOOL_OPTIONS="-javaagent:/app/sentry-otel-agent.jar" \
