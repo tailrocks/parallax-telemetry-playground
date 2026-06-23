@@ -1,37 +1,57 @@
 //! Shared OpenTelemetry + Sentry bootstrap for the Rust services.
 //!
-//! Dual pipeline (per the design doc): a single `tracing` subscriber feeds two
-//! consumers — an `OpenTelemetryLayer` exporting OTLP spans to the collector, and
-//! a `sentry-tracing` layer turning events into Sentry breadcrumbs/issues.
-//! `tracing` is the only span source, so the two coexist without double
-//! instrumentation. The OTLP endpoint is read from the standard
-//! `OTEL_EXPORTER_OTLP_ENDPOINT` env (injected by `parallax run start` or the
-//! lab), so pointing the whole app at Rotel needs no code change.
+//! Dual pipeline (per the design doc §4/§8): a single `tracing` subscriber feeds
+//! parallel consumers so `tracing` is the only span source and nothing is
+//! double-instrumented —
+//!   * `OpenTelemetryLayer`  — OTLP **traces** → collector,
+//!   * `MetricsLayer`        — OTLP **metrics** (counters/histograms from
+//!     `tracing` fields) → collector,
+//!   * `OpenTelemetryTracingBridge` — `tracing` events → OTLP **logs**,
+//!     auto-stamped with the active trace/span id,
+//!   * `sentry-tracing`      — events → Sentry breadcrumbs/issues.
+//!
+//! All three OTLP signals share one `Resource` and target the standard
+//! `OTEL_EXPORTER_OTLP_ENDPOINT` (injected by `parallax run start` or the lab),
+//! so pointing the whole app at Rotel needs no code change.
+//!
+//! (Metric **exemplars** are intentionally absent — the Rust SDK doesn't
+//! implement them yet, issue #3369; the JVM tier is the playground's exemplar
+//! source.)
 
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::{KeyValue, global};
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
+use tracing_subscriber::Layer;
+use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 /// Initialized telemetry. Hold the `_sentry` guard for the process lifetime and
-/// call `shutdown()` before exit so buffered spans are flushed.
+/// call `shutdown()` before exit so buffered spans/logs/metrics are flushed.
 pub struct Telemetry {
-    provider: SdkTracerProvider,
+    tracer_provider: SdkTracerProvider,
+    logger_provider: SdkLoggerProvider,
+    meter_provider: SdkMeterProvider,
     _sentry: sentry::ClientInitGuard,
 }
 
 impl Telemetry {
-    /// Flush + stop the exporter. Call before the process exits.
+    /// Flush + stop every exporter. Call before the process exits.
     pub fn shutdown(self) {
-        let _ = self.provider.shutdown();
+        let _ = self.tracer_provider.shutdown();
+        let _ = self.logger_provider.shutdown();
+        let _ = self.meter_provider.shutdown();
     }
 }
 
-/// Wire OTLP traces + a `tracing` subscriber + Sentry for `service`.
+/// Wire OTLP traces + metrics + logs + a `tracing` subscriber + Sentry for
+/// `service`.
 ///
 /// Reads `OTEL_EXPORTER_OTLP_ENDPOINT` (default per the OTLP SDK) and
 /// `SENTRY_DSN` (Sentry disabled when unset). Honors `RUST_LOG`.
@@ -45,17 +65,47 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
         ])
         .build();
 
-    let exporter = opentelemetry_otlp::SpanExporter::builder()
+    // --- Traces ---
+    let span_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .build()?;
-
-    let provider = SdkTracerProvider::builder()
-        .with_resource(resource)
-        .with_batch_exporter(exporter)
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_resource(resource.clone())
+        .with_batch_exporter(span_exporter)
         .build();
-    global::set_tracer_provider(provider.clone());
+    global::set_tracer_provider(tracer_provider.clone());
+    let tracer = tracer_provider.tracer(service);
 
-    let tracer = provider.tracer(service);
+    // --- Metrics --- (Counter/Histogram emitted from `tracing` fields by MetricsLayer)
+    let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
+        .with_tonic()
+        .build()?;
+    let meter_provider = SdkMeterProvider::builder()
+        .with_resource(resource.clone())
+        .with_periodic_exporter(metric_exporter)
+        .build();
+    global::set_meter_provider(meter_provider.clone());
+
+    // --- Logs --- (`tracing` events → OTLP LogRecords, trace-correlated)
+    let log_exporter = opentelemetry_otlp::LogExporter::builder()
+        .with_tonic()
+        .build()?;
+    let logger_provider = SdkLoggerProvider::builder()
+        .with_resource(resource)
+        .with_batch_exporter(log_exporter)
+        .build();
+    // Drop the transport crates' own logs from the OTLP log layer, else exporting
+    // a log emits a log → feedback loop (doc §8).
+    let log_layer =
+        OpenTelemetryTracingBridge::new(&logger_provider).with_filter(filter_fn(|meta| {
+            let t = meta.target();
+            !(t.starts_with("hyper")
+                || t.starts_with("tonic")
+                || t.starts_with("h2")
+                || t.starts_with("reqwest")
+                || t.starts_with("opentelemetry")
+                || t.starts_with("tower"))
+        }));
 
     // Sentry rides alongside; DSN from env, disabled gracefully when absent.
     let sentry = sentry::init(sentry::ClientOptions {
@@ -81,11 +131,17 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
         .with(filter)
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_opentelemetry::layer().with_tracer(tracer))
+        .with(tracing_opentelemetry::MetricsLayer::new(
+            meter_provider.clone(),
+        ))
+        .with(log_layer)
         .with(sentry_tracing::layer())
         .init();
 
     Ok(Telemetry {
-        provider,
+        tracer_provider,
+        logger_provider,
+        meter_provider,
         _sentry: sentry,
     })
 }
