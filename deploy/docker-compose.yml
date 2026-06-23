@@ -129,6 +129,9 @@ services:
       SENTRY_DSN: "${SENTRY_DSN:-}"
       KAFKA_BROKERS: "broker:9092"
       NOTIFICATIONS_URL: "http://notifications:8091"
+    # POST /publish drives the cross-language async branch: Java produces to the
+    # `orders` topic → consumes it → calls Rust `notifications` (reverse hop).
+    ports: ["8093:8080"]
     depends_on: [broker, notifications]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
