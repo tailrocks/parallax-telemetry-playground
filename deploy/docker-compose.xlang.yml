@@ -1,0 +1,17 @@
+# Cross-language gRPC overlay. Points the Rust `checkout` orchestrator's pricing
+# client at the Java `payment` service (both serve the same playground.pricing.v1
+# Pricing/Quote contract), so a single distributed trace spans Rust → Java over
+# gRPC (W3C traceparent in gRPC metadata). Without it, checkout calls the Rust
+# `pricing` service (Rust → Rust).
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.xlang.yml up -d checkout
+#   curl "http://localhost:8088/checkout?sku=WIDGET-1&quantity=2"
+#
+# Verified live 2026-06-23: payment emits Pricing/Quote SERVER spans and the
+# checkout trace_id is shared with payment (one trace, two languages).
+name: telemetry-playground
+services:
+  checkout:
+    environment:
+      PRICING_ENDPOINT: "http://payment:9090"
+    depends_on: [payment]
