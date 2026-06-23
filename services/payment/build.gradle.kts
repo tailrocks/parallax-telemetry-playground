@@ -4,6 +4,15 @@ import com.google.protobuf.gradle.proto
 // Spring Boot + gRPC payment service. Generates Java stubs from the shared
 // ../../proto/pricing.proto and serves the Pricing gRPC contract — the
 // cross-language counterpart to the Rust pricing service.
+//
+// Version note (latest-stable audit, 2026-06-23): held at Spring Boot 4.0.0 +
+// spring-grpc 1.0.3 + protobuf-gradle-plugin 0.9.4 on purpose. Boot 4.1.0's
+// Gradle plugin double-registers the protobuf `grpc` ExecutableLocator
+// ("Cannot add a ExecutableLocator with name 'grpc' ... already exists"), and
+// spring-grpc 1.1.0's BOM only resolves the starter version on Boot 4.1 — so
+// the two newest pins are mutually blocked here pending a protobuf-config
+// restructure. The runtime grpc toolchain IS latest (protoc 4.35.1, grpc-java
+// 1.82.0). catalog/fulfillment (no protobuf plugin) are on Boot 4.1.0.
 plugins {
     java
     id("org.springframework.boot") version "4.0.0"
@@ -24,8 +33,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
 }
 protobuf {
-    protoc { artifact = "com.google.protobuf:protoc:4.28.3" }
-    plugins { id("grpc") { artifact = "io.grpc:protoc-gen-grpc-java:1.68.1" } }
+    protoc { artifact = "com.google.protobuf:protoc:4.35.1" }
+    plugins { id("grpc") { artifact = "io.grpc:protoc-gen-grpc-java:1.82.0" } }
     generateProtoTasks { all().forEach { it.plugins { id("grpc") } } }
 }
 sourceSets { main { proto { srcDir("../../proto") } } }
