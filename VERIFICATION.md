@@ -32,6 +32,17 @@ short flush) that a sandbox can't provision.
   (`gradlew compileJava`).
 - **A17 profiling** wired on the JVM services (Sentry continuous profiling
   config); flamegraph view needs a live Sentry (below).
+- **Sentry envelope emit path verified (2026-06-23)** — ran `checkout` with
+  `SENTRY_DSN` pointed at a mock receiver and triggered the B1 error
+  (`/checkout?fail=1`). The mock captured real Sentry envelopes: a `type:"event"`
+  issue (`message:"payment failure (chaos)", logger:"checkout"`, A15/A16 emit)
+  **and** a `type:"transaction"` performance envelope
+  (`transaction:"checkout", release:"0.1.0", environment:"playground", sdk:
+  sentry.rust 0.48.2`). So the playground's Sentry path — errors → issues, spans
+  → transactions, correct release/env metadata — emits correctly. Issue
+  *grouping/lifecycle rendering* (A15/A16) and the *flamegraph view* (A17) are
+  Sentry-server product behavior, viewed in a live Sentry UI (the deferred
+  ~72-service self-hosted stack — see below).
 
 ### Known version blocker — Rust `sentry-opentelemetry` (shared trace_id)
 `sentry-opentelemetry` 0.48 pins `opentelemetry` **0.29**; the workspace is on
