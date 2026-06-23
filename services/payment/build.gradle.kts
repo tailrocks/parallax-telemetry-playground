@@ -1,44 +1,44 @@
-import com.google.protobuf.gradle.id
 import com.google.protobuf.gradle.proto
 
 // Spring Boot + gRPC payment service. Generates Java stubs from the shared
 // ../../proto/pricing.proto and serves the Pricing gRPC contract — the
 // cross-language counterpart to the Rust pricing service.
 //
-// Version note (latest-stable audit, 2026-06-23): held at Spring Boot 4.0.0 +
-// spring-grpc 1.0.3 + protobuf-gradle-plugin 0.9.4 on purpose. Boot 4.1.0's
-// Gradle plugin double-registers the protobuf `grpc` ExecutableLocator
-// ("Cannot add a ExecutableLocator with name 'grpc' ... already exists"), and
-// spring-grpc 1.1.0's BOM only resolves the starter version on Boot 4.1 — so
-// the two newest pins are mutually blocked here pending a protobuf-config
-// restructure. protoc gencode is pinned to 4.33.4 to match the protobuf-java
-// runtime the spring-grpc 1.0.3 BOM resolves (a newer gencode aborts at class
-// init); grpc-java 1.82.0. catalog/fulfillment (no protobuf plugin) on Boot 4.1.0.
+// Version note (latest-stable, 2026-06-23): Spring Boot 4.1.0 + the graduated
+// Spring gRPC 1.1.0 (Boot-owned `spring-boot-starter-grpc-server`). The earlier
+// 4.0.0 hold is gone: Boot 4.1 absorbed Spring gRPC, so its Gradle plugin now
+// registers the protobuf `grpc` locator and wires the generate tasks itself —
+// the old manual `protobuf { plugins/generateProtoTasks }` block was the source
+// of the "ExecutableLocator 'grpc' already exists" clash and is removed. We pin
+// only protoc (4.34.2, = Boot's managed protobuf-java; grpc-java 1.80.0 is
+// BOM-managed). catalog/fulfillment are already on Boot 4.1.0.
 plugins {
     java
-    id("org.springframework.boot") version "4.0.0"
+    id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
     id("com.google.protobuf") version "0.9.4"
 }
 group = "dev.tailrocks"; version = "0.1.0"
 java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
 repositories { mavenCentral() }
-dependencyManagement {
-    imports { mavenBom("org.springframework.grpc:spring-grpc-dependencies:1.0.3") }
-}
 dependencies {
-    implementation("org.springframework.grpc:spring-grpc-spring-boot-starter")
+    // Spring Boot 4.1 graduated Spring gRPC: the starter is now Boot-owned and
+    // split by role — payment is a gRPC server. Boot's BOM manages the
+    // spring-grpc-core + grpc-java + protobuf versions, so no separate
+    // spring-grpc-dependencies BOM import is needed.
+    implementation("org.springframework.boot:spring-boot-starter-grpc-server")
     implementation("io.grpc:grpc-services")
     compileOnly("org.apache.tomcat:annotations-api:6.0.53")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
 }
+// Spring Boot 4.1 graduated gRPC support: when `com.google.protobuf` is
+// applied, Boot's Gradle plugin registers the `grpc` protoc locator AND
+// attaches it to every generate task (re-registering either throws "already
+// exists"). It does NOT pin the protoc compiler itself, so we set only that —
+// matched to Boot 4.1's managed protobuf-java 4.34.2 (gencode must be <= the
+// runtime, so equal is correct; grpc-java is 1.80.0, BOM-managed).
 protobuf {
-    // protoc (gencode) must be <= the protobuf-java runtime that spring-grpc's
-    // 1.0.3 BOM resolves (4.33.4); newer gencode aborts at QuoteRequest init
-    // ("Runtime version cannot be older than the linked gencode version").
-    protoc { artifact = "com.google.protobuf:protoc:4.33.4" }
-    plugins { id("grpc") { artifact = "io.grpc:protoc-gen-grpc-java:1.82.0" } }
-    generateProtoTasks { all().forEach { it.plugins { id("grpc") } } }
+    protoc { artifact = "com.google.protobuf:protoc:4.34.2" }
 }
 sourceSets { main { proto { srcDir("../../proto") } } }
