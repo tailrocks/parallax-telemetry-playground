@@ -2705,6 +2705,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "opentelemetry",
  "playground-telemetry",
  "serde",
  "serde_json",
