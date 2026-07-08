@@ -1,9 +1,9 @@
-# Telemetry Playground — all services. Emits OTLP to the fan-out lab's Rotel.
+# Telemetry Playground — all services. Emits OTLP to any host listener on
+# 4317/4318: local `parallax serve` (UI on :4000) or the fan-out lab's Rotel.
 #
-# The lab (separate repo: parallax bench/otlp-fanout) owns Rotel + the backends.
-# Here every service exports to OTEL_EXPORTER_OTLP_ENDPOINT, default the lab's
-# Rotel reached from a container via host.docker.internal:4317. Run the lab
-# first, then `docker compose up` here.
+# Here every service exports to OTEL_EXPORTER_OTLP_ENDPOINT, defaulting to a
+# listener reached from a container via host.docker.internal:4317. Start
+# Parallax or the lab first, then `docker compose up` here.
 #
 # Status: Rust services (checkout, pricing, inventory, recommendation,
 # notifications, orders) + Java (catalog GraphQL, payment gRPC, fulfillment
@@ -69,7 +69,7 @@ services:
 
   postgres:
     image: postgres:17
-    environment: { POSTGRES_PASSWORD: playground, POSTGRES_DB: playground }
+    environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}", POSTGRES_DB: playground }
     networks: [pg]
 
   broker:
@@ -148,6 +148,18 @@ services:
       PORT: "3000"
     ports: ["5173:3000"]
     extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
+  loadgen:
+    image: grafana/k6:latest
+    profiles: [demo]
+    command: ["run", "/scripts/demo.js"]
+    environment:
+      CHECKOUT_URL: "http://checkout:8088"
+      ORDERS_URL: "http://orders:8092"
+      FULFILLMENT_URL: "http://fulfillment:8080"
+    volumes: ["../loadgen:/scripts:ro"]
+    depends_on: [checkout, orders, fulfillment]
     networks: [pg]
 
 networks:
