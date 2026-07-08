@@ -8,6 +8,7 @@
 //!   ?fail=1      payment failure → 502 + error issue        (B1)
 //!   ?slow=<ms>   injected latency                            (B11)
 //!   ?canary=1    plant a redaction canary corpus in span/log (A18)
+//!   ?block_ms=<n>&block_n=<m> flood spawn_blocking sleeps     (A22)
 
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::IntoResponse;
@@ -19,11 +20,16 @@ use playground_proto::pricing::v1::QuoteRequest;
 use playground_proto::pricing::v1::pricing_client::PricingClient;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::OnceCell;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::Instrument;
 
 static FLAGD_PROVIDER: OnceCell<FlagdProvider> = OnceCell::const_new();
+static BLOCKING_POOL_DEPTH: AtomicU64 = AtomicU64::new(0);
+const MAX_BLOCK_MS: u64 = 30_000;
+const MAX_BLOCK_N: u32 = 1_024;
 
 /// Query flags arrive as `1`/`true`/`yes`/`on`; serde's bool wants `true`/`false`.
 fn de_flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
@@ -68,6 +74,11 @@ struct CheckoutParams {
     /// B18: emit a span event with a deliberately skewed timestamp.
     #[serde(default, deserialize_with = "de_flag")]
     skew: bool,
+    /// A22: flood Tokio's blocking pool with bounded sleeping tasks.
+    #[serde(default)]
+    block_ms: u64,
+    #[serde(default)]
+    block_n: u32,
 }
 
 fn default_tier() -> String {
@@ -133,6 +144,9 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
             x = x.wrapping_add(1);
         }
         tracing::warn!(cpu_ms = p.cpu_ms, iterations = x, "high-CPU hot path");
+    }
+    if p.block_ms > 0 && p.block_n > 0 {
+        flood_blocking_pool(p.block_ms, p.block_n).await;
     }
     if p.canary || env_flag("CANARY") {
         // A18: plant a redaction canary corpus so backends can be compared on
@@ -256,6 +270,49 @@ async fn feature_flag(flag_key: &'static str, env_name: &'static str) -> bool {
         "feature_flag.evaluation"
     );
     effective
+}
+
+async fn flood_blocking_pool(block_ms: u64, block_n: u32) {
+    let capped_ms = block_ms.min(MAX_BLOCK_MS);
+    let capped_n = block_n.min(MAX_BLOCK_N);
+    tracing::warn!(
+        requested_block_ms = block_ms,
+        requested_block_n = block_n,
+        block_ms = capped_ms,
+        block_n = capped_n,
+        "tokio blocking-pool saturation requested"
+    );
+    let mut handles = Vec::with_capacity(capped_n as usize);
+    for i in 0..capped_n {
+        BLOCKING_POOL_DEPTH.fetch_add(1, Ordering::Relaxed);
+        record_blocking_pool_depth();
+        handles.push(tokio::task::spawn_blocking(move || {
+            std::thread::sleep(std::time::Duration::from_millis(capped_ms));
+            BLOCKING_POOL_DEPTH.fetch_sub(1, Ordering::Relaxed);
+            record_blocking_pool_depth();
+            tracing::debug!(
+                task = i,
+                block_ms = capped_ms,
+                "blocking-pool task completed"
+            );
+        }));
+    }
+    for handle in handles {
+        if let Err(err) = handle.await {
+            tracing::warn!(error = %err, "blocking-pool task join failed");
+        }
+    }
+}
+
+fn record_blocking_pool_depth() {
+    static GAUGE: OnceLock<opentelemetry::metrics::Gauge<u64>> = OnceLock::new();
+    let gauge = GAUGE.get_or_init(|| {
+        opentelemetry::global::meter("playground.runtime")
+            .u64_gauge("tokio.runtime.blocking_pool_depth")
+            .with_description("Checkout spawn_blocking tasks in flight for the A22 saturation demo")
+            .build()
+    });
+    gauge.record(BLOCKING_POOL_DEPTH.load(Ordering::Relaxed), &[]);
 }
 
 async fn flagd_provider() -> anyhow::Result<&'static FlagdProvider> {

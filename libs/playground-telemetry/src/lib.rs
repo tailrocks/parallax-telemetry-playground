@@ -41,18 +41,31 @@ use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+pub const TOKIO_RUNTIME_METRIC_NAMES: &[&str] = &[
+    "tokio.runtime.workers_count",
+    "tokio.runtime.alive_tasks",
+    "tokio.runtime.global_queue_depth",
+    "tokio.runtime.blocking_pool_depth",
+    "tokio.runtime.total_park_count",
+    "tokio.runtime.total_busy_duration_ms",
+];
+
 /// Initialized telemetry. Hold the `_sentry` guard for the process lifetime and
 /// call `shutdown()` before exit so buffered spans/logs/metrics are flushed.
 pub struct Telemetry {
     tracer_provider: SdkTracerProvider,
     logger_provider: SdkLoggerProvider,
     meter_provider: SdkMeterProvider,
+    runtime_metrics: Option<tokio::task::JoinHandle<()>>,
     _sentry: sentry::ClientInitGuard,
 }
 
 impl Telemetry {
     /// Flush + stop every exporter. Call before the process exits.
     pub fn shutdown(self) {
+        if let Some(task) = self.runtime_metrics {
+            task.abort();
+        }
         let _ = self.tracer_provider.shutdown();
         let _ = self.logger_provider.shutdown();
         let _ = self.meter_provider.shutdown();
@@ -154,12 +167,86 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
         .with(sentry_tracing::layer())
         .init();
 
+    let runtime_metrics = spawn_runtime_metrics();
+
     Ok(Telemetry {
         tracer_provider,
         logger_provider,
         meter_provider,
+        runtime_metrics,
         _sentry: sentry,
     })
+}
+
+pub fn spawn_runtime_metrics() -> Option<tokio::task::JoinHandle<()>> {
+    if !runtime_metrics_enabled() {
+        return None;
+    }
+    let handle = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle,
+        Err(err) => {
+            tracing::warn!(error = %err, "tokio runtime metrics disabled outside a Tokio runtime");
+            return None;
+        }
+    };
+    let meter = global::meter("playground.runtime");
+    let workers_count = meter
+        .u64_gauge(TOKIO_RUNTIME_METRIC_NAMES[0])
+        .with_description("Tokio worker threads configured for the runtime")
+        .build();
+    let alive_tasks = meter
+        .u64_gauge(TOKIO_RUNTIME_METRIC_NAMES[1])
+        .with_description("Tokio tasks alive in the runtime")
+        .build();
+    let global_queue_depth = meter
+        .u64_gauge(TOKIO_RUNTIME_METRIC_NAMES[2])
+        .with_description("Tokio global queue depth")
+        .build();
+    let total_park_count = meter
+        .u64_gauge(TOKIO_RUNTIME_METRIC_NAMES[4])
+        .with_description("Tokio worker park count for the sample interval")
+        .build();
+    let total_busy_duration_ms = meter
+        .u64_gauge(TOKIO_RUNTIME_METRIC_NAMES[5])
+        .with_description("Tokio worker busy duration for the sample interval")
+        .build();
+
+    Some(tokio::spawn(async move {
+        let monitor = tokio_metrics::RuntimeMonitor::new(&handle);
+        let mut intervals = monitor.intervals();
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            let Some(interval) = intervals.next() else {
+                tracing::warn!("tokio runtime metrics iterator ended");
+                return;
+            };
+            workers_count.record(interval.workers_count as u64, &[]);
+            alive_tasks.record(interval.live_tasks_count as u64, &[]);
+            global_queue_depth.record(interval.global_queue_depth as u64, &[]);
+            total_park_count.record(interval.total_park_count, &[]);
+            total_busy_duration_ms.record(interval.total_busy_duration.as_millis() as u64, &[]);
+            // Stable build note: tokio-metrics 0.5 exposes these shared runtime
+            // fields without `tokio_unstable`. Blocking queue/thread fields,
+            // budget-forced yield counts, poll histograms, worker-local queue
+            // distributions, and schedule-source counters are unstable here.
+            // Checkout publishes `tokio.runtime.blocking_pool_depth` from its
+            // bounded A22 blocking-flood knob so the demo keeps a stable signal.
+        }
+    }))
+}
+
+fn runtime_metrics_enabled() -> bool {
+    std::env::var("PLAYGROUND_TOKIO_METRICS")
+        .map(|value| {
+            let value = value.trim();
+            !(value == "0"
+                || value.eq_ignore_ascii_case("false")
+                || value.eq_ignore_ascii_case("off")
+                || value.eq_ignore_ascii_case("no"))
+        })
+        .unwrap_or(true)
 }
 
 fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
@@ -223,6 +310,21 @@ mod tests {
         assert_eq!(
             release_from(Some("  ".to_string())),
             env!("CARGO_PKG_VERSION")
+        );
+    }
+
+    #[test]
+    fn tokio_runtime_metric_names_match_runtime_lane_contract() {
+        assert_eq!(
+            TOKIO_RUNTIME_METRIC_NAMES,
+            &[
+                "tokio.runtime.workers_count",
+                "tokio.runtime.alive_tasks",
+                "tokio.runtime.global_queue_depth",
+                "tokio.runtime.blocking_pool_depth",
+                "tokio.runtime.total_park_count",
+                "tokio.runtime.total_busy_duration_ms",
+            ]
         );
     }
 }

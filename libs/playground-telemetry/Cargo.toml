@@ -22,4 +22,5 @@ reqwest = { workspace = true }
 sentry = { workspace = true }
 sentry-tracing = { workspace = true }
 tokio = { workspace = true }
+tokio-metrics = { workspace = true }
 tonic = { workspace = true }

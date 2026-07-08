@@ -35,7 +35,14 @@ async fn recommend_inner(p: Recommend) -> Json<Value> {
     }
     if p.leak > 0 {
         let mut store = leak_store().lock().unwrap();
-        store.push(vec![0u8; p.leak * 1024]); // never freed → leak
+        let mut bytes = vec![0u8; p.leak * 1024];
+        // Touch each page so the cgroup sees real RSS instead of lazily shared
+        // zero pages. The buffer is never freed, so repeated calls OOM under
+        // the demo limits overlay.
+        for i in (0..bytes.len()).step_by(4096) {
+            bytes[i] = (i % 251) as u8;
+        }
+        store.push(bytes);
         tracing::warn!(kb = p.leak, held = store.len(), "cache leak (chaos)");
     }
     let recs = vec![format!("{}-ACCESSORY", p.sku), "WIDGET-2".to_string()];

@@ -11,6 +11,9 @@ import org.springframework.graphql.data.method.annotation.BatchMapping;
 import org.springframework.graphql.data.method.annotation.QueryMapping;
 import org.springframework.graphql.data.method.annotation.SubscriptionMapping;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseBody;
 import dev.openfeature.sdk.OpenFeatureAPI;
 import dev.openfeature.sdk.Client;
 import io.opentelemetry.api.common.Attributes;
@@ -41,8 +44,12 @@ record Product(String id, String sku, String name, int priceMinor) {}
 
 record Review(String text, int stars) {}
 
+record HeapPressureResult(int requestedMb, int allocatedMb, long requestedHoldMs, long heldMs) {}
+
 @Controller
 class ProductController {
+    private static final int MAX_HEAP_MB = 256;
+    private static final long MAX_HEAP_HOLD_MS = 30_000;
     private static final List<Product> CATALOG = List.of(
         new Product("1", "WIDGET-1", "Widget", 1999),
         new Product("2", "GADGET-1", "Gadget", 4999)
@@ -78,6 +85,25 @@ class ProductController {
             Collections.reverse(products);
         }
         return products;
+    }
+
+    @GetMapping("/chaos/heap")
+    @ResponseBody
+    HeapPressureResult heapPressure(
+        @RequestParam(defaultValue = "64") int mb,
+        @RequestParam(defaultValue = "5000") long holdMs
+    ) throws InterruptedException {
+        int cappedMb = Math.max(0, Math.min(mb, MAX_HEAP_MB));
+        long cappedHoldMs = Math.max(0, Math.min(holdMs, MAX_HEAP_HOLD_MS));
+        Span.current().setAttribute("chaos.heap.requested_mb", mb);
+        Span.current().setAttribute("chaos.heap.allocated_mb", cappedMb);
+        Span.current().setAttribute("chaos.heap.hold_ms", cappedHoldMs);
+        List<byte[]> held = new ArrayList<>(cappedMb);
+        for (int i = 0; i < cappedMb; i++) {
+            held.add(new byte[1024 * 1024]);
+        }
+        Thread.sleep(cappedHoldMs);
+        return new HeapPressureResult(mb, cappedMb, holdMs, cappedHoldMs);
     }
 
     // A6: per-product `reviews` resolved via a @BatchMapping — Spring GraphQL
