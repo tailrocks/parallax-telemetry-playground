@@ -11,6 +11,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, header};
 use axum::{Json, Router, extract::Query, extract::State, routing::post};
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::{Context, global};
+use playground_telemetry::semconv;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -61,7 +62,7 @@ async fn publish(
     State(state): State<App>,
     Query(p): Query<Publish>,
 ) -> Json<Value> {
-    let span = tracing::info_span!("publish", otel.kind = "producer");
+    let span = tracing::info_span!("publish", otel.kind = semconv::SPAN_KIND_PRODUCER);
     playground_telemetry::set_parent_from_headers(&span, &headers);
     publish_inner(state, p).instrument(span).await
 }
@@ -97,7 +98,7 @@ async fn consume(msg: Msg, attempt: u32) {
     let delivery_lag_ms = msg.enqueued_at.elapsed().as_millis() as i64;
     let span = tracing::info_span!(
         "consume",
-        otel.kind = "consumer",
+        otel.kind = semconv::SPAN_KIND_CONSUMER,
         order_id = %msg.order_id,
         attempt,
         "messaging.delivery.lag_ms" = delivery_lag_ms,
@@ -140,7 +141,7 @@ async fn consume_batch(batch: Vec<Msg>) {
         .unwrap_or(0);
     let span = tracing::info_span!(
         "consume_batch",
-        otel.kind = "consumer",
+        otel.kind = semconv::SPAN_KIND_CONSUMER,
         "messaging.batch.message_count" = message_count as i64,
         "messaging.delivery.lag_ms" = max_delivery_lag_ms,
     );
@@ -265,7 +266,8 @@ async fn main() -> anyhow::Result<()> {
                     )
                     .await;
                 }
-                let span = tracing::error_span!("dead_letter", otel.kind = "consumer");
+                let span =
+                    tracing::error_span!("dead_letter", otel.kind = semconv::SPAN_KIND_CONSUMER);
                 let _guard = span.enter();
                 playground_telemetry::mark_span_error("dead_letter");
                 tracing::error!(order_id = %order_id, "dead-lettered after 3 attempts");

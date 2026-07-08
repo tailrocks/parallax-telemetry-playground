@@ -5,6 +5,7 @@
 #![allow(clippy::result_large_err)]
 use playground_proto::pricing::v1::pricing_server::{Pricing, PricingServer};
 use playground_proto::pricing::v1::{QuoteRequest, QuoteResponse};
+use playground_telemetry::semconv;
 use std::pin::Pin;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -24,7 +25,7 @@ impl Pricing for PricingSvc {
         &self,
         request: Request<QuoteRequest>,
     ) -> Result<Response<QuoteResponse>, Status> {
-        let span = tracing::info_span!("quote", otel.kind = "server");
+        let span = tracing::info_span!("quote", otel.kind = semconv::SPAN_KIND_SERVER);
         playground_telemetry::set_parent_from_grpc_metadata(&span, request.metadata());
         async move {
             let grpc_timeout = grpc_timeout(request.metadata());
@@ -69,7 +70,7 @@ impl Pricing for PricingSvc {
         &self,
         request: Request<QuoteRequest>,
     ) -> Result<Response<Self::QuoteStreamStream>, Status> {
-        let span = tracing::info_span!("quote_stream", otel.kind = "server");
+        let span = tracing::info_span!("quote_stream", otel.kind = semconv::SPAN_KIND_SERVER);
         playground_telemetry::set_parent_from_grpc_metadata(&span, request.metadata());
         async move {
             let req = request.into_inner();

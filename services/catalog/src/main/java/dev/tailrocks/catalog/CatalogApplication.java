@@ -82,7 +82,7 @@ class ProductController {
     private final Counter productQueries;
 
     ProductController(MeterRegistry meters) {
-        this.productQueries = Counter.builder("catalog.product.queries")
+        this.productQueries = Counter.builder(Semconv.CATALOG_PRODUCT_QUERIES)
             .description("product list queries")
             .register(meters);
     }
@@ -97,12 +97,12 @@ class ProductController {
             Collections.reverse(products);
         }
         try (
-            var ignoredEvent = MDC.putCloseable("event.name", "catalog.products.served");
+            var ignoredEvent = MDC.putCloseable(Semconv.EVENT_NAME, Semconv.CATALOG_PRODUCTS_SERVED);
             var ignoredCount = MDC.putCloseable("product.count", String.valueOf(products.size()));
             var ignoredPromo = MDC.putCloseable("catalog.promo", String.valueOf(promo))
         ) {
             LOG.atInfo()
-                .addKeyValue("event.name", "catalog.products.served")
+                .addKeyValue(Semconv.EVENT_NAME, Semconv.CATALOG_PRODUCTS_SERVED)
                 .addKeyValue("product.count", products.size())
                 .addKeyValue("catalog.promo", promo)
                 .log("catalog products served");
@@ -113,9 +113,9 @@ class ProductController {
 
     private static void emitCatalogProductsServed(int productCount, boolean promo) {
         EVENT_LOGGER.logRecordBuilder()
-            .setEventName("catalog.products.served")
+            .setEventName(Semconv.CATALOG_PRODUCTS_SERVED)
             .setSeverity(Severity.INFO)
-            .setBody("catalog.products.served")
+            .setBody(Semconv.CATALOG_PRODUCTS_SERVED)
             .setAllAttributes(Attributes.builder()
                 .put("product.count", (long) productCount)
                 .put("catalog.promo", promo)

@@ -34,11 +34,11 @@ class PaymentPricingService extends PricingGrpc.PricingImplBase {
         String paymentMethod = "card";
         long total = 1999L * Math.max(1, req.getQuantity());
         try (
-            var ignoredEvent = MDC.putCloseable("event.name", "payment.authorized");
+            var ignoredEvent = MDC.putCloseable(Semconv.EVENT_NAME, Semconv.PAYMENT_AUTHORIZED);
             var ignoredMethod = MDC.putCloseable("payment.method", paymentMethod)
         ) {
             LOG.atInfo()
-                .addKeyValue("event.name", "payment.authorized")
+                .addKeyValue(Semconv.EVENT_NAME, Semconv.PAYMENT_AUTHORIZED)
                 .addKeyValue("payment.method", paymentMethod)
                 .log("payment authorized");
         }
@@ -54,9 +54,9 @@ class PaymentPricingService extends PricingGrpc.PricingImplBase {
 
     private static void emitPaymentAuthorized(String paymentMethod) {
         EVENT_LOGGER.logRecordBuilder()
-            .setEventName("payment.authorized")
+            .setEventName(Semconv.PAYMENT_AUTHORIZED)
             .setSeverity(Severity.INFO)
-            .setBody("payment.authorized")
+            .setBody(Semconv.PAYMENT_AUTHORIZED)
             .setAllAttributes(Attributes.builder()
                 .put("payment.method", paymentMethod)
                 .build())

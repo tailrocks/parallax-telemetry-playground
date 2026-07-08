@@ -10,6 +10,8 @@
 use tokio::process::Command;
 use tracing::Instrument;
 
+use playground_telemetry::semconv;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
@@ -39,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     std::process::exit(code);
 }
 
-#[tracing::instrument(fields(otel.kind = "client"))]
+#[tracing::instrument(fields(otel.kind = semconv::SPAN_KIND_CLIENT))]
 async fn drive() -> anyhow::Result<i32> {
     let base = std::env::var("CHECKOUT_URL").unwrap_or_else(|_| "http://localhost:8088".into());
     let url = format!("{base}/checkout?sku=WIDGET-1&quantity=3");
@@ -55,10 +57,10 @@ async fn daemon(args: Vec<String>) -> anyhow::Result<i32> {
     let orphan = flag_present(&args, "--orphan");
     let span = tracing::info_span!(
         "host_cli",
-        otel.kind = "client",
-        "cli.command" = "playground daemon",
-        "parallax.session.id" = %session,
-        "parallax.run.id" = %run_id,
+        otel.kind = semconv::SPAN_KIND_CLIENT,
+        cli.command = "playground daemon",
+        parallax.session.id = %session,
+        parallax.run.id = %run_id,
         orphan
     );
     async move { daemon_session(session, run_id, orphan).await }
@@ -69,10 +71,10 @@ async fn daemon(args: Vec<String>) -> anyhow::Result<i32> {
 async fn daemon_session(session: String, run_id: String, orphan: bool) -> anyhow::Result<i32> {
     let span = tracing::info_span!(
         "daemon_session",
-        otel.kind = "internal",
-        "parallax.execution.layer" = "daemon",
-        "parallax.session.id" = %session,
-        "parallax.run.id" = %run_id,
+        otel.kind = semconv::SPAN_KIND_INTERNAL,
+        parallax.execution.layer = "daemon",
+        parallax.session.id = %session,
+        parallax.run.id = %run_id,
         orphan
     );
     async move {
@@ -94,7 +96,11 @@ async fn daemon_session(session: String, run_id: String, orphan: bool) -> anyhow
             }
             child.env(
                 "BAGGAGE",
-                format!("parallax.session.id={session},parallax.run.id={run_id}"),
+                format!(
+                    "{}={session},{}={run_id}",
+                    semconv::PARALLAX_SESSION_ID,
+                    semconv::PARALLAX_RUN_ID
+                ),
             );
         }
 
@@ -118,20 +124,20 @@ async fn enter(args: Vec<String>) -> anyhow::Result<i32> {
     let span = if orphan {
         tracing::info_span!(
             "container_session",
-            otel.kind = "client",
-            "url.full" = "container://agent",
-            "parallax.execution.layer" = "container",
-            "parallax.session.id" = %session,
-            "parallax.run.id" = %run_id,
+            otel.kind = semconv::SPAN_KIND_CLIENT,
+            url.full = "container://agent",
+            parallax.execution.layer = "container",
+            parallax.session.id = %session,
+            parallax.run.id = %run_id,
             orphan
         )
     } else {
         tracing::info_span!(
             "container_session",
-            otel.kind = "internal",
-            "parallax.execution.layer" = "container",
-            "parallax.session.id" = %session,
-            "parallax.run.id" = %run_id,
+            otel.kind = semconv::SPAN_KIND_INTERNAL,
+            parallax.execution.layer = "container",
+            parallax.session.id = %session,
+            parallax.run.id = %run_id,
             orphan
         )
     };
@@ -148,11 +154,11 @@ async fn enter(args: Vec<String>) -> anyhow::Result<i32> {
 async fn invoke_agent(session: &str, run_id: &str) {
     let span = tracing::info_span!(
         "invoke_agent",
-        otel.kind = "internal",
-        "gen_ai.operation.name" = "invoke_agent",
-        "parallax.agent.id" = "demo-agent",
-        "parallax.session.id" = %session,
-        "parallax.run.id" = %run_id
+        otel.kind = semconv::SPAN_KIND_INTERNAL,
+        gen_ai.operation.name = "invoke_agent",
+        parallax.agent.id = "demo-agent",
+        parallax.session.id = %session,
+        parallax.run.id = %run_id
     );
     async move {
         tracing::info!("agent invocation started");
@@ -167,10 +173,10 @@ async fn invoke_agent(session: &str, run_id: &str) {
 async fn execute_tool(tool: &'static str, command: &'static str, fail: bool) {
     let span = tracing::info_span!(
         "execute_tool",
-        otel.kind = "internal",
-        "gen_ai.operation.name" = "execute_tool",
-        "tool.name" = %tool,
-        "shell.command" = %command
+        otel.kind = semconv::SPAN_KIND_INTERNAL,
+        gen_ai.operation.name = "execute_tool",
+        tool.name = %tool,
+        shell.command = %command
     );
     async move {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
@@ -230,7 +236,7 @@ async fn cron_once(
 ) -> anyhow::Result<i32> {
     let span = tracing::info_span!(
         "cron_job",
-        otel.kind = "internal",
+        otel.kind = semconv::SPAN_KIND_INTERNAL,
         "cron.job.name" = "playground-report",
         "cron.schedule" = "*/1 * * * *",
         "cron.invocation.id" = %invocation_id,
@@ -307,13 +313,13 @@ fn resource_attrs_with_run_id(run_id: &str) -> String {
     if existing
         .split(',')
         .filter_map(|item| item.split_once('='))
-        .any(|(key, _)| key.trim() == "parallax.run.id")
+        .any(|(key, _)| key.trim() == semconv::PARALLAX_RUN_ID)
     {
         return existing;
     }
     if existing.trim().is_empty() {
-        format!("parallax.run.id={run_id}")
+        format!("{}={run_id}", semconv::PARALLAX_RUN_ID)
     } else {
-        format!("{existing},parallax.run.id={run_id}")
+        format!("{existing},{}={run_id}", semconv::PARALLAX_RUN_ID)
     }
 }

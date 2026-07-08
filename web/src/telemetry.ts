@@ -35,6 +35,21 @@ import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch";
 import { DocumentLoadInstrumentation } from "@opentelemetry/instrumentation-document-load";
 import { UserInteractionInstrumentation } from "@opentelemetry/instrumentation-user-interaction";
+import {
+  APP_SCREEN_NAME,
+  BROWSER_WEB_VITAL,
+  DEFAULT_ENVIRONMENT,
+  DEPLOYMENT_ENVIRONMENT_NAME,
+  ERROR_TYPE,
+  EVENT_NAME,
+  SESSION_ID,
+  WEB_VITAL_DELTA,
+  WEB_VITAL_ID,
+  WEB_VITAL_NAME,
+  WEB_VITAL_NAVIGATION_TYPE,
+  WEB_VITAL_RATING,
+  WEB_VITAL_VALUE,
+} from "./semconv";
 
 export type RumAttributeValue = string | number | boolean;
 export type RumAttributes = Record<string, RumAttributeValue | undefined>;
@@ -55,8 +70,8 @@ export function initOtel() {
   const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: "web",
     [ATTR_SERVICE_VERSION]: import.meta.env.VITE_RELEASE ?? "dev",
-    "deployment.environment.name": "playground",
-    "session.id": sessionId,
+    [DEPLOYMENT_ENVIRONMENT_NAME]: import.meta.env.VITE_PARALLAX_ENV ?? DEFAULT_ENVIRONMENT,
+    [SESSION_ID]: sessionId,
   });
   const provider = new WebTracerProvider({
     resource,
@@ -118,8 +133,8 @@ export function getSessionId(): string {
 }
 
 export function trackScreen(pathname: string) {
-  trackStep("app.screen.name", {
-    "app.screen.name": screenName(pathname),
+  trackStep(APP_SCREEN_NAME, {
+    [APP_SCREEN_NAME]: screenName(pathname),
     "url.path": pathname,
   });
 }
@@ -175,7 +190,7 @@ export function emitTypedEvent(name: string, attributes: RumAttributes = {}) {
     severityText: "INFO",
     body: name,
     attributes: cleanAttributes({
-      "event.name": name,
+      [EVENT_NAME]: name,
       ...attributes,
     }),
     context: sessionContext(currentStepContext),
@@ -195,12 +210,12 @@ function recordException(span: Span, err: unknown) {
     err instanceof Error ? err : new Error(typeof err === "string" ? err : "unknown error");
   span.recordException(error);
   span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
-  span.setAttribute("error.type", error.name);
+  span.setAttribute(ERROR_TYPE, error.name);
 }
 
 function sessionContext(base: Context = context.active()) {
   const baggage = propagation.createBaggage({
-    "session.id": { value: getSessionId() },
+    [SESSION_ID]: { value: getSessionId() },
   });
   return propagation.setBaggage(base, baggage);
 }
@@ -252,21 +267,21 @@ async function startWebVitals() {
     navigationType?: string;
   }) => {
     const attrs = {
-      "web_vital.name": metric.name,
-      "web_vital.value": metric.value,
-      "web_vital.rating": metric.rating,
-      "web_vital.id": metric.id,
-      "web_vital.delta": metric.delta,
-      "web_vital.navigation_type": metric.navigationType,
-      "app.screen.name": screenName(window.location.pathname),
+      [WEB_VITAL_NAME]: metric.name,
+      [WEB_VITAL_VALUE]: metric.value,
+      [WEB_VITAL_RATING]: metric.rating,
+      [WEB_VITAL_ID]: metric.id,
+      [WEB_VITAL_DELTA]: metric.delta,
+      [WEB_VITAL_NAVIGATION_TYPE]: metric.navigationType,
+      [APP_SCREEN_NAME]: screenName(window.location.pathname),
     };
     // Development-status browser convention used by the lab contract.
     const cleaned = cleanAttributes(attrs);
-    const span = startRumSpan("browser.web_vital", cleaned);
+    const span = startRumSpan(BROWSER_WEB_VITAL, cleaned);
     for (const [key, value] of Object.entries(cleaned)) {
       span.setAttribute(key, value);
     }
-    span.addEvent("browser.web_vital", cleaned);
+    span.addEvent(BROWSER_WEB_VITAL, cleaned);
     span.end();
   };
   onCLS(report);

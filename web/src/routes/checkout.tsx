@@ -1,6 +1,14 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { emitTypedEvent, runTracedStep, tracedFetch, trackStep } from "../rum";
+import {
+  APP_SCREEN_NAME,
+  APP_WIDGET_NAME,
+  TELEMETRY_PROPAGATION_DISABLED,
+  UI_CLICK,
+  UI_SUBMIT,
+  WEB_CHECKOUT_SUBMITTED,
+} from "../semconv";
 
 export const Route = createFileRoute("/checkout")({
   component: CheckoutPage,
@@ -28,16 +36,16 @@ function CheckoutPage() {
     setStatus("submitting...");
     try {
       await runTracedStep(
-        "ui.submit",
+        UI_SUBMIT,
         {
-          "app.screen.name": "checkout",
-          "app.widget.name": nopropagate
+          [APP_SCREEN_NAME]: "checkout",
+          [APP_WIDGET_NAME]: nopropagate
             ? "checkout-form-nopropagate"
             : "checkout-form",
-          "telemetry.propagation.disabled": nopropagate,
+          [TELEMETRY_PROPAGATION_DISABLED]: nopropagate,
         },
         async () => {
-          await emitTypedEvent("web.checkout.submitted", {
+          await emitTypedEvent(WEB_CHECKOUT_SUBMITTED, {
             sku,
             quantity,
           });
@@ -79,9 +87,9 @@ function CheckoutPage() {
             value={sku}
             onChange={(event) => {
               setSku(event.target.value);
-              void trackStep("ui.click", {
-                "app.screen.name": "checkout",
-                "app.widget.name": "sku-picker",
+              void trackStep(UI_CLICK, {
+                [APP_SCREEN_NAME]: "checkout",
+                [APP_WIDGET_NAME]: "sku-picker",
               });
             }}
           >

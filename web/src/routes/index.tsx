@@ -2,6 +2,7 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import * as Sentry from "@sentry/tanstackstart-react";
 import { useState } from "react";
 import { runTracedStep, tracedFetch, trackStep } from "../rum";
+import { APP_SCREEN_NAME, APP_WIDGET_NAME, UI_CLICK } from "../semconv";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -14,10 +15,10 @@ function Home() {
     const base = import.meta.env.VITE_CHECKOUT_URL ?? "http://localhost:8088";
     try {
       await runTracedStep(
-        "ui.click",
+        UI_CLICK,
         {
-          "app.screen.name": "home",
-          "app.widget.name": "rum-error-button",
+          [APP_SCREEN_NAME]: "home",
+          [APP_WIDGET_NAME]: "rum-error-button",
         },
         async () => {
           const res = await tracedFetch(`${base}/checkout?sku=RUM-ERROR&quantity=1&fail=1`);
@@ -42,9 +43,9 @@ function Home() {
         <Link
           to="/checkout"
           onClick={() =>
-            void trackStep("ui.click", {
-              "app.screen.name": "home",
-              "app.widget.name": "start-checkout-link",
+            void trackStep(UI_CLICK, {
+              [APP_SCREEN_NAME]: "home",
+              [APP_WIDGET_NAME]: "start-checkout-link",
             })
           }
         >
@@ -53,9 +54,9 @@ function Home() {
         <Link
           to="/orders"
           onClick={() =>
-            void trackStep("ui.click", {
-              "app.screen.name": "home",
-              "app.widget.name": "orders-link",
+            void trackStep(UI_CLICK, {
+              [APP_SCREEN_NAME]: "home",
+              [APP_WIDGET_NAME]: "orders-link",
             })
           }
         >
@@ -66,9 +67,9 @@ function Home() {
           visible in OTLP even without session replay. */}
       <button
         onClick={() => {
-          void trackStep("ui.click", {
-            "app.screen.name": "home",
-            "app.widget.name": "promo-button",
+          void trackStep(UI_CLICK, {
+            [APP_SCREEN_NAME]: "home",
+            [APP_WIDGET_NAME]: "promo-button",
           });
         }}
       >

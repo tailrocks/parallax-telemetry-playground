@@ -19,6 +19,7 @@
 //! source.)
 
 pub mod propagation;
+pub mod semconv;
 
 pub use propagation::{
     context_env, current_context_env, extract_context_from_env, inject_context_headers,
@@ -36,7 +37,6 @@ use opentelemetry_sdk::logs::{SdkLogger, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
-use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -45,14 +45,7 @@ use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-pub const TOKIO_RUNTIME_METRIC_NAMES: &[&str] = &[
-    "tokio.runtime.workers_count",
-    "tokio.runtime.alive_tasks",
-    "tokio.runtime.global_queue_depth",
-    "tokio.runtime.blocking_pool_depth",
-    "tokio.runtime.total_park_count",
-    "tokio.runtime.total_busy_duration_ms",
-];
+pub use semconv::TOKIO_RUNTIME_METRIC_NAMES;
 
 static EVENT_LOGGER: OnceLock<SdkLogger> = OnceLock::new();
 
@@ -65,7 +58,7 @@ pub fn db_span(
     // never interpolate user input into `db.query.text`.
     tracing::info_span!(
         "postgres.query",
-        otel.kind = "client",
+        otel.kind = semconv::SPAN_KIND_CLIENT,
         "db.system.name" = "postgresql",
         "db.namespace" = "playground",
         "db.operation.name" = operation_name,
@@ -113,7 +106,7 @@ where
     record.set_severity_number(Severity::Info);
     record.set_severity_text("INFO");
     record.set_body(AnyValue::from(name));
-    record.add_attribute("event.name", name);
+    record.add_attribute(semconv::EVENT_NAME, name);
     for (key, value) in attrs {
         record.add_attribute(*key, value.clone());
     }
@@ -221,11 +214,7 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
             .ok()
             .and_then(|d| d.parse().ok()),
         release: Some(release.into()),
-        environment: Some(
-            std::env::var("PARALLAX_ENV")
-                .unwrap_or_else(|_| "lab".into())
-                .into(),
-        ),
+        environment: Some(environment_from(std::env::var("PARALLAX_ENV").ok()).into()),
         traces_sample_rate: 1.0,
         attach_stacktrace: true,
         send_default_pii: false,
@@ -370,19 +359,19 @@ fn sample_ratio_from(value: Option<&str>) -> SampleRatioSetting {
 
 fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
     let mut attributes = vec![
-        KeyValue::new(SERVICE_NAME, service),
-        KeyValue::new(SERVICE_VERSION, release()),
-        KeyValue::new("service.namespace", "playground"),
-        KeyValue::new("service.instance.id", service_instance_id(service)),
+        KeyValue::new(semconv::SERVICE_NAME, service),
+        KeyValue::new(semconv::SERVICE_VERSION, release()),
+        KeyValue::new(semconv::SERVICE_NAMESPACE, semconv::PLAYGROUND_NAMESPACE),
+        KeyValue::new(semconv::SERVICE_INSTANCE_ID, service_instance_id(service)),
         KeyValue::new(
-            "deployment.environment.name",
-            std::env::var("PARALLAX_ENV").unwrap_or_else(|_| "lab".into()),
+            semconv::DEPLOYMENT_ENVIRONMENT_NAME,
+            environment_from(std::env::var("PARALLAX_ENV").ok()),
         ),
     ];
     if let Ok(run_id) = std::env::var("PARALLAX_RUN_ID")
         && !run_id.trim().is_empty()
     {
-        attributes.push(KeyValue::new("parallax.run.id", run_id));
+        attributes.push(KeyValue::new(semconv::PARALLAX_RUN_ID, run_id));
     }
     if let Some(git_sha) = non_empty_env("GIT_SHA") {
         attributes.push(KeyValue::new("vcs.ref.head.revision", git_sha));
@@ -405,6 +394,15 @@ fn release_from(value: Option<String>) -> String {
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         })
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+}
+
+fn environment_from(value: Option<String>) -> String {
+    value
+        .and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .unwrap_or_else(|| semconv::DEFAULT_ENVIRONMENT.to_string())
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
@@ -455,6 +453,30 @@ mod tests {
             release_from(Some("  ".to_string())),
             env!("CARGO_PKG_VERSION")
         );
+    }
+
+    #[test]
+    fn environment_defaults_to_playground() {
+        assert_eq!(environment_from(None), semconv::DEFAULT_ENVIRONMENT);
+        assert_eq!(
+            environment_from(Some("  ".to_string())),
+            semconv::DEFAULT_ENVIRONMENT
+        );
+        assert_eq!(environment_from(Some("prod".to_string())), "prod");
+    }
+
+    #[test]
+    fn shared_wire_names_are_frozen() {
+        assert_eq!(semconv::PARALLAX_RUN_ID, "parallax.run.id");
+        assert_eq!(semconv::SERVICE_NAME, "service.name");
+        assert_eq!(semconv::SERVICE_VERSION, "service.version");
+        assert_eq!(
+            semconv::DEPLOYMENT_ENVIRONMENT_NAME,
+            "deployment.environment.name"
+        );
+        assert_eq!(semconv::EVENT_NAME, "event.name");
+        assert_eq!(semconv::APP_SCREEN_NAME, "app.screen.name");
+        assert_eq!(semconv::OTEL_KIND, "otel.kind");
     }
 
     #[test]
@@ -546,7 +568,8 @@ mod tests {
         assert!(
             attrs
                 .iter()
-                .any(|(key, value)| key == "event.name" && value.contains("checkout.completed"))
+                .any(|(key, value)| key == semconv::EVENT_NAME
+                    && value.contains("checkout.completed"))
         );
     }
 }

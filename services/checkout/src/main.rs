@@ -20,6 +20,7 @@ use open_feature::provider::FeatureProvider;
 use open_feature_flagd::{FlagdOptions, FlagdProvider, ResolverType};
 use playground_proto::pricing::v1::QuoteRequest;
 use playground_proto::pricing::v1::pricing_client::PricingClient;
+use playground_telemetry::semconv;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::OnceLock;
@@ -137,7 +138,7 @@ fn env_flag(name: &str) -> bool {
 }
 
 async fn checkout(headers: HeaderMap, Query(p): Query<CheckoutParams>) -> impl IntoResponse {
-    let span = tracing::info_span!("checkout", otel.kind = "server");
+    let span = tracing::info_span!("checkout", otel.kind = semconv::SPAN_KIND_SERVER);
     playground_telemetry::set_parent_from_headers(&span, &headers);
     checkout_inner(p).instrument(span).await
 }
@@ -352,16 +353,16 @@ fn clamp_shape(fan: u32, depth: u32) -> (u32, u32) {
 
 fn burst_span(level: u32) -> tracing::Span {
     match level {
-        1 => tracing::info_span!("burst.l1", otel.kind = "internal"),
-        2 => tracing::info_span!("burst.l2", otel.kind = "internal"),
-        3 => tracing::info_span!("burst.l3", otel.kind = "internal"),
-        4 => tracing::info_span!("burst.l4", otel.kind = "internal"),
-        5 => tracing::info_span!("burst.l5", otel.kind = "internal"),
-        6 => tracing::info_span!("burst.l6", otel.kind = "internal"),
-        7 => tracing::info_span!("burst.l7", otel.kind = "internal"),
-        8 => tracing::info_span!("burst.l8", otel.kind = "internal"),
-        9 => tracing::info_span!("burst.l9", otel.kind = "internal"),
-        _ => tracing::info_span!("burst.l10", otel.kind = "internal"),
+        1 => tracing::info_span!("burst.l1", otel.kind = semconv::SPAN_KIND_INTERNAL),
+        2 => tracing::info_span!("burst.l2", otel.kind = semconv::SPAN_KIND_INTERNAL),
+        3 => tracing::info_span!("burst.l3", otel.kind = semconv::SPAN_KIND_INTERNAL),
+        4 => tracing::info_span!("burst.l4", otel.kind = semconv::SPAN_KIND_INTERNAL),
+        5 => tracing::info_span!("burst.l5", otel.kind = semconv::SPAN_KIND_INTERNAL),
+        6 => tracing::info_span!("burst.l6", otel.kind = semconv::SPAN_KIND_INTERNAL),
+        7 => tracing::info_span!("burst.l7", otel.kind = semconv::SPAN_KIND_INTERNAL),
+        8 => tracing::info_span!("burst.l8", otel.kind = semconv::SPAN_KIND_INTERNAL),
+        9 => tracing::info_span!("burst.l9", otel.kind = semconv::SPAN_KIND_INTERNAL),
+        _ => tracing::info_span!("burst.l10", otel.kind = semconv::SPAN_KIND_INTERNAL),
     }
 }
 
@@ -544,7 +545,7 @@ async fn pricing_attempt(
 ) -> anyhow::Result<(u64, String)> {
     let span = tracing::info_span!(
         "pricing.attempt",
-        otel.kind = "client",
+        otel.kind = semconv::SPAN_KIND_CLIENT,
         attempt,
         timeout_ms,
         "rpc.system" = "grpc",
@@ -632,7 +633,7 @@ fn grpc_code_number(code: Code) -> i64 {
 
 /// A7: consume the pricing server-stream (a long-lived streaming CLIENT span).
 async fn quote_stream(headers: HeaderMap, Query(p): Query<CheckoutParams>) -> Json<Value> {
-    let span = tracing::info_span!("quote_stream", otel.kind = "server");
+    let span = tracing::info_span!("quote_stream", otel.kind = semconv::SPAN_KIND_SERVER);
     playground_telemetry::set_parent_from_headers(&span, &headers);
     quote_stream_inner(p).instrument(span).await
 }
@@ -721,7 +722,7 @@ async fn quote_stream_inner(p: CheckoutParams) -> Json<Value> {
     }))
 }
 
-#[tracing::instrument(fields(otel.kind = "client"))]
+#[tracing::instrument(fields(otel.kind = semconv::SPAN_KIND_CLIENT))]
 async fn reserve(sku: &str, quantity: u32) -> anyhow::Result<Value> {
     let base = std::env::var("INVENTORY_URL").unwrap_or_else(|_| "http://inventory:8089".into());
     let url = format!("{base}/reserve?sku={sku}&quantity={quantity}");
@@ -731,7 +732,7 @@ async fn reserve(sku: &str, quantity: u32) -> anyhow::Result<Value> {
         .await?)
 }
 
-#[tracing::instrument(fields(otel.kind = "client"))]
+#[tracing::instrument(fields(otel.kind = semconv::SPAN_KIND_CLIENT))]
 async fn recommend(sku: &str) -> anyhow::Result<Value> {
     let base =
         std::env::var("RECOMMENDATION_URL").unwrap_or_else(|_| "http://recommendation:8090".into());

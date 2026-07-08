@@ -5,6 +5,7 @@ use axum::http::HeaderMap;
 use axum::{Json, Router, extract::Query, routing::get};
 use opentelemetry::metrics::{Counter, Gauge};
 use opentelemetry::{KeyValue, global};
+use playground_telemetry::semconv;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -158,7 +159,7 @@ fn record_cache_metrics(hit: bool, size: usize) {
 }
 
 async fn recommend(headers: HeaderMap, Query(p): Query<Recommend>) -> Json<Value> {
-    let span = tracing::info_span!("recommend", otel.kind = "server");
+    let span = tracing::info_span!("recommend", otel.kind = semconv::SPAN_KIND_SERVER);
     playground_telemetry::set_parent_from_headers(&span, &headers);
     recommend_inner(p).instrument(span).await
 }
@@ -284,7 +285,7 @@ async fn stampede_recommendations(
 }
 
 async fn compute_recommendations(sku: &str) -> Vec<String> {
-    let span = tracing::info_span!("compute_recommendations", sku = %sku, otel.kind = "internal");
+    let span = tracing::info_span!("compute_recommendations", sku = %sku, otel.kind = semconv::SPAN_KIND_INTERNAL);
     async move {
         tokio::time::sleep(COMPUTE_LATENCY).await;
         vec![format!("{sku}-ACCESSORY"), "WIDGET-2".to_string()]

@@ -1,6 +1,7 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { runTracedStep, tracedFetch, trackStep } from "../rum";
+import { APP_SCREEN_NAME, APP_WIDGET_NAME, UI_CLICK, UI_SUBMIT } from "../semconv";
 
 export const Route = createFileRoute("/orders")({
   component: OrdersPage,
@@ -21,10 +22,10 @@ function OrdersPage() {
     setStatus("submitting...");
     try {
       await runTracedStep(
-        "ui.submit",
+        UI_SUBMIT,
         {
-          "app.screen.name": "orders",
-          "app.widget.name": "order-form",
+          [APP_SCREEN_NAME]: "orders",
+          [APP_WIDGET_NAME]: "order-form",
         },
         async () => {
           const res = await tracedFetch(`${base}/order?${query}`, { method: "POST" });
@@ -66,9 +67,9 @@ function OrdersPage() {
             type="checkbox"
             onChange={(event) => {
               setBatch(event.target.checked);
-              void trackStep("ui.click", {
-                "app.screen.name": "orders",
-                "app.widget.name": "batch-toggle",
+              void trackStep(UI_CLICK, {
+                [APP_SCREEN_NAME]: "orders",
+                [APP_WIDGET_NAME]: "batch-toggle",
               });
             }}
           />{" "}

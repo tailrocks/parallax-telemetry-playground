@@ -9,6 +9,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::{Json, Router, routing::get};
 use opentelemetry::global;
+use playground_telemetry::semconv;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::pool::PoolConnection;
@@ -81,7 +82,7 @@ async fn reserve(
     State(state): State<AppState>,
     Query(p): Query<Reserve>,
 ) -> impl IntoResponse {
-    let span = tracing::info_span!("reserve", otel.kind = "server");
+    let span = tracing::info_span!("reserve", otel.kind = semconv::SPAN_KIND_SERVER);
     playground_telemetry::set_parent_from_headers(&span, &headers);
     reserve_inner(state, p).instrument(span).await
 }
@@ -170,7 +171,7 @@ async fn reserve_db(db: DbState, p: Reserve) -> InventoryResponse {
 async fn hold_connection(db: &DbState, hold_ms: u64) -> Result<(), sqlx::Error> {
     let span = tracing::info_span!(
         "postgres.pool",
-        otel.kind = "client",
+        otel.kind = semconv::SPAN_KIND_CLIENT,
         "db.system.name" = "postgresql",
         "db.namespace" = "playground",
         "db.operation.name" = "ACQUIRE",

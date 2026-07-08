@@ -2,10 +2,11 @@
 //! domain behavior per docs (DB spans / cache / reverse-hop) at implementation.
 use axum::http::HeaderMap;
 use axum::{Router, routing::get};
+use playground_telemetry::semconv;
 use tracing::Instrument;
 
 async fn handle(headers: HeaderMap) -> &'static str {
-    let span = tracing::info_span!("handle", otel.kind = "server");
+    let span = tracing::info_span!("handle", otel.kind = semconv::SPAN_KIND_SERVER);
     playground_telemetry::set_parent_from_headers(&span, &headers);
     handle_inner().instrument(span).await
 }
