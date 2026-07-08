@@ -17,6 +17,8 @@ rows here and in `run.sh`.
 | a13 | `a13-deploy-regression.sh` | Recreate checkout as `RELEASE=v1`, then `RELEASE=v2` (`A13_BUILD=1` rebuilds images first). | Issues: checkout error spike attributed to `service.version=v2`; release strip lands in plan 041. |
 | a14 | `a14-flag-flip.sh` | Flip flagd `paymentFailure` off/on/off without restarting checkout. | Trace detail: `feature_flag.evaluation` events; Issues: failures only while flag is on. |
 | a18 | `a18-canary.sh` | Fake sensitive canary corpus in telemetry. | Issues/Logs: redaction of fake email/token/card/jwt fields. |
+| a19 | `a19-long-trace.sh` | Checkout emits a synthetic wide/deep `burst.l*` span tree. | Traces: large waterfall stress trace for windowing, minimap, and lane checks. |
+| a20-compare | `a20-compare-pair.sh` | Two green checkout variants with structural differences. | Traces: Compare shows added reserve spans, removed recommend branch, and duration deltas. |
 | a20 | `a20-batch-fanin.sh` | Orders batch consumer drains rapid publishes into one consumer span. | Trace detail: `consume_batch` has `messaging.batch.message_count=8` and links to each producer trace. |
 | a22 | `a22-tokio-saturation.sh` | Checkout `spawn_blocking` flood plus concurrent traffic. | Services -> checkout -> Runtime lane: `tokio.runtime.*` spike; Traces: slow checkout spans in the same window. |
 | a25 | `a25-postgres.sh` | Inventory uses real Postgres for normal reserve, `pg_sleep`, DB-N+1 SELECT fan-out, and pool exhaustion. | Traces: `db.query.text` spans for UPDATE, `pg_sleep`, SELECT fan-out, and `pool_exhausted`; Runtime: `db.client.connection.*` gauges. |
@@ -27,7 +29,7 @@ rows here and in `run.sh`.
 | b-chaos | `b-chaos.sh` | Payment failure and injected latency. | Issues/Services: checkout error grouping and slow-span rendering. |
 | b-checkout-chaos | `b-checkout-chaos.sh` | Retry timeout and N+1 fan-out. | Traces: retry/timeout branch and N+1 waterfall. |
 | b3b | `b3b-grpc-deadline.sh` | Checkout uses tonic `grpc-timeout` against delayed pricing, with retries. | Traces: sibling `pricing.attempt` spans show `rpc.grpc.status_code=4` and `deadline_exceeded` ERROR status. |
-| b-degradation | `b-degradation.sh` | Partial degrade and clock skew. | Traces/Issues: degraded response and skewed span timing. |
+| b-degradation | `b-degradation.sh` | Partial degrade and real backdated child span. | Traces/Issues: degraded response and skewed span timing. |
 | b17 | `b17-cron.sh` | Short-lived Rust CLI cron mode. | Runs: cron success/fail/stuck outcome; run `cargo build` first. `parallax run start -- scenarios/b17-cron.sh` is optional when you want run-scoped resource attrs. |
 | b17b | `b17b-cron-suite.sh` | Cron timeline: ok, ok, fail, stuck, missed, duplicate. | Runs: schedule attrs, exit codes, missing beat, and duplicate `cron.invocation.id`; run `cargo build` first. |
 | b19 | `b19-jvm-gc-pressure.sh` | Catalog bounded heap pressure while GraphQL products queries run. | Services -> catalog -> Runtime lane: `jvm.memory.used` / `jvm.gc.*` rise; GraphQL spans slow in the same window. |

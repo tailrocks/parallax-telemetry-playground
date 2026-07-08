@@ -28,7 +28,7 @@ pub use propagation::{
 
 use opentelemetry::logs::{AnyValue, LogRecord, Logger, LoggerProvider as _, Severity};
 use opentelemetry::propagation::TextMapCompositePropagator;
-use opentelemetry::trace::TracerProvider as _;
+use opentelemetry::trace::{Span as _, SpanBuilder, TracerProvider as _};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
@@ -38,7 +38,8 @@ use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::SubscriberExt;
@@ -88,6 +89,19 @@ pub fn emit_event(name: &'static str, attrs: &[(&'static str, String)]) {
     let mut record = logger.create_log_record();
     populate_event_record(&mut record, name, attrs);
     logger.emit(record);
+}
+
+/// Emit a child span whose timestamps are deliberately behind the current span.
+pub fn emit_backdated_span(name: &'static str, offset: Duration, duration: Duration) {
+    let now = SystemTime::now();
+    let start = now.checked_sub(offset).unwrap_or(SystemTime::UNIX_EPOCH);
+    let end = start.checked_add(duration).unwrap_or(start);
+    let parent = tracing::Span::current().context();
+    let tracer = global::tracer("playground.backdated");
+    let mut span = SpanBuilder::from_name(name)
+        .with_start_time(start)
+        .start_with_context(&tracer, &parent);
+    span.end_with_timestamp(end);
 }
 
 fn populate_event_record<R>(record: &mut R, name: &'static str, attrs: &[(&'static str, String)])
@@ -455,6 +469,15 @@ mod tests {
                 "tokio.runtime.total_park_count",
                 "tokio.runtime.total_busy_duration_ms",
             ]
+        );
+    }
+
+    #[test]
+    fn backdated_span_helper_compiles_against_otel_api() {
+        emit_backdated_span(
+            "test-backdated",
+            Duration::from_secs(60),
+            Duration::from_millis(5),
         );
     }
 

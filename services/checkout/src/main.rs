@@ -24,15 +24,20 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::{future::Future, pin::Pin};
 use tokio::sync::OnceCell;
 use tonic::Code;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::Instrument;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 static FLAGD_PROVIDER: OnceCell<FlagdProvider> = OnceCell::const_new();
 static BLOCKING_POOL_DEPTH: AtomicU64 = AtomicU64::new(0);
 const MAX_BLOCK_MS: u64 = 30_000;
 const MAX_BLOCK_N: u32 = 1_024;
+const MAX_BURST_FAN: u32 = 50;
+const MAX_BURST_DEPTH: u32 = 10;
+const MAX_BURST_SPANS: u64 = 2_000;
 
 /// Query flags arrive as `1`/`true`/`yes`/`on`; serde's bool wants `true`/`false`.
 fn de_flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
@@ -55,6 +60,14 @@ struct CheckoutParams {
     /// B9: extra sequential inventory calls (N+1 hotspot).
     #[serde(default)]
     n1: u32,
+    /// A19: synthetic trace shape width.
+    #[serde(default)]
+    fan: u32,
+    /// A19: synthetic trace shape depth.
+    #[serde(default)]
+    depth: u32,
+    /// A20: green structural compare variant.
+    variant: Option<String>,
     /// B3: retry the pricing call up to N times with a per-attempt deadline.
     #[serde(default)]
     retry: u32,
@@ -83,7 +96,7 @@ struct CheckoutParams {
     /// B4: on a pricing failure, degrade to a partial 200 instead of 502.
     #[serde(default, deserialize_with = "de_flag")]
     degrade: bool,
-    /// B18: emit a span event with a deliberately skewed timestamp.
+    /// B18: emit a genuinely backdated child span.
     #[serde(default, deserialize_with = "de_flag")]
     skew: bool,
     /// A22: flood Tokio's blocking pool with bounded sleeping tasks.
@@ -188,12 +201,18 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
         );
     }
     if p.skew {
-        // B18: a span event timestamped far in the past (clock skew across hops).
+        // B18: backdate a child span under the current checkout span. The log
+        // below is only a witness; the skew is in the emitted span timestamp.
         let skewed = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
         let skewed = skewed
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        playground_telemetry::emit_backdated_span(
+            "skewed-op",
+            std::time::Duration::from_secs(3600),
+            std::time::Duration::from_millis(20),
+        );
         tracing::warn!(skewed_unix_s = skewed, "clock-skew event (1h in the past)");
     }
     // B12: release-attributed regression — RELEASE=v2 fails (vs v1 clean).
@@ -226,15 +245,37 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
         );
     }
 
-    // B9: N+1 — fire N extra sequential inventory calls (a classic hotspot).
-    for i in 0..p.n1 {
+    let variant = compare_variant(p.variant.as_deref());
+    tracing::Span::current().set_attribute("compare.variant", variant);
+    tracing::info!(compare.variant = variant, "checkout compare variant");
+
+    let n1_count = if variant == "v2" { p.n1.max(8) } else { p.n1 };
+    // B9/A20: N+1 — fire extra sequential inventory calls (a classic hotspot).
+    for i in 0..n1_count {
         let _ = reserve(&p.sku, 1).await;
         tracing::debug!(i, "n+1 inventory call");
     }
 
+    let (fan, depth) = clamp_shape(p.fan, p.depth);
+    if fan > 0 && depth > 0 {
+        tracing::info!(
+            requested_fan = p.fan,
+            requested_depth = p.depth,
+            fan,
+            depth,
+            estimated_spans = estimated_burst_spans(fan, depth),
+            "synthetic burst trace requested"
+        );
+        burst(1, fan, depth).await;
+    }
+
     let pricing = quote_with_retry(&p.sku, p.quantity, p.retry, p.timeout_ms, p.delay_ms).await;
     let inventory = reserve(&p.sku, p.quantity).await;
-    let recommendation = recommend(&p.sku).await;
+    let recommendation = if variant == "v2" {
+        Ok(json!({"skipped": "compare.variant=v2"}))
+    } else {
+        recommend(&p.sku).await
+    };
 
     match pricing {
         Ok((total, currency)) => {
@@ -275,6 +316,78 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
             )
         }
     }
+}
+
+fn compare_variant(variant: Option<&str>) -> &'static str {
+    match variant.map(str::trim) {
+        Some("v2") => "v2",
+        _ => "v1",
+    }
+}
+
+fn estimated_burst_spans(fan: u32, depth: u32) -> u64 {
+    let mut total = 0_u64;
+    let mut level = 1_u64;
+    for _ in 0..depth {
+        level = level.saturating_mul(u64::from(fan));
+        total = total.saturating_add(level);
+        if total > MAX_BURST_SPANS {
+            return total;
+        }
+    }
+    total
+}
+
+fn clamp_shape(fan: u32, depth: u32) -> (u32, u32) {
+    let mut fan = fan.min(MAX_BURST_FAN);
+    let depth = depth.min(MAX_BURST_DEPTH);
+    if fan == 0 || depth == 0 {
+        return (0, 0);
+    }
+    while fan > 1 && estimated_burst_spans(fan, depth) > MAX_BURST_SPANS {
+        fan -= 1;
+    }
+    (fan, depth)
+}
+
+fn burst_span(level: u32) -> tracing::Span {
+    match level {
+        1 => tracing::info_span!("burst.l1", otel.kind = "internal"),
+        2 => tracing::info_span!("burst.l2", otel.kind = "internal"),
+        3 => tracing::info_span!("burst.l3", otel.kind = "internal"),
+        4 => tracing::info_span!("burst.l4", otel.kind = "internal"),
+        5 => tracing::info_span!("burst.l5", otel.kind = "internal"),
+        6 => tracing::info_span!("burst.l6", otel.kind = "internal"),
+        7 => tracing::info_span!("burst.l7", otel.kind = "internal"),
+        8 => tracing::info_span!("burst.l8", otel.kind = "internal"),
+        9 => tracing::info_span!("burst.l9", otel.kind = "internal"),
+        _ => tracing::info_span!("burst.l10", otel.kind = "internal"),
+    }
+}
+
+fn burst(level: u32, width: u32, depth: u32) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        if level > depth {
+            return;
+        }
+        let mut handles = Vec::with_capacity(width as usize);
+        for index in 0..width {
+            let span = burst_span(level);
+            let delay = std::time::Duration::from_millis(u64::from((level + index) % 5 + 1));
+            handles.push(tokio::spawn(
+                async move {
+                    tokio::time::sleep(delay).await;
+                    burst(level + 1, width, depth).await;
+                }
+                .instrument(span),
+            ));
+        }
+        for handle in handles {
+            if let Err(err) = handle.await {
+                tracing::warn!(error = %err, "burst task join failed");
+            }
+        }
+    })
 }
 
 fn emit_field_spike(screen: &str) {
@@ -666,4 +779,28 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     telemetry.shutdown();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamp_shape_bounds_fan_depth_and_estimated_spans() {
+        assert_eq!(clamp_shape(0, 3), (0, 0));
+        assert_eq!(clamp_shape(15, 2), (15, 2));
+
+        let (fan, depth) = clamp_shape(50, 20);
+        assert!(fan <= MAX_BURST_FAN);
+        assert_eq!(depth, MAX_BURST_DEPTH);
+        assert!(estimated_burst_spans(fan, depth) <= MAX_BURST_SPANS);
+    }
+
+    #[test]
+    fn compare_variant_defaults_to_v1_and_accepts_v2() {
+        assert_eq!(compare_variant(None), "v1");
+        assert_eq!(compare_variant(Some("v1")), "v1");
+        assert_eq!(compare_variant(Some("v2")), "v2");
+        assert_eq!(compare_variant(Some("other")), "v1");
+    }
 }
