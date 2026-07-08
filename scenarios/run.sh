@@ -12,6 +12,7 @@ a4              a4-reverse.sh                  fulfillment -> Kafka -> notificat
 a12             a12-cli-run.sh                 playground CLI checkout driver              Runs: command row with exit code; cargo build first
 a13             a13-deploy-regression.sh       clean checkout, then fail checkout           Issues: error spike while RELEASE=v2; release attribution lands in plan 042
 a18             a18-canary.sh                  fake sensitive canary corpus                 Issues/Logs: redaction of fake email/token/card/jwt corpus
+a27             a27-execution-stack.sh         CLI -> daemon -> container -> agent          Runs/Story: stitched beats; orphan child trace has browser_without_backend
 b-async-chaos   b-async-chaos.sh               consumer lag and poison message              Services/Traces: lag span and dead-letter error branch
 b-chaos         b-chaos.sh                     payment failure and latency                  Issues/Services: checkout error and slow-span rendering
 b-checkout-chaos b-checkout-chaos.sh           retry timeout and N+1 fan-out                Traces: retry/timeout branch and N+1 waterfall
@@ -28,6 +29,7 @@ scenario() {
     a12) echo "a12-cli-run.sh|Runs: command row with exit code; requires cargo build first" ;;
     a13) echo "a13-deploy-regression.sh|Issues: error spike while RELEASE=v2; release attribution lands in plan 042" ;;
     a18) echo "a18-canary.sh|Issues/Logs: redaction of fake email/token/card/jwt corpus" ;;
+    a27) echo "a27-execution-stack.sh|Runs/Story: stitched CLI -> daemon -> container -> agent beats; orphan child trace has browser_without_backend" ;;
     b-async-chaos) echo "b-async-chaos.sh|Services/Traces: lag span and dead-letter error branch" ;;
     b-chaos) echo "b-chaos.sh|Issues/Services: checkout error and slow-span rendering" ;;
     b-checkout-chaos) echo "b-checkout-chaos.sh|Traces: retry/timeout branch and N+1 waterfall" ;;

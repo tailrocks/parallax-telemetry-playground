@@ -21,7 +21,8 @@
 pub mod propagation;
 
 pub use propagation::{
-    inject_context_headers, inject_grpc_metadata, inject_headers, mark_span_error, set_parent_from,
+    context_env, current_context_env, extract_context_from_env, inject_context_headers,
+    inject_grpc_metadata, inject_headers, mark_span_error, set_parent_from, set_parent_from_env,
     set_parent_from_grpc, set_parent_from_grpc_metadata, set_parent_from_headers, traced_get,
 };
 
@@ -172,7 +173,7 @@ fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
         ),
     ];
     if let Ok(run_id) = std::env::var("PARALLAX_RUN_ID")
-        && !otel_resource_attrs_has("parallax.run.id")
+        && !run_id.trim().is_empty()
     {
         attributes.push(KeyValue::new("parallax.run.id", run_id));
     }
@@ -181,13 +182,4 @@ fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
 
 fn service_instance_id(service: &str) -> String {
     std::env::var("HOSTNAME").unwrap_or_else(|_| format!("{service}-{}", std::process::id()))
-}
-
-fn otel_resource_attrs_has(key: &str) -> bool {
-    std::env::var("OTEL_RESOURCE_ATTRIBUTES").is_ok_and(|attrs| {
-        attrs
-            .split(',')
-            .filter_map(|item| item.split_once('='))
-            .any(|(name, _)| name.trim() == key)
-    })
 }

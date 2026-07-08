@@ -12,6 +12,7 @@ rows here and in `run.sh`.
 | a12 | `a12-cli-run.sh` | Short-lived Rust CLI checkout driver. | Runs: command row with exit code; run `cargo build` first. `parallax run start -- scenarios/a12-cli-run.sh` is optional when you want run-scoped resource attrs. |
 | a13 | `a13-deploy-regression.sh` | Clean checkout, then failed checkout. | Issues: error spike while `RELEASE=v2`; release attribution lands in plan 042. |
 | a18 | `a18-canary.sh` | Fake sensitive canary corpus in telemetry. | Issues/Logs: redaction of fake email/token/card/jwt fields. |
+| a27 | `a27-execution-stack.sh` | Host CLI to daemon to simulated container and agent/tool spans, plus orphan variant. | Runs/Story: execution beats share one run id; orphan child trace shows `browser_without_backend`. |
 | b-async-chaos | `b-async-chaos.sh` | Consumer lag and poison message. | Services/Traces: lag span and dead-letter error branch. |
 | b-chaos | `b-chaos.sh` | Payment failure and injected latency. | Issues/Services: checkout error grouping and slow-span rendering. |
 | b-checkout-chaos | `b-checkout-chaos.sh` | Retry timeout and N+1 fan-out. | Traces: retry/timeout branch and N+1 waterfall. |

@@ -3,6 +3,7 @@ use opentelemetry::propagation::{Extractor, Injector};
 use opentelemetry::trace::{Status, TraceContextExt};
 use opentelemetry::{Context, global};
 use opentelemetry_http::{HeaderExtractor, HeaderInjector};
+use std::collections::BTreeMap;
 use tonic::metadata::{Ascii, KeyRef, MetadataKey, MetadataMap};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -26,6 +27,27 @@ pub fn inject_context_headers(context: &Context, headers: &mut HeaderMap) {
 
 pub fn inject_headers(headers: &mut HeaderMap) {
     inject_context_headers(&tracing::Span::current().context(), headers);
+}
+
+pub fn extract_context_from_env() -> Context {
+    let carrier = EnvExtractor::from_env();
+    global::get_text_map_propagator(|propagator| propagator.extract(&carrier))
+}
+
+pub fn set_parent_from_env(span: &tracing::Span) {
+    set_parent_if_valid(span, extract_context_from_env());
+}
+
+pub fn context_env(context: &Context) -> Vec<(String, String)> {
+    let mut carrier = EnvInjector::default();
+    global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(context, &mut carrier);
+    });
+    carrier.into_env()
+}
+
+pub fn current_context_env() -> Vec<(String, String)> {
+    context_env(&tracing::Span::current().context())
 }
 
 pub async fn traced_get(url: &str) -> reqwest::Result<reqwest::Response> {
@@ -75,6 +97,63 @@ impl Extractor for MetadataExtractor<'_> {
             .filter_map(|value| value.to_str().ok())
             .collect::<Vec<_>>();
         (!values.is_empty()).then_some(values)
+    }
+}
+
+#[derive(Default)]
+struct EnvInjector(BTreeMap<&'static str, String>);
+
+impl EnvInjector {
+    fn into_env(self) -> Vec<(String, String)> {
+        self.0
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect()
+    }
+}
+
+impl Injector for EnvInjector {
+    fn set(&mut self, key: &str, value: String) {
+        if let Some(key) = env_key(key) {
+            self.0.insert(key, value);
+        }
+    }
+}
+
+struct EnvExtractor {
+    values: BTreeMap<&'static str, String>,
+}
+
+impl EnvExtractor {
+    fn from_env() -> Self {
+        let mut values = BTreeMap::new();
+        for key in ["TRACEPARENT", "TRACESTATE", "BAGGAGE"] {
+            if let Ok(value) = std::env::var(key)
+                && !value.trim().is_empty()
+            {
+                values.insert(key, value);
+            }
+        }
+        Self { values }
+    }
+}
+
+impl Extractor for EnvExtractor {
+    fn get(&self, key: &str) -> Option<&str> {
+        env_key(key).and_then(|key| self.values.get(key).map(String::as_str))
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.values.keys().copied().collect()
+    }
+}
+
+fn env_key(key: &str) -> Option<&'static str> {
+    match key.to_ascii_lowercase().as_str() {
+        "traceparent" => Some("TRACEPARENT"),
+        "tracestate" => Some("TRACESTATE"),
+        "baggage" => Some("BAGGAGE"),
+        _ => None,
     }
 }
 
@@ -135,5 +214,23 @@ mod tests {
         let extracted = extract_context(&headers);
 
         assert_eq!(extracted.span().span_context().trace_id(), trace_id);
+    }
+
+    #[test]
+    fn env_carrier_injects_trace_context_names() {
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        let trace_id = TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").expect("trace id");
+        let span_context = SpanContext::new(
+            trace_id,
+            SpanId::from_hex("00f067aa0ba902b7").expect("span id"),
+            TraceFlags::SAMPLED,
+            true,
+            TraceState::default(),
+        );
+        let context = Context::new().with_remote_span_context(span_context);
+        let vars = context_env(&context);
+
+        assert!(vars.iter().any(|(key, _)| key == "TRACEPARENT"));
+        assert!(vars.iter().all(|(key, _)| key == &key.to_ascii_uppercase()));
     }
 }
