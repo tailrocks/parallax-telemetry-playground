@@ -12,12 +12,18 @@
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::{Json, Router, extract::Query, routing::get};
+use open_feature::EvaluationContext;
+use open_feature::provider::FeatureProvider;
+use open_feature_flagd::{FlagdOptions, FlagdProvider, ResolverType};
 use playground_proto::pricing::v1::QuoteRequest;
 use playground_proto::pricing::v1::pricing_client::PricingClient;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tokio::sync::OnceCell;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::Instrument;
+
+static FLAGD_PROVIDER: OnceCell<FlagdProvider> = OnceCell::const_new();
 
 /// Query flags arrive as `1`/`true`/`yes`/`on`; serde's bool wants `true`/`false`.
 fn de_flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
@@ -85,7 +91,7 @@ fn default_qty() -> u32 {
     1
 }
 
-fn flag(name: &str) -> bool {
+fn env_flag(name: &str) -> bool {
     std::env::var(name).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
@@ -96,8 +102,17 @@ async fn checkout(headers: HeaderMap, Query(p): Query<CheckoutParams>) -> impl I
 }
 
 async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
-    if p.slow > 0 {
-        tokio::time::sleep(std::time::Duration::from_millis(p.slow)).await;
+    let payment_failure_flag = feature_flag("paymentFailure", "PAYMENT_FAILURE").await;
+    let slow_query_flag = feature_flag("slowQuery", "SLOW_QUERY").await;
+    let slow_ms = if p.slow > 0 {
+        p.slow
+    } else if slow_query_flag {
+        250
+    } else {
+        0
+    };
+    if slow_ms > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(slow_ms)).await;
     }
     // A10: business context as baggage (propagated downstream in the full design).
     if let Some(tenant) = &p.tenant {
@@ -119,7 +134,7 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
         }
         tracing::warn!(cpu_ms = p.cpu_ms, iterations = x, "high-CPU hot path");
     }
-    if p.canary || flag("CANARY") {
+    if p.canary || env_flag("CANARY") {
         // A18: plant a redaction canary corpus so backends can be compared on
         // raw-vs-scrubbed. These are FAKE secrets for redaction testing only.
         tracing::warn!(
@@ -141,10 +156,10 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
     }
     // B12: release-attributed regression — RELEASE=v2 fails (vs v1 clean).
     let release_regressed = std::env::var("RELEASE").as_deref() == Ok("v2");
-    if p.fail || flag("PAYMENT_FAILURE") || release_regressed {
+    if p.fail || payment_failure_flag || release_regressed {
         // B1/B12: deliberate failure → error issue + ERROR span status.
         playground_telemetry::mark_span_error("payment_failure");
-        tracing::error!(sku = %p.sku, release_regressed, "payment failure (chaos)");
+        tracing::error!(sku = %p.sku, payment_failure_flag, release_regressed, "payment failure (chaos)");
         // B4: cascading failure → degrade to a partial 200 when asked, else 502.
         if p.degrade {
             tracing::warn!("degraded: returning partial result without pricing");
@@ -196,6 +211,64 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
             )
         }
     }
+}
+
+async fn feature_flag(flag_key: &'static str, env_name: &'static str) -> bool {
+    let env_override = env_flag(env_name);
+    let mut provider_name = "flagd";
+    let mut provider_value = false;
+    let mut variant = "off".to_string();
+    let mut error = String::new();
+
+    match flagd_provider().await {
+        Ok(provider) => match provider
+            .resolve_bool_value(flag_key, &EvaluationContext::default())
+            .await
+        {
+            Ok(details) => {
+                provider_value = details.value;
+                variant = details
+                    .variant
+                    .unwrap_or_else(|| if provider_value { "on" } else { "off" }.to_string());
+            }
+            Err(err) => {
+                provider_name = "env";
+                error = format!("{err:?}");
+            }
+        },
+        Err(err) => {
+            provider_name = "env";
+            error = err.to_string();
+        }
+    }
+
+    let effective = provider_value || env_override;
+    if env_override {
+        variant = "env-on".to_string();
+    }
+    tracing::info!(
+        "feature_flag.key" = flag_key,
+        "feature_flag.provider_name" = provider_name,
+        "feature_flag.variant" = %variant,
+        "feature_flag.value" = effective,
+        "feature_flag.env_override" = env_override,
+        "feature_flag.error" = %error,
+        "feature_flag.evaluation"
+    );
+    effective
+}
+
+async fn flagd_provider() -> anyhow::Result<&'static FlagdProvider> {
+    FLAGD_PROVIDER
+        .get_or_try_init(|| async {
+            FlagdProvider::new(FlagdOptions {
+                resolver_type: ResolverType::Rpc,
+                ..Default::default()
+            })
+            .await
+            .map_err(anyhow::Error::new)
+        })
+        .await
 }
 
 /// B3: bounded retry with a per-attempt deadline around the pricing call.

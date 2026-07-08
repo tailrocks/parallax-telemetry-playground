@@ -1,5 +1,9 @@
 package dev.tailrocks.catalog;
 
+import dev.openfeature.contrib.providers.flagd.FlagdProvider;
+import dev.openfeature.sdk.BooleanHook;
+import dev.openfeature.sdk.FlagEvaluationDetails;
+import dev.openfeature.sdk.HookContext;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.graphql.data.method.annotation.Argument;
@@ -9,18 +13,26 @@ import org.springframework.graphql.data.method.annotation.SubscriptionMapping;
 import org.springframework.stereotype.Controller;
 import dev.openfeature.sdk.OpenFeatureAPI;
 import dev.openfeature.sdk.Client;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.trace.Span;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import reactor.core.publisher.Flux;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @SpringBootApplication
 public class CatalogApplication {
     public static void main(String[] args) {
+        OpenFeatureAPI api = OpenFeatureAPI.getInstance();
+        api.addHooks(new FeatureFlagSpanEventHook());
+        api.setProvider(new FlagdProvider());
         SpringApplication.run(CatalogApplication.class, args);
     }
 }
@@ -60,7 +72,12 @@ class ProductController {
     List<Product> products() {
         productQueries.increment();
         boolean promo = flags.getBooleanValue("catalogPromo", false);
-        return promo ? CATALOG : CATALOG;
+        Span.current().setAttribute("catalog.promo", promo);
+        var products = new ArrayList<>(CATALOG);
+        if (promo) {
+            Collections.reverse(products);
+        }
+        return products;
     }
 
     // A6: per-product `reviews` resolved via a @BatchMapping — Spring GraphQL
@@ -89,5 +106,31 @@ class ProductController {
                     base.priceMinor() + jitter);
             })
             .take(10);
+    }
+}
+
+class FeatureFlagSpanEventHook implements BooleanHook {
+    @Override
+    public void after(
+        HookContext<Boolean> ctx,
+        FlagEvaluationDetails<Boolean> details,
+        Map<String, Object> hints
+    ) {
+        Span.current().addEvent("feature_flag.evaluation", Attributes.builder()
+            .put("feature_flag.key", ctx.getFlagKey())
+            .put("feature_flag.provider_name", "flagd")
+            .put("feature_flag.variant", Optional.ofNullable(details.getVariant()).orElse(""))
+            .put("feature_flag.value", Boolean.TRUE.equals(details.getValue()))
+            .build());
+    }
+
+    @Override
+    public void error(HookContext<Boolean> ctx, Exception error, Map<String, Object> hints) {
+        Span.current().addEvent("feature_flag.evaluation", Attributes.builder()
+            .put("feature_flag.key", ctx.getFlagKey())
+            .put("feature_flag.provider_name", "flagd")
+            .put("feature_flag.variant", "error")
+            .put("feature_flag.error", error.getClass().getSimpleName())
+            .build());
     }
 }

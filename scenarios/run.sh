@@ -10,7 +10,8 @@ a1              a1-checkout.sh                 checkout -> pricing/inventory/rec
 a3              a3-async.sh                    orders producer/consumer                    Trace detail: producer span linked to consumer trace
 a4              a4-reverse.sh                  fulfillment -> Kafka -> notifications        Trace detail: Java async span link and Java -> Rust hop
 a12             a12-cli-run.sh                 playground CLI checkout driver              Runs: command row with exit code; cargo build first
-a13             a13-deploy-regression.sh       clean checkout, then fail checkout           Issues: error spike while RELEASE=v2; release attribution lands in plan 042
+a13             a13-deploy-regression.sh       checkout v1 then v2 recreate                Issues: error spike attributed to service.version=v2
+a14             a14-flag-flip.sh               flagd paymentFailure off/on/off              Traces/Issues: feature_flag events and flag-scoped failures
 a18             a18-canary.sh                  fake sensitive canary corpus                 Issues/Logs: redaction of fake email/token/card/jwt corpus
 a27             a27-execution-stack.sh         CLI -> daemon -> container -> agent          Runs/Story: stitched beats; orphan child trace has browser_without_backend
 b-async-chaos   b-async-chaos.sh               consumer lag and poison message              Services/Traces: lag span and dead-letter error branch
@@ -27,7 +28,8 @@ scenario() {
     a3) echo "a3-async.sh|Trace detail: producer span with link to consumer trace" ;;
     a4) echo "a4-reverse.sh|Trace detail: Java producer/consumer link plus Java -> Rust notifications hop" ;;
     a12) echo "a12-cli-run.sh|Runs: command row with exit code; requires cargo build first" ;;
-    a13) echo "a13-deploy-regression.sh|Issues: error spike while RELEASE=v2; release attribution lands in plan 042" ;;
+    a13) echo "a13-deploy-regression.sh|Issues: error spike attributed to service.version=v2" ;;
+    a14) echo "a14-flag-flip.sh|Traces/Issues: feature_flag events and flag-scoped failures" ;;
     a18) echo "a18-canary.sh|Issues/Logs: redaction of fake email/token/card/jwt corpus" ;;
     a27) echo "a27-execution-stack.sh|Runs/Story: stitched CLI -> daemon -> container -> agent beats; orphan child trace has browser_without_backend" ;;
     b-async-chaos) echo "b-async-chaos.sh|Services/Traces: lag span and dead-letter error branch" ;;

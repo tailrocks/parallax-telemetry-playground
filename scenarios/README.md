@@ -10,7 +10,8 @@ rows here and in `run.sh`.
 | a3 | `a3-async.sh` | Orders producer/consumer branch. | Trace detail: producer span with link to consumer trace. |
 | a4 | `a4-reverse.sh` | Java fulfillment produces to Kafka, consumes, then calls Rust notifications. | Trace detail: Java async span link plus Java -> Rust hop. |
 | a12 | `a12-cli-run.sh` | Short-lived Rust CLI checkout driver. | Runs: command row with exit code; run `cargo build` first. `parallax run start -- scenarios/a12-cli-run.sh` is optional when you want run-scoped resource attrs. |
-| a13 | `a13-deploy-regression.sh` | Clean checkout, then failed checkout. | Issues: error spike while `RELEASE=v2`; release attribution lands in plan 042. |
+| a13 | `a13-deploy-regression.sh` | Recreate checkout as `RELEASE=v1`, then `RELEASE=v2` (`A13_BUILD=1` rebuilds images first). | Issues: checkout error spike attributed to `service.version=v2`; release strip lands in plan 041. |
+| a14 | `a14-flag-flip.sh` | Flip flagd `paymentFailure` off/on/off without restarting checkout. | Trace detail: `feature_flag.evaluation` events; Issues: failures only while flag is on. |
 | a18 | `a18-canary.sh` | Fake sensitive canary corpus in telemetry. | Issues/Logs: redaction of fake email/token/card/jwt fields. |
 | a27 | `a27-execution-stack.sh` | Host CLI to daemon to simulated container and agent/tool spans, plus orphan variant. | Runs/Story: execution beats share one run id; orphan child trace shows `browser_without_backend`. |
 | b-async-chaos | `b-async-chaos.sh` | Consumer lag and poison message. | Services/Traces: lag span and dead-letter error branch. |

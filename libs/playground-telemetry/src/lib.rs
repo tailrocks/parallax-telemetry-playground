@@ -79,6 +79,7 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
     let resource = Resource::builder()
         .with_attributes(resource_attributes(service))
         .build();
+    let release = release();
 
     // --- Traces ---
     let span_exporter = opentelemetry_otlp::SpanExporter::builder()
@@ -127,7 +128,7 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
         dsn: std::env::var("SENTRY_DSN")
             .ok()
             .and_then(|d| d.parse().ok()),
-        release: Some(env!("CARGO_PKG_VERSION").into()),
+        release: Some(release.into()),
         environment: Some(
             std::env::var("PARALLAX_ENV")
                 .unwrap_or_else(|_| "lab".into())
@@ -164,7 +165,7 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
 fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
     let mut attributes = vec![
         KeyValue::new(SERVICE_NAME, service),
-        KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
+        KeyValue::new(SERVICE_VERSION, release()),
         KeyValue::new("service.namespace", "playground"),
         KeyValue::new("service.instance.id", service_instance_id(service)),
         KeyValue::new(
@@ -177,9 +178,51 @@ fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
     {
         attributes.push(KeyValue::new("parallax.run.id", run_id));
     }
+    if let Some(git_sha) = non_empty_env("GIT_SHA") {
+        attributes.push(KeyValue::new("vcs.ref.head.revision", git_sha));
+    }
     attributes
 }
 
 fn service_instance_id(service: &str) -> String {
     std::env::var("HOSTNAME").unwrap_or_else(|_| format!("{service}-{}", std::process::id()))
+}
+
+fn release() -> String {
+    release_from(std::env::var("RELEASE").ok())
+}
+
+fn release_from(value: Option<String>) -> String {
+    value
+        .and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+}
+
+fn non_empty_env(name: &str) -> Option<String> {
+    std::env::var(name).ok().and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn release_uses_env_value_when_present() {
+        assert_eq!(release_from(Some("v2".to_string())), "v2");
+    }
+
+    #[test]
+    fn release_falls_back_to_crate_version() {
+        assert_eq!(release_from(None), env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            release_from(Some("  ".to_string())),
+            env!("CARGO_PKG_VERSION")
+        );
+    }
 }

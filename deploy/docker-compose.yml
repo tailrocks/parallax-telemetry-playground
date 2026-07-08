@@ -24,15 +24,22 @@ x-otlp: &otlp
   OTEL_METRICS_EXPORTER: "otlp"
   OTEL_LOGS_EXPORTER: "otlp"
   OTEL_PROPAGATORS: "tracecontext,baggage"
-  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=playground"
-  PARALLAX_ENV: "playground"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+  PARALLAX_ENV: "${PLAYGROUND_ENV:-playground}"
 
 services:
   checkout:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: checkout } }
-    environment: { <<: *otlp, PRICING_ENDPOINT: "http://pricing:50051", CHECKOUT_ADDR: "0.0.0.0:8088" }
+    environment:
+      <<: *otlp
+      PRICING_ENDPOINT: "http://pricing:50051"
+      CHECKOUT_ADDR: "0.0.0.0:8088"
+      RELEASE: "${RELEASE:-v1}"
+      GIT_SHA: "${GIT_SHA:-}"
+      FLAGD_HOST: "flagd"
+      FLAGD_CACHE: "disabled"
     ports: ["8088:8088"]
-    depends_on: [pricing]
+    depends_on: [pricing, inventory, recommendation, flagd]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
@@ -99,9 +106,10 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
       OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "catalog"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=0.1.0,service.namespace=playground,deployment.environment.name=${PARALLAX_ENV:-lab}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       FLAGD_HOST: "flagd"
+      FLAGD_CACHE: "disabled"
       SERVER_PORT: "8080"
     ports: ["8080:8080"] # GraphQL (browser → catalog)
     depends_on: [flagd]
@@ -115,7 +123,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
       OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "payment"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=0.1.0,service.namespace=playground,deployment.environment.name=${PARALLAX_ENV:-lab}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       SPRING_GRPC_SERVER_PORT: "9090"
     extra_hosts: ["host.docker.internal:host-gateway"]
@@ -128,7 +136,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
       OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "fulfillment"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=0.1.0,service.namespace=playground,deployment.environment.name=${PARALLAX_ENV:-lab}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       KAFKA_BROKERS: "broker:9092"
       NOTIFICATIONS_URL: "http://notifications:8091"
