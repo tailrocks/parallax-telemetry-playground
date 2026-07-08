@@ -109,6 +109,8 @@ services:
       OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "catalog"
       OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+      OTEL_INSTRUMENTATION_GRAPHQL_DATA_FETCHER_ENABLED: "true"
+      OTEL_INSTRUMENTATION_GRAPHQL_OPERATION_NAME_IN_SPAN_NAME_ENABLED: "false"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
       OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
       SENTRY_DSN: "${SENTRY_DSN:-}"

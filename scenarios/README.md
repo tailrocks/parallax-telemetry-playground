@@ -7,6 +7,8 @@ rows here and in `run.sh`.
 | ID | Script | Drives | Check in Parallax UI |
 |---|---|---|---|
 | a1 | `a1-checkout.sh` | Checkout through pricing, inventory, and recommendation. | Traces: one checkout waterfall with pricing, inventory, and recommendation children. |
+| a6 | `a6-graphql.sh` | Catalog GraphQL products queries: batched reviews, `reviewsSlow` N+1, partial `riskScore` error, and random operation name. | Traces: batched shape has one reviews/DataLoader fetch; N+1 has one `reviewsSlow` field span per product; partial error stays HTTP 200 with field error; op-name trace stays low-cardinality. |
+| a7 | `a7-subscription.ts` | Catalog `priceChanges` GraphQL-over-WebSocket subscription via Bun native WebSocket. | Traces: long-lived subscription / data-fetcher span emits price events. |
 | a3 | `a3-async.sh` | Orders producer/consumer branch. | Trace detail: producer span with link to consumer trace. |
 | a4 | `a4-reverse.sh` | Java fulfillment produces to Kafka, consumes, then calls Rust notifications. | Trace detail: Java async span link plus Java -> Rust hop. |
 | a9 | `a9-field-spike.sh` | Checkout emits baseline logs plus a dominant structured WARN burst. | Logs/Field Explorer: `app_screen_name=workspace-select` dominates the spike window. |

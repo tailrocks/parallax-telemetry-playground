@@ -7,6 +7,8 @@ catalog() {
   cat <<'TABLE'
 ID              Script                         Drives                                      Check in Parallax UI
 a1              a1-checkout.sh                 checkout -> pricing/inventory/recommendation Traces: checkout waterfall with downstream children
+a6              a6-graphql.sh                  catalog GraphQL field-span family            Traces: batched vs N+1, partial error, op-name policy
+a7              a7-subscription.ts             catalog GraphQL subscription smoke            Traces: long-lived priceChanges subscription span
 a9              a9-field-spike.sh              checkout structured log burst                Logs/Field Explorer: app_screen_name dominated by workspace-select
 a3              a3-async.sh                    orders producer/consumer                    Trace detail: producer span linked to consumer trace
 a4              a4-reverse.sh                  fulfillment -> Kafka -> notifications        Trace detail: Java async span link and Java -> Rust hop
@@ -32,6 +34,8 @@ TABLE
 scenario() {
   case "$1" in
     a1) echo "a1-checkout.sh|Traces: checkout waterfall with pricing, inventory, and recommendation children" ;;
+    a6) echo "a6-graphql.sh|Traces: batched reviews vs reviewsSlow N+1 shape, partial riskScore error, op-name policy" ;;
+    a7) echo "a7-subscription.ts|Traces: long-lived priceChanges subscription span; run with Bun" ;;
     a9) echo "a9-field-spike.sh|Logs/Field Explorer: app_screen_name dominated by workspace-select in the spike window" ;;
     a3) echo "a3-async.sh|Trace detail: producer span with link to consumer trace" ;;
     a4) echo "a4-reverse.sh|Trace detail: Java producer/consumer link plus Java -> Rust notifications hop" ;;
@@ -70,7 +74,9 @@ fi
 
 script="${entry%%|*}"
 check="${entry#*|}"
-if [[ "$id" == "b20" ]]; then
+if [[ "$id" == "a7" ]]; then
+  bun "$SCRIPT_DIR/$script"
+elif [[ "$id" == "b20" ]]; then
   "$SCRIPT_DIR/$script" --yes
 else
   "$SCRIPT_DIR/$script"

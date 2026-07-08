@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.graphql.data.method.annotation.Argument;
 import org.springframework.graphql.data.method.annotation.BatchMapping;
 import org.springframework.graphql.data.method.annotation.QueryMapping;
+import org.springframework.graphql.data.method.annotation.SchemaMapping;
 import org.springframework.graphql.data.method.annotation.SubscriptionMapping;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,8 +17,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import dev.openfeature.sdk.OpenFeatureAPI;
 import dev.openfeature.sdk.Client;
+import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Scope;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import reactor.core.publisher.Flux;
@@ -50,6 +54,8 @@ record HeapPressureResult(int requestedMb, int allocatedMb, long requestedHoldMs
 class ProductController {
     private static final int MAX_HEAP_MB = 256;
     private static final long MAX_HEAP_HOLD_MS = 30_000;
+    private static final String PARTIAL_ERROR_SKU = "GADGET-1";
+    private static final Tracer TRACER = GlobalOpenTelemetry.getTracer("catalog-graphql-scenarios");
     private static final List<Product> CATALOG = List.of(
         new Product("1", "WIDGET-1", "Widget", 1999),
         new Product("2", "GADGET-1", "Gadget", 4999)
@@ -109,13 +115,53 @@ class ProductController {
     // A6: per-product `reviews` resolved via a @BatchMapping — Spring GraphQL
     // batches all products' review fetches into ONE DataLoader call, so the
     // trace shows a single batched fetch instead of an N+1 fan of per-product
-    // calls. Contrast with a plain @SchemaMapping (which would be N+1).
+    // calls. The OTel Java agent still emits one data-fetcher span per product
+    // field, so we add a single scenario span around the actual batch fetch to
+    // make the fetch pattern explicit and stable.
     @BatchMapping
     Map<Product, List<Review>> reviews(List<Product> products) {
-        return products.stream().collect(Collectors.toMap(
-            p -> p,
-            p -> List.of(new Review("solid " + p.name(), 5), new Review("ok", 3))
-        ));
+        Span span = TRACER.spanBuilder("catalog.reviews.batch").startSpan();
+        try (Scope ignored = span.makeCurrent()) {
+            span.setAttribute("catalog.fetch_pattern", "batched");
+            span.setAttribute("catalog.product.count", products.size());
+            return products.stream().collect(Collectors.toMap(
+                p -> p,
+                this::reviewsFor
+            ));
+        } finally {
+            span.end();
+        }
+    }
+
+    // A6b: same data as `reviews`, intentionally fetched one product at a
+    // time. With GraphQL data-fetcher spans on, Parallax shows the N+1 fan.
+    @SchemaMapping(typeName = "Product", field = "reviewsSlow")
+    List<Review> reviewsSlow(Product product) {
+        Span.current().setAttribute("catalog.fetch_pattern", "n_plus_one");
+        Span.current().setAttribute("catalog.product.sku", product.sku());
+        Span span = TRACER.spanBuilder("catalog.reviews.single").startSpan();
+        try (Scope ignored = span.makeCurrent()) {
+            span.setAttribute("catalog.fetch_pattern", "n_plus_one");
+            span.setAttribute("catalog.product.sku", product.sku());
+            return reviewsFor(product);
+        } finally {
+            span.end();
+        }
+    }
+
+    // Partial-error case: GraphQL returns HTTP 200 with errors[] and a null
+    // field for one deterministic product.
+    @SchemaMapping(typeName = "Product", field = "riskScore")
+    Float riskScore(Product product) {
+        Span.current().setAttribute("catalog.product.sku", product.sku());
+        if (PARTIAL_ERROR_SKU.equals(product.sku())) {
+            throw new IllegalStateException("risk score unavailable for " + PARTIAL_ERROR_SKU);
+        }
+        return product.priceMinor() > 3000 ? 0.72f : 0.18f;
+    }
+
+    private List<Review> reviewsFor(Product product) {
+        return List.of(new Review("solid " + product.name(), 5), new Review("ok", 3));
     }
 
     // A7: GraphQL subscription — a long-lived streaming span. The data-fetcher
