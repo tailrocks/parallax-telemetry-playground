@@ -1,0 +1,7 @@
+.git
+.DS_Store
+target
+web/node_modules
+web/.nitro
+web/.output
+node_modules

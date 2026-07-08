@@ -60,10 +60,13 @@ Use this path after `parallax serve` is running in the Parallax repo.
 
 ## 9. RUM Journey
 
-- Command: after plan 050.
+- Command: `scenarios/run.sh a28`.
 - Route: Traces, Services
-- See: browser-to-backend trace plus web vitals.
-- Proves: frontend symptoms can connect to backend causes.
+- See: browser route/user-step spans, `session.id`, web vital spans, a browser
+  exception stitched to checkout, and the `?nopropagate=1` broken-continuation
+  gap.
+- Proves: frontend symptoms can connect to backend causes, and missing
+  propagation is visible as an evidence gap.
 
 ## 10. Telemetry Quality
 

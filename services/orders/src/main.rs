@@ -7,7 +7,7 @@
 //! Chaos: POST /order?poison=1 → the consumer fails repeatedly with redelivery
 //! (B8); POST /order?lag_ms=<n> → slow consumer to build queue depth (B7).
 
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, header};
 use axum::{Json, Router, extract::Query, extract::State, routing::post};
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::{Context, global};
@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -203,6 +204,23 @@ fn next_order_id() -> String {
     format!("order-{}-{seq}", std::process::id())
 }
 
+fn cors_layer() -> CorsLayer {
+    let origin = std::env::var("WEB_ORIGIN")
+        .ok()
+        .and_then(|origin| origin.parse::<HeaderValue>().ok())
+        .map(AllowOrigin::exact)
+        .unwrap_or_else(AllowOrigin::mirror_request);
+    CorsLayer::new()
+        .allow_origin(origin)
+        .allow_methods([Method::POST])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            HeaderName::from_static("traceparent"),
+            HeaderName::from_static("tracestate"),
+            HeaderName::from_static("baggage"),
+        ])
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let telemetry = playground_telemetry::init("orders")?;
@@ -251,7 +269,8 @@ async fn main() -> anyhow::Result<()> {
     });
     let app = Router::new()
         .route("/order", post(publish))
-        .with_state(App { tx, queue_depth });
+        .with_state(App { tx, queue_depth })
+        .layer(cors_layer());
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8092".into());
     tracing::info!(%addr, "orders HTTP listening");
     axum::serve(tokio::net::TcpListener::bind(&addr).await?, app)
