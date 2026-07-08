@@ -50,6 +50,26 @@ pub const TOKIO_RUNTIME_METRIC_NAMES: &[&str] = &[
     "tokio.runtime.total_busy_duration_ms",
 ];
 
+pub fn db_span(
+    operation_name: &'static str,
+    query_summary: &'static str,
+    query_text: &'static str,
+) -> tracing::Span {
+    // Playground lab emits full query text on purpose. SQL uses bind params only;
+    // never interpolate user input into `db.query.text`.
+    tracing::info_span!(
+        "postgres.query",
+        otel.kind = "client",
+        "db.system.name" = "postgresql",
+        "db.namespace" = "playground",
+        "db.operation.name" = operation_name,
+        "db.query.summary" = query_summary,
+        "db.query.text" = query_text,
+        "server.address" = "postgres",
+        "server.port" = 5432_i64,
+    )
+}
+
 /// Initialized telemetry. Hold the `_sentry` guard for the process lifetime and
 /// call `shutdown()` before exit so buffered spans/logs/metrics are flushed.
 pub struct Telemetry {

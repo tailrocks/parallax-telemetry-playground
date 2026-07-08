@@ -52,7 +52,14 @@ services:
 
   inventory:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: inventory } }
-    environment: { <<: *otlp, ADDR: "0.0.0.0:8089" }
+    environment:
+      <<: *otlp
+      ADDR: "0.0.0.0:8089"
+      DATABASE_URL: "postgres://postgres:${POSTGRES_PASSWORD:-playground}@postgres:5432/playground"
+    ports: ["8089:8089"]
+    depends_on:
+      postgres:
+        condition: service_healthy
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
@@ -79,6 +86,12 @@ services:
   postgres:
     image: postgres:17
     environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}", POSTGRES_DB: playground }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d playground"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     networks: [pg]
 
   broker:

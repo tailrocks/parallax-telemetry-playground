@@ -34,6 +34,9 @@ tokio-stream = "0.1"
 prost = "0.14"
 tonic-prost-build = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls", "http2"] }
+# In-network Postgres is plaintext. If TLS is ever needed, use sqlx's
+# `tls-native-tls` feature; never rustls in this repo.
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "macros"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
