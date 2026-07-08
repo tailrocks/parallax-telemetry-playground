@@ -19,11 +19,14 @@ import dev.openfeature.sdk.OpenFeatureAPI;
 import dev.openfeature.sdk.Client;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.logs.Severity;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
@@ -52,6 +55,9 @@ record HeapPressureResult(int requestedMb, int allocatedMb, long requestedHoldMs
 
 @Controller
 class ProductController {
+    private static final org.slf4j.Logger LOG = LoggerFactory.getLogger(ProductController.class);
+    private static final io.opentelemetry.api.logs.Logger EVENT_LOGGER =
+        GlobalOpenTelemetry.get().getLogsBridge().get("catalog.events");
     private static final int MAX_HEAP_MB = 256;
     private static final long MAX_HEAP_HOLD_MS = 30_000;
     private static final String PARTIAL_ERROR_SKU = "GADGET-1";
@@ -90,7 +96,31 @@ class ProductController {
         if (promo) {
             Collections.reverse(products);
         }
+        try (
+            var ignoredEvent = MDC.putCloseable("event.name", "catalog.products.served");
+            var ignoredCount = MDC.putCloseable("product.count", String.valueOf(products.size()));
+            var ignoredPromo = MDC.putCloseable("catalog.promo", String.valueOf(promo))
+        ) {
+            LOG.atInfo()
+                .addKeyValue("event.name", "catalog.products.served")
+                .addKeyValue("product.count", products.size())
+                .addKeyValue("catalog.promo", promo)
+                .log("catalog products served");
+        }
+        emitCatalogProductsServed(products.size(), promo);
         return products;
+    }
+
+    private static void emitCatalogProductsServed(int productCount, boolean promo) {
+        EVENT_LOGGER.logRecordBuilder()
+            .setEventName("catalog.products.served")
+            .setSeverity(Severity.INFO)
+            .setBody("catalog.products.served")
+            .setAllAttributes(Attributes.builder()
+                .put("product.count", (long) productCount)
+                .put("catalog.promo", promo)
+                .build())
+            .emit();
     }
 
     @GetMapping("/chaos/heap")

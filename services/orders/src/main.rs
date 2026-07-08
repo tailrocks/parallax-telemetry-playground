@@ -117,6 +117,13 @@ async fn consume(msg: Msg, attempt: u32) {
             playground_telemetry::mark_span_error("poison_message");
             tracing::error!(order_id = %msg.order_id, attempt, "poison message; consume failed, redelivering");
         } else {
+            playground_telemetry::emit_event(
+                "order.consumed",
+                &[
+                    ("order_id", msg.order_id.clone()),
+                    ("poison", msg.poison.to_string()),
+                ],
+            );
             tracing::info!(order_id = %msg.order_id, orphan = msg.orphan, "order consumed");
         }
     }

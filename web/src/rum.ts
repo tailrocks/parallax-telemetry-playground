@@ -27,3 +27,12 @@ export async function tracedFetch(
   const telemetry = await import("./telemetry");
   return telemetry.tracedFetch(input, init);
 }
+
+export async function emitTypedEvent(
+  name: string,
+  attributes: RumAttributes = {},
+) {
+  if (typeof window === "undefined") return;
+  const telemetry = await import("./telemetry");
+  telemetry.emitTypedEvent(name, attributes);
+}

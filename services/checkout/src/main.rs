@@ -201,6 +201,13 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
     if p.fail || payment_failure_flag || release_regressed {
         // B1/B12: deliberate failure → error issue + ERROR span status.
         playground_telemetry::mark_span_error("payment_failure");
+        playground_telemetry::emit_event(
+            "checkout.failed",
+            &[
+                ("sku", p.sku.clone()),
+                ("error.type", "payment_failure".to_string()),
+            ],
+        );
         tracing::error!(sku = %p.sku, payment_failure_flag, release_regressed, "payment failure (chaos)");
         // B4: cascading failure → degrade to a partial 200 when asked, else 502.
         if p.degrade {
@@ -231,6 +238,14 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
 
     match pricing {
         Ok((total, currency)) => {
+            playground_telemetry::emit_event(
+                "checkout.completed",
+                &[
+                    ("sku", p.sku.clone()),
+                    ("quantity", p.quantity.to_string()),
+                    ("order.total", total.to_string()),
+                ],
+            );
             tracing::info!(sku = %p.sku, total, "checkout ok");
             (
                 StatusCode::OK,
@@ -246,6 +261,13 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
         }
         Err(err) => {
             playground_telemetry::mark_span_error("pricing_unavailable");
+            playground_telemetry::emit_event(
+                "checkout.failed",
+                &[
+                    ("sku", p.sku.clone()),
+                    ("error.type", "pricing_unavailable".to_string()),
+                ],
+            );
             tracing::error!(error = %err, "pricing call failed");
             (
                 StatusCode::BAD_GATEWAY,

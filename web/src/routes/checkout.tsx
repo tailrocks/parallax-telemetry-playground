@@ -1,6 +1,6 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { runTracedStep, tracedFetch, trackStep } from "../rum";
+import { emitTypedEvent, runTracedStep, tracedFetch, trackStep } from "../rum";
 
 export const Route = createFileRoute("/checkout")({
   component: CheckoutPage,
@@ -37,6 +37,10 @@ function CheckoutPage() {
           "telemetry.propagation.disabled": nopropagate,
         },
         async () => {
+          await emitTypedEvent("web.checkout.submitted", {
+            sku,
+            quantity,
+          });
           const res = nopropagate
             ? await fetch(`${base}/checkout?${query}`)
             : await tracedFetch(`${base}/checkout?${query}`);
@@ -98,7 +102,9 @@ function CheckoutPage() {
             onChange={(event) => setQuantity(Number(event.target.value))}
           />
         </label>
-        <button type="submit">submit checkout</button>
+        <button type="button" onClick={() => void submit()}>
+          submit checkout
+        </button>
       </form>
       <pre>{status}</pre>
       <p>

@@ -26,16 +26,18 @@ pub use propagation::{
     set_parent_from_grpc, set_parent_from_grpc_metadata, set_parent_from_headers, traced_get,
 };
 
+use opentelemetry::logs::{AnyValue, LogRecord, Logger, LoggerProvider as _, Severity};
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::logs::{SdkLogger, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
+use std::sync::OnceLock;
 use std::time::Duration;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::filter_fn;
@@ -50,6 +52,8 @@ pub const TOKIO_RUNTIME_METRIC_NAMES: &[&str] = &[
     "tokio.runtime.total_park_count",
     "tokio.runtime.total_busy_duration_ms",
 ];
+
+static EVENT_LOGGER: OnceLock<SdkLogger> = OnceLock::new();
 
 pub fn db_span(
     operation_name: &'static str,
@@ -69,6 +73,36 @@ pub fn db_span(
         "server.address" = "postgres",
         "server.port" = 5432_i64,
     )
+}
+
+/// Emit a typed OTel log event (EventName set) on the shared logs pipeline,
+/// correlated to the current span context when one is active.
+pub fn emit_event(name: &'static str, attrs: &[(&'static str, String)]) {
+    let Some(logger) = EVENT_LOGGER.get() else {
+        tracing::warn!(event.name = name, "typed event logger unavailable");
+        return;
+    };
+    if !logger.event_enabled(Severity::Info, "playground.events", Some(name)) {
+        return;
+    }
+    let mut record = logger.create_log_record();
+    populate_event_record(&mut record, name, attrs);
+    logger.emit(record);
+}
+
+fn populate_event_record<R>(record: &mut R, name: &'static str, attrs: &[(&'static str, String)])
+where
+    R: LogRecord,
+{
+    record.set_event_name(name);
+    record.set_target("playground.events");
+    record.set_severity_number(Severity::Info);
+    record.set_severity_text("INFO");
+    record.set_body(AnyValue::from(name));
+    record.add_attribute("event.name", name);
+    for (key, value) in attrs {
+        record.add_attribute(*key, value.clone());
+    }
 }
 
 /// Initialized telemetry. Hold the `_sentry` guard for the process lifetime and
@@ -153,6 +187,7 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
         .with_resource(resource)
         .with_batch_exporter(log_exporter)
         .build();
+    let _ = EVENT_LOGGER.set(logger_provider.logger("playground.events"));
     // Drop the transport crates' own logs from the OTLP log layer, else exporting
     // a log emits a log → feedback loop (doc §8).
     let log_layer =
@@ -368,6 +403,31 @@ fn non_empty_env(name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord, SdkLoggerProvider};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug, Clone, Default)]
+    struct CaptureLogExporter {
+        records: Arc<Mutex<Vec<SdkLogRecord>>>,
+    }
+
+    impl LogExporter for CaptureLogExporter {
+        fn export(
+            &self,
+            batch: LogBatch<'_>,
+        ) -> impl std::future::Future<Output = opentelemetry_sdk::error::OTelSdkResult> + Send
+        {
+            let records = self.records.clone();
+            let owned = batch
+                .iter()
+                .map(|(record, _scope)| (*record).clone())
+                .collect::<Vec<_>>();
+            async move {
+                records.lock().unwrap().extend(owned);
+                Ok(())
+            }
+        }
+    }
 
     #[test]
     fn release_uses_env_value_when_present() {
@@ -431,5 +491,39 @@ mod tests {
             sample_ratio_from(Some("1.1")),
             SampleRatioSetting::Invalid
         ));
+    }
+
+    #[test]
+    fn typed_event_record_sets_name_and_attrs() {
+        let exporter = CaptureLogExporter::default();
+        let provider = SdkLoggerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let logger = provider.logger("test.events");
+        let mut record = logger.create_log_record();
+        populate_event_record(
+            &mut record,
+            "checkout.completed",
+            &[("sku", "WIDGET-1".to_string())],
+        );
+        logger.emit(record);
+
+        let logs = exporter.records.lock().unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].event_name(), Some("checkout.completed"));
+        let attrs = logs[0]
+            .attributes_iter()
+            .map(|(key, value)| (key.to_string(), format!("{value:?}")))
+            .collect::<Vec<_>>();
+        assert!(
+            attrs
+                .iter()
+                .any(|(key, value)| key == "sku" && value.contains("WIDGET-1"))
+        );
+        assert!(
+            attrs
+                .iter()
+                .any(|(key, value)| key == "event.name" && value.contains("checkout.completed"))
+        );
     }
 }

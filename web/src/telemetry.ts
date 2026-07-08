@@ -8,6 +8,10 @@ import {
   BatchSpanProcessor,
 } from "@opentelemetry/sdk-trace-web";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
+import { logs, SeverityNumber, type Logger } from "@opentelemetry/api-logs";
+import { LoggerProvider } from "@opentelemetry/sdk-logs";
+import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
+import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
 import { ZoneContextManager } from "@opentelemetry/context-zone";
 import {
   CompositePropagator,
@@ -40,24 +44,38 @@ const WEB_TRACER_NAME = "playground.web.rum";
 
 let sessionId: string | undefined;
 let providerRef: WebTracerProvider | undefined;
+let loggerProviderRef: LoggerProvider | undefined;
+let eventLogger: Logger | undefined;
 let flushListenersAttached = false;
 let vitalsStarted = false;
 let currentStepContext: Context | undefined;
 
 export function initOtel() {
   sessionId = getSessionId();
+  const resource = resourceFromAttributes({
+    [ATTR_SERVICE_NAME]: "web",
+    [ATTR_SERVICE_VERSION]: import.meta.env.VITE_RELEASE ?? "dev",
+    "deployment.environment.name": "playground",
+    "session.id": sessionId,
+  });
   const provider = new WebTracerProvider({
-    resource: resourceFromAttributes({
-      [ATTR_SERVICE_NAME]: "web",
-      [ATTR_SERVICE_VERSION]: import.meta.env.VITE_RELEASE ?? "dev",
-      "deployment.environment.name": "playground",
-      "session.id": sessionId,
-    }),
+    resource,
     spanProcessors: [
       new BatchSpanProcessor(new OTLPTraceExporter({ url: "/v1/traces" })),
     ],
   });
   providerRef = provider;
+  const loggerProvider = new LoggerProvider({
+    resource,
+    processors: [
+      new BatchLogRecordProcessor({
+        exporter: new OTLPLogExporter({ url: "/v1/logs" }),
+      }),
+    ],
+  });
+  loggerProviderRef = loggerProvider;
+  logs.setGlobalLoggerProvider(loggerProvider);
+  eventLogger = loggerProvider.getLogger("playground.web.events");
   provider.register({
     contextManager: new ZoneContextManager(),
     propagator: new CompositePropagator({
@@ -146,6 +164,24 @@ export async function tracedFetch(
   return fetch(input, { ...init, headers });
 }
 
+export function emitTypedEvent(name: string, attributes: RumAttributes = {}) {
+  const logger = eventLogger ?? logs.getLogger("playground.web.events");
+  if (!logger.enabled({ severityNumber: SeverityNumber.INFO, eventName: name })) {
+    return;
+  }
+  logger.emit({
+    eventName: name,
+    severityNumber: SeverityNumber.INFO,
+    severityText: "INFO",
+    body: name,
+    attributes: cleanAttributes({
+      "event.name": name,
+      ...attributes,
+    }),
+    context: sessionContext(currentStepContext),
+  });
+}
+
 function startRumSpan(name: string, attributes: RumAttributes): Span {
   return trace.getTracer(WEB_TRACER_NAME).startSpan(
     name,
@@ -192,6 +228,9 @@ function attachFlushListeners() {
   const flush = () => {
     void providerRef?.forceFlush().catch((err) => {
       console.debug("[otel] forceFlush failed", err);
+    });
+    void loggerProviderRef?.forceFlush().catch((err) => {
+      console.debug("[otel] log forceFlush failed", err);
     });
   };
   document.addEventListener("visibilitychange", () => {

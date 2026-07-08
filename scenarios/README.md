@@ -22,6 +22,7 @@ rows here and in `run.sh`.
 | a25 | `a25-postgres.sh` | Inventory uses real Postgres for normal reserve, `pg_sleep`, DB-N+1 SELECT fan-out, and pool exhaustion. | Traces: `db.query.text` spans for UPDATE, `pg_sleep`, SELECT fan-out, and `pool_exhausted`; Runtime: `db.client.connection.*` gauges. |
 | a27 | `a27-execution-stack.sh` | Host CLI to daemon to simulated container and agent/tool spans, plus orphan variant. | Runs/Story: execution beats share one run id; orphan child trace shows `browser_without_backend`. |
 | a28 | `a28-rum-journey.sh` | Browser routes, user-step spans, web vitals over OTLP, `session.id`, RUM error, and `nopropagate` broken continuation. | Traces: browser route/user-step spans, `browser.web_vital`, stitched checkout, OTel exception, and disconnected frontend/backend traces for the gap case. |
+| a29 | `a29-typed-events.sh` | Typed business log events across Rust, Java, and web tiers. | Logs SQL/Event column: `checkout.completed`, `checkout.failed`, `order.consumed`, `catalog.products.served`, `payment.authorized`, and `web.checkout.submitted`. |
 | b-async-chaos | `b-async-chaos.sh` | Consumer lag and poison message. | Services/Traces: lag span and dead-letter error branch. |
 | b-chaos | `b-chaos.sh` | Payment failure and injected latency. | Issues/Services: checkout error grouping and slow-span rendering. |
 | b-checkout-chaos | `b-checkout-chaos.sh` | Retry timeout and N+1 fan-out. | Traces: retry/timeout branch and N+1 waterfall. |
