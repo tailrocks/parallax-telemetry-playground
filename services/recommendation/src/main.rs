@@ -1,10 +1,12 @@
 //! Recommendation HTTP service — related SKUs (cache-backed in the full design).
 //! Chaos: ?leak=<n> grows a process-held buffer to emulate a cache/memory leak
 //! (B6) and adds latency, so the slow degradation is visible over repeated calls.
+use axum::http::HeaderMap;
 use axum::{Json, Router, extract::Query, routing::get};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::{Mutex, OnceLock};
+use tracing::Instrument;
 
 fn leak_store() -> &'static Mutex<Vec<Vec<u8>>> {
     static STORE: OnceLock<Mutex<Vec<Vec<u8>>>> = OnceLock::new();
@@ -21,8 +23,13 @@ struct Recommend {
     slow: u64,
 }
 
-#[tracing::instrument(skip(p), fields(otel.kind = "server"))]
-async fn recommend(Query(p): Query<Recommend>) -> Json<Value> {
+async fn recommend(headers: HeaderMap, Query(p): Query<Recommend>) -> Json<Value> {
+    let span = tracing::info_span!("recommend", otel.kind = "server");
+    playground_telemetry::set_parent_from_headers(&span, &headers);
+    recommend_inner(p).instrument(span).await
+}
+
+async fn recommend_inner(p: Recommend) -> Json<Value> {
     if p.slow > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(p.slow)).await;
     }
@@ -44,7 +51,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/healthz", get(|| async { "ok" }));
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8090".into());
     tracing::info!(%addr, "recommendation HTTP listening");
-    axum::serve(tokio::net::TcpListener::bind(&addr).await?, app).await?;
+    axum::serve(tokio::net::TcpListener::bind(&addr).await?, app)
+        .with_graceful_shutdown(playground_telemetry::shutdown_signal())
+        .await?;
     telemetry.shutdown();
     Ok(())
 }

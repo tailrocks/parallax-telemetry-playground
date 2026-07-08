@@ -9,13 +9,15 @@
 //!   ?slow=<ms>   injected latency                            (B11)
 //!   ?canary=1    plant a redaction canary corpus in span/log (A18)
 
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::{Json, Router, extract::Query, routing::get};
 use playground_proto::pricing::v1::QuoteRequest;
 use playground_proto::pricing::v1::pricing_client::PricingClient;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tower_http::cors::{AllowOrigin, CorsLayer};
+use tracing::Instrument;
 
 /// Query flags arrive as `1`/`true`/`yes`/`on`; serde's bool wants `true`/`false`.
 fn de_flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
@@ -87,8 +89,13 @@ fn flag(name: &str) -> bool {
     std::env::var(name).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
-#[tracing::instrument(skip(p), fields(otel.kind = "server"))]
-async fn checkout(Query(p): Query<CheckoutParams>) -> impl IntoResponse {
+async fn checkout(headers: HeaderMap, Query(p): Query<CheckoutParams>) -> impl IntoResponse {
+    let span = tracing::info_span!("checkout", otel.kind = "server");
+    playground_telemetry::set_parent_from_headers(&span, &headers);
+    checkout_inner(p).instrument(span).await
+}
+
+async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
     if p.slow > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(p.slow)).await;
     }
@@ -136,6 +143,7 @@ async fn checkout(Query(p): Query<CheckoutParams>) -> impl IntoResponse {
     let release_regressed = std::env::var("RELEASE").as_deref() == Ok("v2");
     if p.fail || flag("PAYMENT_FAILURE") || release_regressed {
         // B1/B12: deliberate failure → error issue + ERROR span status.
+        playground_telemetry::mark_span_error("payment_failure");
         tracing::error!(sku = %p.sku, release_regressed, "payment failure (chaos)");
         // B4: cascading failure → degrade to a partial 200 when asked, else 502.
         if p.degrade {
@@ -180,6 +188,7 @@ async fn checkout(Query(p): Query<CheckoutParams>) -> impl IntoResponse {
             )
         }
         Err(err) => {
+            playground_telemetry::mark_span_error("pricing_unavailable");
             tracing::error!(error = %err, "pricing call failed");
             (
                 StatusCode::BAD_GATEWAY,
@@ -216,22 +225,8 @@ async fn quote_with_retry(
     last
 }
 
-/// Injects the active span's W3C context into gRPC metadata so the downstream
-/// (Rust or Java) continues the SAME trace — cross-language trace stitching.
-struct MetadataInjector<'a>(&'a mut tonic::metadata::MetadataMap);
-impl opentelemetry::propagation::Injector for MetadataInjector<'_> {
-    fn set(&mut self, key: &str, value: String) {
-        if let Ok(k) = tonic::metadata::MetadataKey::from_bytes(key.as_bytes())
-            && let Ok(v) = value.parse()
-        {
-            self.0.insert(k, v);
-        }
-    }
-}
-
 #[tracing::instrument(fields(otel.kind = "client"))]
 async fn quote(sku: &str, quantity: u32) -> anyhow::Result<(u64, String)> {
-    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
     let endpoint =
         std::env::var("PRICING_ENDPOINT").unwrap_or_else(|_| "http://pricing:50051".into());
     let mut client = PricingClient::connect(endpoint).await?;
@@ -240,30 +235,30 @@ async fn quote(sku: &str, quantity: u32) -> anyhow::Result<(u64, String)> {
         quantity,
     });
     // Inject traceparent/tracestate/baggage into the gRPC metadata.
-    let cx = tracing::Span::current().context();
-    opentelemetry::global::get_text_map_propagator(|prop| {
-        prop.inject_context(&cx, &mut MetadataInjector(request.metadata_mut()));
-    });
+    playground_telemetry::inject_grpc_metadata(request.metadata_mut());
     let response = client.quote(request).await?.into_inner();
     Ok((response.total_minor, response.currency))
 }
 
 /// A7: consume the pricing server-stream (a long-lived streaming CLIENT span).
-#[tracing::instrument(skip(p), fields(otel.kind = "server"))]
-async fn quote_stream(Query(p): Query<CheckoutParams>) -> Json<Value> {
+async fn quote_stream(headers: HeaderMap, Query(p): Query<CheckoutParams>) -> Json<Value> {
+    let span = tracing::info_span!("quote_stream", otel.kind = "server");
+    playground_telemetry::set_parent_from_headers(&span, &headers);
+    quote_stream_inner(p).instrument(span).await
+}
+
+async fn quote_stream_inner(p: CheckoutParams) -> Json<Value> {
     use tokio_stream::StreamExt as _;
     let endpoint =
         std::env::var("PRICING_ENDPOINT").unwrap_or_else(|_| "http://pricing:50051".into());
     let count = async {
         let mut client = PricingClient::connect(endpoint).await.ok()?;
-        let mut stream = client
-            .quote_stream(QuoteRequest {
-                sku: p.sku.clone(),
-                quantity: p.quantity,
-            })
-            .await
-            .ok()?
-            .into_inner();
+        let mut request = tonic::Request::new(QuoteRequest {
+            sku: p.sku.clone(),
+            quantity: p.quantity,
+        });
+        playground_telemetry::inject_grpc_metadata(request.metadata_mut());
+        let mut stream = client.quote_stream(request).await.ok()?.into_inner();
         let mut n = 0u32;
         while let Some(Ok(_item)) = stream.next().await {
             n += 1;
@@ -280,7 +275,10 @@ async fn quote_stream(Query(p): Query<CheckoutParams>) -> Json<Value> {
 async fn reserve(sku: &str, quantity: u32) -> anyhow::Result<Value> {
     let base = std::env::var("INVENTORY_URL").unwrap_or_else(|_| "http://inventory:8089".into());
     let url = format!("{base}/reserve?sku={sku}&quantity={quantity}");
-    Ok(reqwest::get(&url).await?.json::<Value>().await?)
+    Ok(playground_telemetry::traced_get(&url)
+        .await?
+        .json::<Value>()
+        .await?)
 }
 
 #[tracing::instrument(fields(otel.kind = "client"))]
@@ -288,7 +286,31 @@ async fn recommend(sku: &str) -> anyhow::Result<Value> {
     let base =
         std::env::var("RECOMMENDATION_URL").unwrap_or_else(|_| "http://recommendation:8090".into());
     let url = format!("{base}/recommend?sku={sku}");
-    Ok(reqwest::get(&url).await?.json::<Value>().await?)
+    Ok(playground_telemetry::traced_get(&url)
+        .await?
+        .json::<Value>()
+        .await?)
+}
+
+fn cors_layer() -> CorsLayer {
+    let origin = std::env::var("WEB_ORIGIN")
+        .ok()
+        .and_then(|origin| origin.parse::<HeaderValue>().ok())
+        .map(AllowOrigin::exact)
+        .unwrap_or_else(|| {
+            // Local lab stack: mirror request origin so browser trace headers
+            // can cross from the demo UI to checkout without per-port config.
+            AllowOrigin::mirror_request()
+        });
+    CorsLayer::new()
+        .allow_origin(origin)
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            HeaderName::from_static("traceparent"),
+            HeaderName::from_static("tracestate"),
+            HeaderName::from_static("baggage"),
+        ])
 }
 
 #[tokio::main]
@@ -297,11 +319,14 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/checkout", get(checkout))
         .route("/quote-stream", get(quote_stream))
-        .route("/healthz", get(|| async { "ok" }));
+        .route("/healthz", get(|| async { "ok" }))
+        .layer(cors_layer());
     let addr = std::env::var("CHECKOUT_ADDR").unwrap_or_else(|_| "0.0.0.0:8088".into());
     tracing::info!(%addr, "checkout HTTP listening");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(playground_telemetry::shutdown_signal())
+        .await?;
     telemetry.shutdown();
     Ok(())
 }

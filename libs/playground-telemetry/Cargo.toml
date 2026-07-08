@@ -12,9 +12,14 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
+opentelemetry-http = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
+http = { workspace = true }
+reqwest = { workspace = true }
 sentry = { workspace = true }
 sentry-tracing = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }

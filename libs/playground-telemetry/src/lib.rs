@@ -18,13 +18,21 @@
 //! implement them yet, issue #3369; the JVM tier is the playground's exemplar
 //! source.)
 
+pub mod propagation;
+
+pub use propagation::{
+    inject_context_headers, inject_grpc_metadata, inject_headers, mark_span_error, set_parent_from,
+    set_parent_from_grpc, set_parent_from_grpc_metadata, set_parent_from_headers, traced_get,
+};
+
+use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::propagation::TraceContextPropagator;
+use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
 use tracing_subscriber::Layer;
@@ -50,19 +58,25 @@ impl Telemetry {
     }
 }
 
+pub async fn shutdown_signal() {
+    if let Err(err) = tokio::signal::ctrl_c().await {
+        tracing::warn!(error = %err, "failed to install Ctrl-C shutdown signal");
+    }
+}
+
 /// Wire OTLP traces + metrics + logs + a `tracing` subscriber + Sentry for
 /// `service`.
 ///
 /// Reads `OTEL_EXPORTER_OTLP_ENDPOINT` (default per the OTLP SDK) and
 /// `SENTRY_DSN` (Sentry disabled when unset). Honors `RUST_LOG`.
 pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
-    global::set_text_map_propagator(TraceContextPropagator::new());
+    global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
+        Box::new(TraceContextPropagator::new()),
+        Box::new(BaggagePropagator::new()),
+    ]));
 
     let resource = Resource::builder()
-        .with_attributes([
-            KeyValue::new(SERVICE_NAME, service),
-            KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-        ])
+        .with_attributes(resource_attributes(service))
         .build();
 
     // --- Traces ---
@@ -143,5 +157,37 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
         logger_provider,
         meter_provider,
         _sentry: sentry,
+    })
+}
+
+fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
+    let mut attributes = vec![
+        KeyValue::new(SERVICE_NAME, service),
+        KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
+        KeyValue::new("service.namespace", "playground"),
+        KeyValue::new("service.instance.id", service_instance_id(service)),
+        KeyValue::new(
+            "deployment.environment.name",
+            std::env::var("PARALLAX_ENV").unwrap_or_else(|_| "lab".into()),
+        ),
+    ];
+    if let Ok(run_id) = std::env::var("PARALLAX_RUN_ID")
+        && !otel_resource_attrs_has("parallax.run.id")
+    {
+        attributes.push(KeyValue::new("parallax.run.id", run_id));
+    }
+    attributes
+}
+
+fn service_instance_id(service: &str) -> String {
+    std::env::var("HOSTNAME").unwrap_or_else(|_| format!("{service}-{}", std::process::id()))
+}
+
+fn otel_resource_attrs_has(key: &str) -> bool {
+    std::env::var("OTEL_RESOURCE_ATTRIBUTES").is_ok_and(|attrs| {
+        attrs
+            .split(',')
+            .filter_map(|item| item.split_once('='))
+            .any(|(name, _)| name.trim() == key)
     })
 }

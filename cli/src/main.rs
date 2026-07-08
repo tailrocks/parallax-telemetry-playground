@@ -13,21 +13,23 @@ async fn main() -> anyhow::Result<()> {
         "cron" => cron().await,
         _ => drive().await,
     };
-    telemetry.shutdown(); // flush before exit
-    match result {
-        Ok(code) => std::process::exit(code),
+    let code = match result {
+        Ok(code) => code,
         Err(err) => {
+            playground_telemetry::mark_span_error("cli_error");
             tracing::error!(error = %err, "cli failed");
-            std::process::exit(1);
+            1
         }
-    }
+    };
+    telemetry.shutdown(); // flush before exit
+    std::process::exit(code);
 }
 
 #[tracing::instrument(fields(otel.kind = "client"))]
 async fn drive() -> anyhow::Result<i32> {
     let base = std::env::var("CHECKOUT_URL").unwrap_or_else(|_| "http://localhost:8088".into());
     let url = format!("{base}/checkout?sku=WIDGET-1&quantity=3");
-    let body = reqwest::get(&url).await?.text().await?;
+    let body = playground_telemetry::traced_get(&url).await?.text().await?;
     tracing::info!(%url, "drove checkout");
     println!("{body}");
     Ok(0)
@@ -48,6 +50,7 @@ async fn cron() -> anyhow::Result<i32> {
             Ok(0)
         }
         90..=94 => {
+            playground_telemetry::mark_span_error("nonzero_exit");
             tracing::error!(bucket, "cron job failed");
             Ok(1)
         }

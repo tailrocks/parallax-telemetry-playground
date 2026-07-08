@@ -358,6 +358,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
+ "tower-http",
  "tracing",
  "tracing-opentelemetry",
 ]
@@ -1637,13 +1638,18 @@ name = "playground-telemetry"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "http 1.4.2",
  "opentelemetry",
  "opentelemetry-appender-tracing",
+ "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
+ "reqwest",
  "sentry",
  "sentry-tracing",
+ "tokio",
+ "tonic",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
