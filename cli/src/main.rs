@@ -12,12 +12,17 @@ use tracing::Instrument;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let telemetry = playground_telemetry::init("playground-cli")?;
     let mut args = std::env::args().skip(1);
     let mode = args.next().unwrap_or_default();
     let rest = args.collect::<Vec<_>>();
+    if mode == "cron" && rest.first().map(String::as_str) == Some("missed") {
+        println!("cron missed: no process telemetry emitted");
+        return Ok(());
+    }
+
+    let telemetry = playground_telemetry::init("playground-cli")?;
     let result = match mode.as_str() {
-        "cron" => cron().await,
+        "cron" => cron(rest).await,
         "daemon" => daemon(rest).await,
         "enter" => enter(rest).await,
         _ => drive().await,
@@ -180,30 +185,90 @@ async fn execute_tool(tool: &'static str, command: &'static str, fail: bool) {
     .await
 }
 
+#[derive(Debug, Clone, Copy)]
+enum CronOutcome {
+    Ok,
+    Fail,
+    Stuck,
+}
+
+impl CronOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Fail => "fail",
+            Self::Stuck => "stuck",
+        }
+    }
+}
+
 /// B17: weighted cron outcome. Deterministic source (process nanos) avoids a rand
-/// dep; bucket 0–89 ok, 90–94 fail, 95–99 stuck.
-#[tracing::instrument(fields(otel.kind = "internal"))]
-async fn cron() -> anyhow::Result<i32> {
+/// dep; bucket 0-89 ok, 90-94 fail, 95-99 stuck.
+async fn cron(args: Vec<String>) -> anyhow::Result<i32> {
+    let mode = args.first().map(String::as_str).unwrap_or("weighted");
+    let invocation_id = option_value(&args, "--invocation-id").unwrap_or_else(default_cron_id);
+    match mode {
+        "ok" => cron_once(CronOutcome::Ok, &invocation_id, 0).await,
+        "fail" => cron_once(CronOutcome::Fail, &invocation_id, 0).await,
+        "stuck" => cron_once(CronOutcome::Stuck, &invocation_id, 0).await,
+        "duplicate" => {
+            let first = cron_once(CronOutcome::Ok, &invocation_id, 1).await?;
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let second = cron_once(CronOutcome::Ok, &invocation_id, 2).await?;
+            Ok(first.max(second))
+        }
+        "missed" => Ok(0),
+        "weighted" | "" => cron_once(weighted_cron_outcome(), &invocation_id, 0).await,
+        other => Err(anyhow::anyhow!("unknown cron mode: {other}")),
+    }
+}
+
+async fn cron_once(
+    outcome: CronOutcome,
+    invocation_id: &str,
+    duplicate_ordinal: i64,
+) -> anyhow::Result<i32> {
+    let span = tracing::info_span!(
+        "cron_job",
+        otel.kind = "internal",
+        "cron.job.name" = "playground-report",
+        "cron.schedule" = "*/1 * * * *",
+        "cron.invocation.id" = %invocation_id,
+        "cron.outcome" = outcome.as_str(),
+        "cron.duplicate.ordinal" = duplicate_ordinal
+    );
+    async move {
+        match outcome {
+            CronOutcome::Ok => {
+                tracing::info!("cron job succeeded");
+                Ok(0)
+            }
+            CronOutcome::Fail => {
+                playground_telemetry::mark_span_error("nonzero_exit");
+                tracing::error!("cron job failed");
+                Ok(1)
+            }
+            CronOutcome::Stuck => {
+                tracing::warn!("cron job stuck: long-running check-in");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                Ok(0)
+            }
+        }
+    }
+    .instrument(span)
+    .await
+}
+
+fn weighted_cron_outcome() -> CronOutcome {
     let bucket = (std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0)
         % 100) as u8;
     match bucket {
-        0..=89 => {
-            tracing::info!(bucket, "cron job succeeded");
-            Ok(0)
-        }
-        90..=94 => {
-            playground_telemetry::mark_span_error("nonzero_exit");
-            tracing::error!(bucket, "cron job failed");
-            Ok(1)
-        }
-        _ => {
-            tracing::warn!(bucket, "cron job stuck — long-running (missed check-in)");
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            Ok(0)
-        }
+        0..=89 => CronOutcome::Ok,
+        90..=94 => CronOutcome::Fail,
+        _ => CronOutcome::Stuck,
     }
 }
 
@@ -223,6 +288,14 @@ fn default_session_id() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     format!("exec-stack-{seconds}-{}", std::process::id())
+}
+
+fn default_cron_id() -> String {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("playground-report-{millis}-{}", std::process::id())
 }
 
 fn run_id(session: &str) -> String {

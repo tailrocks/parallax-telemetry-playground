@@ -34,7 +34,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::filter_fn;
@@ -98,10 +98,16 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
     let span_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .build()?;
-    let tracer_provider = SdkTracerProvider::builder()
+    let sample_ratio = sample_ratio_from(std::env::var("PLAYGROUND_SAMPLE_RATIO").ok().as_deref());
+    let mut tracer_builder = SdkTracerProvider::builder()
         .with_resource(resource.clone())
-        .with_batch_exporter(span_exporter)
-        .build();
+        .with_batch_exporter(span_exporter);
+    if let SampleRatioSetting::Ratio(ratio) = sample_ratio {
+        tracer_builder = tracer_builder.with_sampler(Sampler::ParentBased(Box::new(
+            Sampler::TraceIdRatioBased(ratio),
+        )));
+    }
+    let tracer_provider = tracer_builder.build();
     global::set_tracer_provider(tracer_provider.clone());
     let tracer = tracer_provider.tracer(service);
 
@@ -166,6 +172,17 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
         .with(log_layer)
         .with(sentry_tracing::layer())
         .init();
+    match sample_ratio {
+        SampleRatioSetting::Ratio(ratio) => {
+            tracing::info!(sample_ratio = ratio, "PLAYGROUND_SAMPLE_RATIO active");
+        }
+        SampleRatioSetting::Invalid => {
+            tracing::warn!(
+                "invalid PLAYGROUND_SAMPLE_RATIO; expected 0.0..=1.0, sampling default unchanged"
+            );
+        }
+        SampleRatioSetting::Unset => {}
+    }
 
     let runtime_metrics = spawn_runtime_metrics();
 
@@ -249,6 +266,25 @@ fn runtime_metrics_enabled() -> bool {
         .unwrap_or(true)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SampleRatioSetting {
+    Unset,
+    Ratio(f64),
+    Invalid,
+}
+
+fn sample_ratio_from(value: Option<&str>) -> SampleRatioSetting {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return SampleRatioSetting::Unset;
+    };
+    match value.parse::<f64>() {
+        Ok(ratio) if ratio.is_finite() && (0.0..=1.0).contains(&ratio) => {
+            SampleRatioSetting::Ratio(ratio)
+        }
+        _ => SampleRatioSetting::Invalid,
+    }
+}
+
 fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
     let mut attributes = vec![
         KeyValue::new(SERVICE_NAME, service),
@@ -326,5 +362,40 @@ mod tests {
                 "tokio.runtime.total_busy_duration_ms",
             ]
         );
+    }
+
+    #[test]
+    fn sample_ratio_parser_keeps_default_when_unset() {
+        assert!(matches!(sample_ratio_from(None), SampleRatioSetting::Unset));
+        assert!(matches!(
+            sample_ratio_from(Some("  ")),
+            SampleRatioSetting::Unset
+        ));
+    }
+
+    #[test]
+    fn sample_ratio_parser_accepts_bounded_ratio() {
+        match sample_ratio_from(Some("0.1")) {
+            SampleRatioSetting::Ratio(ratio) => {
+                assert!((ratio - 0.1).abs() < f64::EPSILON);
+            }
+            other => panic!("expected ratio, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sample_ratio_parser_rejects_junk_and_out_of_range() {
+        assert!(matches!(
+            sample_ratio_from(Some("junk")),
+            SampleRatioSetting::Invalid
+        ));
+        assert!(matches!(
+            sample_ratio_from(Some("-0.1")),
+            SampleRatioSetting::Invalid
+        ));
+        assert!(matches!(
+            sample_ratio_from(Some("1.1")),
+            SampleRatioSetting::Invalid
+        ));
     }
 }

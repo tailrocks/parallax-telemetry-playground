@@ -36,6 +36,7 @@ services:
       CHECKOUT_ADDR: "0.0.0.0:8088"
       RELEASE: "${RELEASE:-v1}"
       GIT_SHA: "${GIT_SHA:-}"
+      PLAYGROUND_SAMPLE_RATIO: "${PLAYGROUND_SAMPLE_RATIO:-}"
       FLAGD_HOST: "flagd"
       FLAGD_CACHE: "disabled"
     ports: ["8088:8088"]

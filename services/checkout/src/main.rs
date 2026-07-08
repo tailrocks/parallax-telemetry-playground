@@ -9,6 +9,8 @@
 //!   ?slow=<ms>   injected latency                            (B11)
 //!   ?canary=1    plant a redaction canary corpus in span/log (A18)
 //!   ?block_ms=<n>&block_n=<m> flood spawn_blocking sleeps     (A22)
+//!   ?spike=<screen> emit dominant structured WARN logs         (A9)
+//!   ?rogue_log=1  emit one detached log without trace context  (B23)
 
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::IntoResponse;
@@ -79,6 +81,11 @@ struct CheckoutParams {
     block_ms: u64,
     #[serde(default)]
     block_n: u32,
+    /// A9: emit a burst of logs with one dominant field value.
+    spike: Option<String>,
+    /// B23: emit a detached log outside span context.
+    #[serde(default, deserialize_with = "de_flag")]
+    rogue_log: bool,
 }
 
 fn default_tier() -> String {
@@ -124,6 +131,17 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
     };
     if slow_ms > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(slow_ms)).await;
+    }
+    if let Some(screen) = p
+        .spike
+        .as_deref()
+        .map(str::trim)
+        .filter(|screen| !screen.is_empty())
+    {
+        emit_field_spike(screen);
+    }
+    if p.rogue_log {
+        emit_rogue_log();
     }
     // A10: business context as baggage (propagated downstream in the full design).
     if let Some(tenant) = &p.tenant {
@@ -225,6 +243,27 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
             )
         }
     }
+}
+
+fn emit_field_spike(screen: &str) {
+    for spike_index in 0..30 {
+        tracing::warn!(
+            app_screen_name = %screen,
+            cart_tier = "free",
+            spike_index,
+            "slow render observed"
+        );
+    }
+}
+
+fn emit_rogue_log() {
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        tracing::error!(
+            evidence_gap = true,
+            "orphan diagnostic without trace context"
+        );
+    });
 }
 
 async fn feature_flag(flag_key: &'static str, env_name: &'static str) -> bool {

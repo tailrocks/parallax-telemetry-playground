@@ -9,6 +9,7 @@ Sentry) can be compared on identical data.
 
 Full design: the Parallax repo's
 `docs/research/validation/telemetry-playground-sample-project.md`.
+Guided Parallax demo: [`TOUR.md`](TOUR.md).
 Apache-2.0 · Tailrocks.
 
 ## Architecture
