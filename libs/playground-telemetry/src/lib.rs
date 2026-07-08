@@ -32,10 +32,11 @@ use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
+use std::time::Duration;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::SubscriberExt;
@@ -135,9 +136,12 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .build()?;
+    let metric_reader = PeriodicReader::builder(metric_exporter)
+        .with_interval(metric_export_interval())
+        .build();
     let meter_provider = SdkMeterProvider::builder()
         .with_resource(resource.clone())
-        .with_periodic_exporter(metric_exporter)
+        .with_reader(metric_reader)
         .build();
     global::set_meter_provider(meter_provider.clone());
 
@@ -284,6 +288,16 @@ fn runtime_metrics_enabled() -> bool {
                 || value.eq_ignore_ascii_case("no"))
         })
         .unwrap_or(true)
+}
+
+fn metric_export_interval() -> Duration {
+    std::env::var("PLAYGROUND_METRIC_EXPORT_INTERVAL_MS")
+        .or_else(|_| std::env::var("OTEL_METRIC_EXPORT_INTERVAL"))
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|millis| *millis > 0)
+        .map(Duration::from_millis)
+        .unwrap_or_else(|| Duration::from_secs(5))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

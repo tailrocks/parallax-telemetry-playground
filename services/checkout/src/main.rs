@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::OnceCell;
+use tonic::Code;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::Instrument;
 
@@ -59,6 +60,15 @@ struct CheckoutParams {
     retry: u32,
     #[serde(default = "default_timeout")]
     timeout_ms: u64,
+    /// B3b/A7b: ask pricing to delay work so grpc-timeout and streams are visible.
+    #[serde(default)]
+    delay_ms: u32,
+    /// A7b: fail the pricing stream at this message index.
+    #[serde(default)]
+    fail_at: u32,
+    /// A7b: cancel the pricing stream client-side after this many ms.
+    #[serde(default)]
+    cancel_ms: u64,
     /// B5: busy-loop for this many ms (high-CPU hot path).
     #[serde(default)]
     cpu_ms: u64,
@@ -215,7 +225,7 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
         tracing::debug!(i, "n+1 inventory call");
     }
 
-    let pricing = quote_with_retry(&p.sku, p.quantity, p.retry, p.timeout_ms).await;
+    let pricing = quote_with_retry(&p.sku, p.quantity, p.retry, p.timeout_ms, p.delay_ms).await;
     let inventory = reserve(&p.sku, p.quantity).await;
     let recommendation = recommend(&p.sku).await;
 
@@ -374,39 +384,115 @@ async fn quote_with_retry(
     quantity: u32,
     retry: u32,
     timeout_ms: u64,
+    delay_ms: u32,
 ) -> anyhow::Result<(u64, String)> {
     let attempts = retry.saturating_add(1);
     let mut last: anyhow::Result<(u64, String)> = Err(anyhow::anyhow!("no attempt"));
     for attempt in 1..=attempts {
-        let deadline = std::time::Duration::from_millis(timeout_ms);
-        match tokio::time::timeout(deadline, quote(sku, quantity)).await {
-            Ok(Ok(ok)) => return Ok(ok),
-            Ok(Err(err)) => {
+        match pricing_attempt(sku, quantity, timeout_ms, delay_ms, attempt).await {
+            Ok(ok) => return Ok(ok),
+            Err(err) => {
                 tracing::warn!(attempt, error = %err, "pricing attempt failed");
                 last = Err(err);
-            }
-            Err(_) => {
-                tracing::warn!(attempt, timeout_ms, "pricing attempt timed out");
-                last = Err(anyhow::anyhow!("pricing deadline exceeded"));
             }
         }
     }
     last
 }
 
-#[tracing::instrument(fields(otel.kind = "client"))]
-async fn quote(sku: &str, quantity: u32) -> anyhow::Result<(u64, String)> {
+async fn pricing_attempt(
+    sku: &str,
+    quantity: u32,
+    timeout_ms: u64,
+    delay_ms: u32,
+    attempt: u32,
+) -> anyhow::Result<(u64, String)> {
+    let span = tracing::info_span!(
+        "pricing.attempt",
+        otel.kind = "client",
+        attempt,
+        timeout_ms,
+        "rpc.system" = "grpc",
+        "rpc.service" = "playground.pricing.v1.Pricing",
+        "rpc.method" = "Quote",
+        "rpc.grpc.status_code" = tracing::field::Empty,
+    );
+    quote(sku, quantity, timeout_ms, delay_ms)
+        .instrument(span)
+        .await
+}
+
+async fn quote(
+    sku: &str,
+    quantity: u32,
+    timeout_ms: u64,
+    delay_ms: u32,
+) -> anyhow::Result<(u64, String)> {
     let endpoint =
         std::env::var("PRICING_ENDPOINT").unwrap_or_else(|_| "http://pricing:50051".into());
     let mut client = PricingClient::connect(endpoint).await?;
     let mut request = tonic::Request::new(QuoteRequest {
         sku: sku.to_string(),
         quantity,
+        delay_ms,
+        fail_at: 0,
     });
+    request.set_timeout(std::time::Duration::from_millis(timeout_ms.max(1)));
     // Inject traceparent/tracestate/baggage into the gRPC metadata.
     playground_telemetry::inject_grpc_metadata(request.metadata_mut());
-    let response = client.quote(request).await?.into_inner();
+    let response = match client.quote(request).await {
+        Ok(response) => {
+            tracing::Span::current().record("rpc.grpc.status_code", 0_i64);
+            response.into_inner()
+        }
+        Err(status) => {
+            record_grpc_error(&status);
+            return Err(anyhow::anyhow!(
+                "pricing gRPC {:?}: {}",
+                status.code(),
+                status.message()
+            ));
+        }
+    };
     Ok((response.total_minor, response.currency))
+}
+
+fn record_grpc_error(status: &tonic::Status) {
+    let code = status.code();
+    tracing::Span::current().record("rpc.grpc.status_code", grpc_code_number(code));
+    if code == Code::DeadlineExceeded {
+        playground_telemetry::mark_span_error("deadline_exceeded");
+    } else {
+        playground_telemetry::mark_span_error("grpc_error");
+    }
+    tracing::warn!(
+        "rpc.grpc.status_code" = grpc_code_number(code),
+        code = ?code,
+        message = status.message(),
+        "pricing gRPC status"
+    );
+}
+
+fn grpc_code_number(code: Code) -> i64 {
+    match code {
+        Code::Ok => 0,
+        Code::Cancelled => 1,
+        Code::Unknown => 2,
+        Code::InvalidArgument => 3,
+        Code::DeadlineExceeded => 4,
+        Code::NotFound => 5,
+        Code::AlreadyExists => 6,
+        Code::PermissionDenied => 7,
+        Code::ResourceExhausted => 8,
+        Code::FailedPrecondition => 9,
+        Code::Aborted => 10,
+        Code::OutOfRange => 11,
+        Code::Unimplemented => 12,
+        Code::Internal => 13,
+        Code::Unavailable => 14,
+        Code::DataLoss => 15,
+        Code::Unauthenticated => 16,
+    }
 }
 
 /// A7: consume the pricing server-stream (a long-lived streaming CLIENT span).
@@ -420,24 +506,84 @@ async fn quote_stream_inner(p: CheckoutParams) -> Json<Value> {
     use tokio_stream::StreamExt as _;
     let endpoint =
         std::env::var("PRICING_ENDPOINT").unwrap_or_else(|_| "http://pricing:50051".into());
-    let count = async {
+    let (count, cancelled, stream_error) = async {
         let mut client = PricingClient::connect(endpoint).await.ok()?;
         let mut request = tonic::Request::new(QuoteRequest {
             sku: p.sku.clone(),
             quantity: p.quantity,
+            delay_ms: p.delay_ms,
+            fail_at: p.fail_at,
         });
         playground_telemetry::inject_grpc_metadata(request.metadata_mut());
         let mut stream = client.quote_stream(request).await.ok()?.into_inner();
         let mut n = 0u32;
-        while let Some(Ok(_item)) = stream.next().await {
-            n += 1;
+        let cancel_at = (p.cancel_ms > 0)
+            .then(|| std::time::Instant::now() + std::time::Duration::from_millis(p.cancel_ms));
+        let mut cancelled = false;
+        let mut stream_error = None;
+        loop {
+            let item = if let Some(cancel_at) = cancel_at {
+                let now = std::time::Instant::now();
+                if now >= cancel_at {
+                    cancelled = true;
+                    tracing::warn!(
+                        cancel_ms = p.cancel_ms,
+                        count = n,
+                        "pricing stream cancelled by client"
+                    );
+                    break;
+                }
+                match tokio::time::timeout(cancel_at.saturating_duration_since(now), stream.next())
+                    .await
+                {
+                    Ok(item) => item,
+                    Err(_) => {
+                        cancelled = true;
+                        tracing::warn!(
+                            cancel_ms = p.cancel_ms,
+                            count = n,
+                            "pricing stream cancelled by client"
+                        );
+                        break;
+                    }
+                }
+            } else {
+                stream.next().await
+            };
+            match item {
+                Some(Ok(_item)) => {
+                    n += 1;
+                    tracing::info!(
+                        "rpc.message.type" = "RECEIVED",
+                        "rpc.message.id" = i64::from(n),
+                        "rpc.message"
+                    );
+                }
+                Some(Err(status)) => {
+                    playground_telemetry::mark_span_error("stream_failed");
+                    tracing::error!(
+                        code = ?status.code(),
+                        message = status.message(),
+                        received = n,
+                        "pricing stream failed"
+                    );
+                    stream_error = Some(status.message().to_string());
+                    break;
+                }
+                None => break,
+            }
         }
-        Some(n)
+        Some((n, cancelled, stream_error))
     }
     .await
-    .unwrap_or(0);
-    tracing::info!(sku = %p.sku, count, "consumed pricing stream");
-    Json(json!({ "sku": p.sku, "streamed_quotes": count }))
+    .unwrap_or((0, false, Some("stream unavailable".to_string())));
+    tracing::info!(sku = %p.sku, count, cancelled, "consumed pricing stream");
+    Json(json!({
+        "sku": p.sku,
+        "streamed_quotes": count,
+        "cancelled": cancelled,
+        "error": stream_error,
+    }))
 }
 
 #[tracing::instrument(fields(otel.kind = "client"))]

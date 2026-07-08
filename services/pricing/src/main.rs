@@ -6,6 +6,10 @@
 use playground_proto::pricing::v1::pricing_server::{Pricing, PricingServer};
 use playground_proto::pricing::v1::{QuoteRequest, QuoteResponse};
 use std::pin::Pin;
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::metadata::MetadataMap;
 use tonic::{Request, Response, Status, transport::Server};
 use tracing::Instrument;
 
@@ -23,10 +27,30 @@ impl Pricing for PricingSvc {
         let span = tracing::info_span!("quote", otel.kind = "server");
         playground_telemetry::set_parent_from_grpc_metadata(&span, request.metadata());
         async move {
+            let grpc_timeout = grpc_timeout(request.metadata());
             let req = request.into_inner();
+            if req.delay_ms > 0 {
+                if let Some(timeout) =
+                    grpc_timeout.filter(|timeout| Duration::from_millis(u64::from(req.delay_ms)) > *timeout)
+                {
+                    let guard = Duration::from_millis(10);
+                    let wait = timeout.saturating_sub(guard);
+                    if !wait.is_zero() {
+                        tokio::time::sleep(wait).await;
+                    }
+                    playground_telemetry::mark_span_error("deadline_exceeded");
+                    tracing::warn!(
+                        delay_ms = req.delay_ms,
+                        timeout_ms = timeout.as_millis() as u64,
+                        "pricing quote exceeded grpc-timeout"
+                    );
+                    return Err(Status::deadline_exceeded("deadline exceeded"));
+                }
+                tokio::time::sleep(Duration::from_millis(u64::from(req.delay_ms))).await;
+            }
             // Deterministic toy pricing: 1999 minor units per unit.
             let total_minor = 1999u64 * u64::from(req.quantity.max(1));
-            tracing::info!(sku = %req.sku, quantity = req.quantity, total_minor, "quoted");
+            tracing::info!(sku = %req.sku, quantity = req.quantity, delay_ms = req.delay_ms, total_minor, "quoted");
             Ok(Response::new(QuoteResponse {
                 sku: req.sku,
                 quantity: req.quantity,
@@ -50,22 +74,74 @@ impl Pricing for PricingSvc {
         async move {
             let req = request.into_inner();
             let n = req.quantity.max(1);
-            tracing::info!(sku = %req.sku, n, "streaming quotes");
-            let items: Vec<Result<QuoteResponse, Status>> = (1..=n)
-                .map(|i| {
-                    Ok(QuoteResponse {
-                        sku: req.sku.clone(),
-                        quantity: i,
-                        total_minor: 1999u64 * u64::from(i),
-                        currency: "USD".into(),
-                    })
-                })
-                .collect();
-            let stream: QuoteStreamS = Box::pin(tokio_stream::iter(items));
+            let sku = req.sku;
+            let delay_ms = if req.delay_ms > 0 { req.delay_ms } else { 50 };
+            let fail_at = req.fail_at;
+            tracing::info!(%sku, n, delay_ms, fail_at, "streaming quotes");
+            let (tx, rx) = mpsc::channel::<Result<QuoteResponse, Status>>(16);
+            let stream_span = tracing::Span::current();
+            tokio::spawn(
+                async move {
+                    for i in 1..=n {
+                        tokio::time::sleep(Duration::from_millis(u64::from(delay_ms))).await;
+                        if fail_at > 0 && i == fail_at {
+                            playground_telemetry::mark_span_error("stream_failed");
+                            tracing::error!(
+                                "rpc.message.type" = "SENT",
+                                "rpc.message.id" = i64::from(i),
+                                "pricing stream failed at requested item"
+                            );
+                            let _ = tx
+                                .send(Err(Status::internal("pricing stream failed")))
+                                .await;
+                            return;
+                        }
+                        tracing::info!(
+                            "rpc.message.type" = "SENT",
+                            "rpc.message.id" = i64::from(i),
+                            "rpc.message"
+                        );
+                        if tx
+                            .send(Ok(QuoteResponse {
+                                sku: sku.clone(),
+                                quantity: i,
+                                total_minor: 1999u64 * u64::from(i),
+                                currency: "USD".into(),
+                            }))
+                            .await
+                            .is_err()
+                        {
+                            playground_telemetry::mark_span_error("stream_cancelled");
+                            tracing::warn!(
+                                sent = i.saturating_sub(1),
+                                "pricing stream cancelled by client"
+                            );
+                            return;
+                        }
+                    }
+                }
+                .instrument(stream_span),
+            );
+            let stream: QuoteStreamS = Box::pin(ReceiverStream::new(rx));
             Ok(Response::new(stream))
         }
         .instrument(span)
         .await
+    }
+}
+
+fn grpc_timeout(metadata: &MetadataMap) -> Option<Duration> {
+    let value = metadata.get("grpc-timeout")?.to_str().ok()?;
+    let (amount, unit) = value.split_at(value.len().checked_sub(1)?);
+    let amount: u64 = amount.parse().ok()?;
+    match unit {
+        "H" => Some(Duration::from_secs(amount.saturating_mul(60 * 60))),
+        "M" => Some(Duration::from_secs(amount.saturating_mul(60))),
+        "S" => Some(Duration::from_secs(amount)),
+        "m" => Some(Duration::from_millis(amount)),
+        "u" => Some(Duration::from_micros(amount)),
+        "n" => Some(Duration::from_nanos(amount)),
+        _ => None,
     }
 }
 
@@ -80,4 +156,19 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     telemetry.shutdown();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_grpc_timeout_units() {
+        let mut metadata = MetadataMap::new();
+        metadata.insert("grpc-timeout", "100000u".parse().unwrap());
+        assert_eq!(grpc_timeout(&metadata), Some(Duration::from_millis(100)));
+
+        metadata.insert("grpc-timeout", "2S".parse().unwrap());
+        assert_eq!(grpc_timeout(&metadata), Some(Duration::from_secs(2)));
+    }
 }
