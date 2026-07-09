@@ -66,9 +66,9 @@ Prereqs: start the lab (`parallax` repo `bench/otlp-fanout`), then this app's
 Code: `catalog` exports the `catalog.product.queries` Micrometer counter with
 the Java agent exemplar filter set by `OTEL_METRICS_EXEMPLAR_FILTER=trace_based`
 in compose.
-Verify: drive `products` queries; in the metrics backend (SigNoz/OpenObserve),
-open the counter and confirm a data point carries a `trace_id` exemplar that
-jumps to the trace. (Rust tier has no exemplars — issue #3369 — so use the JVM
+Verify: drive `products` queries; query GreptimeDB's native metric table for
+the counter and inspect exemplar columns/metadata for a `trace_id` that links
+to the trace. (Rust tier has no exemplars — issue #3369 — so use the JVM
 counter.)
 
 ### A5 / B15 — browser RUM + rage-clicks + session replay

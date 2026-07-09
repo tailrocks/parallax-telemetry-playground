@@ -87,7 +87,7 @@ Use this path after `parallax serve` is running in the Parallax repo.
 - Proves: scheduled work needs absence and duplication semantics.
 
 - Command: `scenarios/run.sh a9`
-- Route: Logs; Field Explorer after plan 046.
+- Route: Logs.
 - See: `app_screen_name=workspace-select` dominates the spike window.
 - Proves: structured log fields can explain sudden cohort spikes.
 

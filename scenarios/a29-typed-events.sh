@@ -47,8 +47,9 @@ cat <<CHECKS
 
 Check in Parallax:
   - Native GreptimeDB logs table:
-    SELECT event_name, body, log_attributes FROM opentelemetry_logs
-    WHERE event_name IN ('checkout.completed', 'checkout.failed', 'order.consumed',
+    SELECT json_get_string(log_attributes, 'event.name') AS event_name,
+      body, log_attributes FROM opentelemetry_logs
+    WHERE json_get_string(log_attributes, 'event.name') IN ('checkout.completed', 'checkout.failed', 'order.consumed',
       'catalog.products.served', 'payment.authorized', 'web.checkout.submitted');
   - Expected typed event names:
     checkout.completed, checkout.failed, order.consumed, catalog.products.served.

@@ -10,7 +10,7 @@ a1              a1-checkout.sh                 checkout -> pricing/inventory/rec
 a6              a6-graphql.sh                  catalog GraphQL field-span family            Traces: batched vs N+1, partial error, op-name policy
 a7              a7-subscription.ts             catalog GraphQL subscription smoke            Traces: long-lived priceChanges subscription span
 a7b             a7b-grpc-stream.sh             pricing gRPC stream events/failure/cancel    Traces: rpc.message SENT/RECEIVED events and stream_failed/cancel
-a9              a9-field-spike.sh              checkout structured log burst                Logs/Field Explorer: app_screen_name dominated by workspace-select
+a9              a9-field-spike.sh              checkout structured log burst                Logs document fields: app_screen_name dominated by workspace-select
 a3              a3-async.sh                    orders producer/consumer                    Trace detail: producer span linked to consumer trace
 a4              a4-reverse.sh                  fulfillment -> Kafka -> notifications        Trace detail: Java async span link and Java -> Rust hop
 a12             a12-cli-run.sh                 playground CLI checkout driver              Runs: command row with exit code; cargo build first
@@ -22,7 +22,7 @@ a20-compare     a20-compare-pair.sh            green structural checkout variant
 a20             a20-batch-fanin.sh             orders batch consumer links many producers   Trace detail: consume_batch has many span links
 a22             a22-tokio-saturation.sh        checkout spawn_blocking flood                Services -> checkout -> Runtime lane: tokio.runtime.* spike; Traces: slow spans
 a25             a25-postgres.sh                 inventory real Postgres and pool pressure    Traces: db spans, pg_sleep, SELECT fan-out, pool_exhausted; Runtime: db.client.connection.*
-a26             a26-cache.sh                    recommendation TTL cache and stampede       Metrics: cache.hits/cache.misses; Traces: parallel compute_recommendations
+a26             a26-cache.sh                    recommendation TTL cache and stampede       Metrics: cache_hits_total/cache_misses_total; Traces: parallel compute_recommendations
 a27             a27-execution-stack.sh         CLI -> daemon -> container -> agent          Runs/Story: stitched beats; orphan child trace has browser_without_backend
 a28             a28-rum-journey.sh             browser routes, web vitals, session.id       Traces: stitched browser checkout, RUM error, web_vital spans, nopropagate gap
 a29             a29-typed-events.sh            typed log events across tiers                Logs SQL/Event column: checkout/order/catalog/payment/web event names
@@ -47,7 +47,7 @@ scenario() {
     a6) echo "a6-graphql.sh|Traces: batched reviews vs reviewsSlow N+1 shape, partial riskScore error, op-name policy" ;;
     a7) echo "a7-subscription.ts|Traces: long-lived priceChanges subscription span; run with Bun" ;;
     a7b) echo "a7b-grpc-stream.sh|Traces: pricing stream SENT events, checkout RECEIVED events, stream_failed, and cancel observation" ;;
-    a9) echo "a9-field-spike.sh|Logs/Field Explorer: app_screen_name dominated by workspace-select in the spike window" ;;
+    a9) echo "a9-field-spike.sh|Logs document fields: app_screen_name dominated by workspace-select in the spike window" ;;
     a3) echo "a3-async.sh|Trace detail: producer span with link to consumer trace" ;;
     a4) echo "a4-reverse.sh|Trace detail: Java producer/consumer link plus Java -> Rust notifications hop" ;;
     a12) echo "a12-cli-run.sh|Runs: command row with exit code; requires cargo build first" ;;
@@ -59,7 +59,7 @@ scenario() {
     a20) echo "a20-batch-fanin.sh|Trace detail: consume_batch span carries messaging.batch.message_count and many span links" ;;
     a22) echo "a22-tokio-saturation.sh|Services -> checkout -> Runtime lane: tokio.runtime.* spike; Traces: slow checkout spans" ;;
     a25) echo "a25-postgres.sh|Traces: db.query.text spans for reserve, pg_sleep, SELECT fan-out, and pool_exhausted; Runtime: db.client.connection.* gauges" ;;
-    a26) echo "a26-cache.sh|Metrics: cache.hits/cache.misses and cache.size; Traces: parallel compute_recommendations spans; Logs/Field Explorer: cache.hit" ;;
+    a26) echo "a26-cache.sh|Metrics: cache_hits_total/cache_misses_total and cache_size; Traces: parallel compute_recommendations spans; Logs document fields: cache.hit" ;;
     a27) echo "a27-execution-stack.sh|Runs/Story: stitched CLI -> daemon -> container -> agent beats; orphan child trace has browser_without_backend" ;;
     a28) echo "a28-rum-journey.sh|Traces: browser route/user-step spans, web_vital spans, stitched checkout, RUM exception, and nopropagate disconnected-trace gap" ;;
     a29) echo "a29-typed-events.sh|Logs SQL/Event column: checkout.completed, checkout.failed, order.consumed, catalog.products.served, payment.authorized, and web.checkout.submitted" ;;

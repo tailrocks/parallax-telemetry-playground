@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A9: field-spike logs for Field Explorer demos.
+# A9: field-spike logs for structured log-field demos.
 set -euo pipefail
 
 BASE="${CHECKOUT_BASE:-http://localhost:8088}"
@@ -13,5 +13,5 @@ curl -sS "$BASE/checkout?sku=WIDGET-1&quantity=1&spike=$SCREEN" -o /dev/null -w 
 sleep 1
 
 echo "A9 done."
-echo "Check in Parallax: Logs plus Field Explorer (plan 046)."
+echo "Check in Parallax: Logs route document fields."
 echo "In the spike window, app_screen_name should be dominated by $SCREEN."
