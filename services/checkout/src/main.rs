@@ -225,7 +225,7 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
             "checkout.failed",
             &[
                 ("sku", p.sku.clone()),
-                ("error.type", "payment_failure".to_string()),
+                (semconv::ERROR_TYPE, "payment_failure".to_string()),
             ],
         );
         tracing::error!(sku = %p.sku, payment_failure_flag, release_regressed, "payment failure (chaos)");
@@ -307,7 +307,7 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
                 "checkout.failed",
                 &[
                     ("sku", p.sku.clone()),
-                    ("error.type", "pricing_unavailable".to_string()),
+                    (semconv::ERROR_TYPE, "pricing_unavailable".to_string()),
                 ],
             );
             tracing::error!(error = %err, "pricing call failed");
@@ -493,7 +493,7 @@ fn record_blocking_pool_depth() {
     static GAUGE: OnceLock<opentelemetry::metrics::Gauge<u64>> = OnceLock::new();
     let gauge = GAUGE.get_or_init(|| {
         opentelemetry::global::meter("playground.runtime")
-            .u64_gauge("tokio.runtime.blocking_pool_depth")
+            .u64_gauge(semconv::TOKIO_RUNTIME_BLOCKING_POOL_DEPTH)
             .with_description("Checkout spawn_blocking tasks in flight for the A22 saturation demo")
             .build()
     });

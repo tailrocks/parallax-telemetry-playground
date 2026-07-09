@@ -1,3 +1,4 @@
+use crate::semconv;
 use http::HeaderMap;
 use opentelemetry::propagation::{Extractor, Injector};
 use opentelemetry::trace::{Status, TraceContextExt};
@@ -181,7 +182,7 @@ pub fn inject_grpc_metadata(metadata: &mut MetadataMap) {
 pub fn mark_span_error(error_type: &'static str) {
     let span = tracing::Span::current();
     span.set_status(Status::error(error_type));
-    span.set_attribute("error.type", error_type);
+    span.set_attribute(semconv::ERROR_TYPE, error_type);
 }
 
 fn set_parent_if_valid(span: &tracing::Span, parent: Context) {

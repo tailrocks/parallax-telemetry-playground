@@ -85,6 +85,7 @@ if [[ $# -eq 0 ]]; then
 fi
 
 id="$1"
+shift
 if ! entry="$(scenario "$id")"; then
   echo "Unknown scenario: $id" >&2
   echo >&2
@@ -95,11 +96,9 @@ fi
 script="${entry%%|*}"
 check="${entry#*|}"
 if [[ "$id" == "a7" ]]; then
-  bun "$SCRIPT_DIR/$script"
-elif [[ "$id" == "b20" ]]; then
-  "$SCRIPT_DIR/$script" --yes
+  bun "$SCRIPT_DIR/$script" "$@"
 else
-  "$SCRIPT_DIR/$script"
+  "$SCRIPT_DIR/$script" "$@"
 fi
 echo
 echo "Check in Parallax UI: $check"

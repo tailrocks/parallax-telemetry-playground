@@ -64,7 +64,8 @@ Prereqs: start the lab (`parallax` repo `bench/otlp-fanout`), then this app's
 
 ### A2 — exemplars (JVM)
 Code: `catalog` exports the `catalog.product.queries` Micrometer counter with
-`management.tracing.exemplars.include=all`.
+the Java agent exemplar filter set by `OTEL_METRICS_EXEMPLAR_FILTER=trace_based`
+in compose.
 Verify: drive `products` queries; in the metrics backend (SigNoz/OpenObserve),
 open the counter and confirm a data point carries a `trace_id` exemplar that
 jumps to the trace. (Rust tier has no exemplars — issue #3369 — so use the JVM

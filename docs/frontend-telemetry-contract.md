@@ -25,8 +25,10 @@ emitted as a metric label.
 |---|---|---|
 | `app.screen.name` | short browser span + same-named span event | `app.screen.name`, `url.path` |
 | `ui.click` | short browser span + same-named span event | `app.screen.name`, `app.widget.name` |
-| `ui.submit` | short browser span + same-named span event | `app.screen.name`, `app.widget.name` |
-| `browser.web_vital` | short browser span + same-named span event | `web_vital.name`, `web_vital.value`, `web_vital.rating`, `web_vital.id`, `web_vital.delta`, `app.screen.name` |
+| `ui.submit` | short browser span + same-named span event | `app.screen.name`, `app.widget.name`, `telemetry.propagation.disabled` |
+| `web.checkout.submitted` | OTLP log event | `event.name`, `sku`, `quantity` |
+| `browser.web_vital` | short browser span + same-named span event | `web_vital.name`, `web_vital.value`, `web_vital.rating`, `web_vital.id`, `web_vital.delta`, `web_vital.navigation_type`, `app.screen.name` |
+| OTel exception event | span exception event | `error.type`, exception fields emitted by the Web SDK |
 
 The `browser.web_vital` name is intentionally stable; the metric name is an
 attribute (`CLS`, `FCP`, `INP`, `LCP`, `TTFB`) to avoid per-vital span names.

@@ -9,6 +9,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::{Json, Router, routing::get};
 use opentelemetry::global;
+use opentelemetry::{KeyValue, metrics::Histogram};
 use playground_telemetry::semconv;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -16,6 +17,7 @@ use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Postgres, Row};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tracing::Instrument;
@@ -199,6 +201,7 @@ async fn hold_connection(db: &DbState, hold_ms: u64) -> Result<(), sqlx::Error> 
 async fn run_slow_query(db: &DbState, slow_ms: u64) -> Result<(), sqlx::Error> {
     let span = playground_telemetry::db_span("SELECT", "SELECT pg_sleep", SLOW_QUERY_SQL);
     async {
+        let started = Instant::now();
         let result = async {
             let mut conn = acquire(db).await?;
             sqlx::query(SLOW_QUERY_SQL)
@@ -208,6 +211,7 @@ async fn run_slow_query(db: &DbState, slow_ms: u64) -> Result<(), sqlx::Error> {
             Ok(())
         }
         .await;
+        record_db_operation_duration("SELECT", started);
         if let Err(err) = &result {
             mark_current_db_error(err);
         }
@@ -220,6 +224,7 @@ async fn run_slow_query(db: &DbState, slow_ms: u64) -> Result<(), sqlx::Error> {
 async fn select_stock_once(db: &DbState, sku: &str) -> Result<Option<i64>, sqlx::Error> {
     let span = playground_telemetry::db_span("SELECT", "SELECT stock quantity", SELECT_STOCK_SQL);
     async {
+        let started = Instant::now();
         let result = async {
             let mut conn = acquire(db).await?;
             sqlx::query_scalar::<_, i64>(SELECT_STOCK_SQL)
@@ -228,6 +233,7 @@ async fn select_stock_once(db: &DbState, sku: &str) -> Result<Option<i64>, sqlx:
                 .await
         }
         .await;
+        record_db_operation_duration("SELECT", started);
         if let Err(err) = &result {
             mark_current_db_error(err);
         }
@@ -240,6 +246,7 @@ async fn select_stock_once(db: &DbState, sku: &str) -> Result<Option<i64>, sqlx:
 async fn reserve_stock(db: &DbState, sku: &str, quantity: u32) -> Result<Option<i64>, sqlx::Error> {
     let span = playground_telemetry::db_span("UPDATE", "UPDATE stock reserve", RESERVE_STOCK_SQL);
     async {
+        let started = Instant::now();
         let result = async {
             let mut conn = acquire(db).await?;
             sqlx::query(RESERVE_STOCK_SQL)
@@ -250,6 +257,7 @@ async fn reserve_stock(db: &DbState, sku: &str, quantity: u32) -> Result<Option<
                 .map(|row| row.map(|row| row.get::<i64, _>("quantity")))
         }
         .await;
+        record_db_operation_duration("UPDATE", started);
         if let Err(err) = &result {
             mark_current_db_error(err);
         }
@@ -271,7 +279,46 @@ async fn acquire(db: &DbState) -> Result<PoolConnection<Postgres>, sqlx::Error> 
     if wait_ms > 0 {
         tracing::debug!(wait_ms, "postgres pool acquire wait");
     }
+    record_db_connection_wait(wait_ms as f64);
     result
+}
+
+fn db_metric_attrs(operation: Option<&'static str>) -> Vec<KeyValue> {
+    let mut attrs = vec![
+        KeyValue::new("db.system.name", "postgresql"),
+        KeyValue::new("db.namespace", "playground"),
+    ];
+    if let Some(operation) = operation {
+        attrs.push(KeyValue::new("db.operation.name", operation));
+    }
+    attrs
+}
+
+fn record_db_operation_duration(operation: &'static str, started: Instant) {
+    static HISTOGRAM: OnceLock<Histogram<f64>> = OnceLock::new();
+    let histogram = HISTOGRAM.get_or_init(|| {
+        global::meter("playground.db")
+            .f64_histogram("db.client.operation.duration")
+            .with_unit("ms")
+            .with_description("Inventory Postgres client operation duration")
+            .build()
+    });
+    histogram.record(
+        started.elapsed().as_secs_f64() * 1_000.0,
+        &db_metric_attrs(Some(operation)),
+    );
+}
+
+fn record_db_connection_wait(wait_ms: f64) {
+    static HISTOGRAM: OnceLock<Histogram<f64>> = OnceLock::new();
+    let histogram = HISTOGRAM.get_or_init(|| {
+        global::meter("playground.db")
+            .f64_histogram("db.client.connection.wait_time")
+            .with_unit("ms")
+            .with_description("Inventory SQLx pool acquire wait time")
+            .build()
+    });
+    histogram.record(wait_ms, &db_metric_attrs(None));
 }
 
 fn db_error_response(err: sqlx::Error, sku: String) -> InventoryResponse {

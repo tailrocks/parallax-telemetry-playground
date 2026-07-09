@@ -29,8 +29,16 @@ run_slot() {
     return 0
   fi
   set +e
-  run_wrapped "$BIN" cron "$mode" --invocation-id "$id"
-  local code="$?"
+  if [[ "$mode" == "duplicate" ]]; then
+    run_wrapped "$BIN" cron ok --invocation-id "$id"
+    local first_code="$?"
+    run_wrapped "$BIN" cron ok --invocation-id "$id"
+    local second_code="$?"
+    local code="$(( first_code > second_code ? first_code : second_code ))"
+  else
+    run_wrapped "$BIN" cron "$mode" --invocation-id "$id"
+    local code="$?"
+  fi
   set -e
   echo "slot $slot exit=$code invocation=$id"
   sleep 5
@@ -45,4 +53,4 @@ run_slot 6 duplicate
 
 echo "B17b done."
 echo "Check in Parallax: Runs show exit codes and durations; slot 5 is absent by design."
-echo "Check traces/log attrs: slot 6 has two cron_job spans sharing cron.invocation.id."
+echo "Check traces/log attrs: slot 6 has two runs/spans sharing cron.invocation.id."

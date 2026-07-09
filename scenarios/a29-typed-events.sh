@@ -46,9 +46,9 @@ graphql_products
 cat <<CHECKS
 
 Check in Parallax:
-  - SQL fallback until plan 055 UI lands:
-    SELECT body, log_attributes FROM opentelemetry_logs
-    WHERE body IN ('checkout.completed', 'checkout.failed', 'order.consumed',
+  - Native GreptimeDB logs table:
+    SELECT event_name, body, log_attributes FROM opentelemetry_logs
+    WHERE event_name IN ('checkout.completed', 'checkout.failed', 'order.consumed',
       'catalog.products.served', 'payment.authorized', 'web.checkout.submitted');
   - Expected typed event names:
     checkout.completed, checkout.failed, order.consumed, catalog.products.served.
