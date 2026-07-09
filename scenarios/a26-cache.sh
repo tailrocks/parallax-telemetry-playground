@@ -41,4 +41,4 @@ request "$BASE/recommend?sku=$SKU&ttl_ms=$TTL_MS&stampede=10"
 echo
 
 echo "A26 done."
-echo "Check in Parallax: Dashboards -> metric cache.hits/cache.misses (rate agg); trace detail -> parallel compute_recommendations spans; Logs/Field explorer -> cache.hit field."
+echo "Check in Parallax: Dashboards -> metric cache_hits_total/cache_misses_total (rate agg) and cache_size; trace detail -> parallel compute_recommendations spans; Logs document fields -> cache.hit."
