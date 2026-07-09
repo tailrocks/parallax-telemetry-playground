@@ -368,8 +368,13 @@ fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
             environment_from(std::env::var("PARALLAX_ENV").ok()),
         ),
     ];
+    let otel_resource_attributes = std::env::var("OTEL_RESOURCE_ATTRIBUTES").ok();
     if let Ok(run_id) = std::env::var("PARALLAX_RUN_ID")
         && !run_id.trim().is_empty()
+        && !resource_attr_list_contains(
+            otel_resource_attributes.as_deref(),
+            semconv::PARALLAX_RUN_ID,
+        )
     {
         attributes.push(KeyValue::new(semconv::PARALLAX_RUN_ID, run_id));
     }
@@ -403,6 +408,17 @@ fn environment_from(value: Option<String>) -> String {
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         })
         .unwrap_or_else(|| semconv::DEFAULT_ENVIRONMENT.to_string())
+}
+
+fn resource_attr_list_contains(value: Option<&str>, attr: &str) -> bool {
+    value.is_some_and(|value| {
+        value.split(',').any(|pair| {
+            let Some((key, _value)) = pair.split_once('=') else {
+                return false;
+            };
+            key.trim() == attr
+        })
+    })
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
@@ -463,6 +479,19 @@ mod tests {
             semconv::DEFAULT_ENVIRONMENT
         );
         assert_eq!(environment_from(Some("prod".to_string())), "prod");
+    }
+
+    #[test]
+    fn resource_attr_list_detects_existing_run_id() {
+        assert!(resource_attr_list_contains(
+            Some("service.name=checkout, parallax.run.id=run-a"),
+            semconv::PARALLAX_RUN_ID
+        ));
+        assert!(!resource_attr_list_contains(
+            Some("service.name=checkout, parallax.session.id=s1"),
+            semconv::PARALLAX_RUN_ID
+        ));
+        assert!(!resource_attr_list_contains(None, semconv::PARALLAX_RUN_ID));
     }
 
     #[test]

@@ -27,6 +27,6 @@ OTLP/protobuf trace exporter line. Browser logs remain experimental upstream,
 but the package versions are compatible with the current OTel JS 0.220/2.8
 dependency set.
 
-Before Parallax plan 055 lands, the local SQL fallback is `body` +
-`log_attributes` in `opentelemetry_logs`; plan 055 promotes the OTel event name
-into a first-class `event_name` column/UI field.
+Parallax reads typed events from GreptimeDB's native `opentelemetry_logs`
+table. The OTel `EventName` field is exposed as `event_name`, and the Logs UI
+has a native Event column; no custom event table is used.

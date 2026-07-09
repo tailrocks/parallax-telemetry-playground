@@ -39,11 +39,18 @@ pub const WEB_CHECKOUT_SUBMITTED: &str = "web.checkout.submitted";
 pub const CATALOG_PRODUCTS_SERVED: &str = "catalog.products.served";
 pub const PAYMENT_AUTHORIZED: &str = "payment.authorized";
 
+pub const TOKIO_RUNTIME_WORKERS_COUNT: &str = "tokio.runtime.workers_count";
+pub const TOKIO_RUNTIME_ALIVE_TASKS: &str = "tokio.runtime.alive_tasks";
+pub const TOKIO_RUNTIME_GLOBAL_QUEUE_DEPTH: &str = "tokio.runtime.global_queue_depth";
+pub const TOKIO_RUNTIME_BLOCKING_POOL_DEPTH: &str = "tokio.runtime.blocking_pool_depth";
+pub const TOKIO_RUNTIME_TOTAL_PARK_COUNT: &str = "tokio.runtime.total_park_count";
+pub const TOKIO_RUNTIME_TOTAL_BUSY_DURATION_MS: &str = "tokio.runtime.total_busy_duration_ms";
+
 pub const TOKIO_RUNTIME_METRIC_NAMES: &[&str] = &[
-    "tokio.runtime.workers_count",
-    "tokio.runtime.alive_tasks",
-    "tokio.runtime.global_queue_depth",
-    "tokio.runtime.blocking_pool_depth",
-    "tokio.runtime.total_park_count",
-    "tokio.runtime.total_busy_duration_ms",
+    TOKIO_RUNTIME_WORKERS_COUNT,
+    TOKIO_RUNTIME_ALIVE_TASKS,
+    TOKIO_RUNTIME_GLOBAL_QUEUE_DEPTH,
+    TOKIO_RUNTIME_BLOCKING_POOL_DEPTH,
+    TOKIO_RUNTIME_TOTAL_PARK_COUNT,
+    TOKIO_RUNTIME_TOTAL_BUSY_DURATION_MS,
 ];

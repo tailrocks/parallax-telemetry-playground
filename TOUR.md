@@ -46,14 +46,15 @@ Use this path after `parallax serve` is running in the Parallax repo.
 
 ## 7. DB Spans And Pool Exhaustion
 
-- Command: after Parallax/playground plan 048.
+- Command: `scenarios/run.sh a25`
 - Route: Traces, Services
-- See: DB spans, pool saturation, and correlated latency.
+- See: Postgres SELECT/UPDATE spans, `db.client.operation.duration`,
+  `db.client.connection.wait_time`, pool saturation, and correlated latency.
 - Proves: storage bottlenecks become trace-visible.
 
 ## 8. GraphQL Field Shapes
 
-- Command: after plan 047.
+- Command: `scenarios/run.sh a6`
 - Route: Trace detail
 - See: GraphQL resolver and field-tree shapes.
 - Proves: expensive fields can be separated from cheap request envelopes.
@@ -94,5 +95,6 @@ Use this path after `parallax serve` is running in the Parallax repo.
 
 - Command: `scenarios/run.sh a12`
 - Route: Runs
-- See: short-lived CLI run with checkout story and exit code.
+- See: short-lived CLI run with checkout story, exit code, and exported
+  investigation bundle.
 - Proves: one-shot tools can be inspected as first-class telemetry.

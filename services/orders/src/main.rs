@@ -162,6 +162,38 @@ async fn consume_batch(batch: Vec<Msg>) {
     .await;
 }
 
+async fn consume_single(msg: Msg) {
+    if msg.poison {
+        // Redeliver up to 3 attempts, then dead-letter.
+        let order_id = msg.order_id.clone();
+        let producer_cx = msg.producer_cx.clone();
+        let lag_ms = msg.lag_ms;
+        let orphan = msg.orphan;
+        let enqueued_at = msg.enqueued_at;
+        for attempt in 1..=3 {
+            consume(
+                Msg {
+                    order_id: order_id.clone(),
+                    producer_cx: producer_cx.clone(),
+                    poison: true,
+                    lag_ms,
+                    batch: false,
+                    orphan,
+                    enqueued_at,
+                },
+                attempt,
+            )
+            .await;
+        }
+        let span = tracing::error_span!("dead_letter", otel.kind = semconv::SPAN_KIND_CONSUMER);
+        let _guard = span.enter();
+        playground_telemetry::mark_span_error("dead_letter");
+        tracing::error!(order_id = %order_id, "dead-lettered after 3 attempts");
+    } else {
+        consume(msg, 1).await;
+    }
+}
+
 async fn drain_batch(
     first: Msg,
     rx: &mut mpsc::Receiver<Msg>,
@@ -180,7 +212,7 @@ async fn drain_batch(
                 if msg.batch {
                     batch.push(msg);
                 } else {
-                    consume(msg, 1).await;
+                    consume_single(msg).await;
                 }
             }
             _ = &mut deadline => break,
@@ -244,36 +276,7 @@ async fn main() -> anyhow::Result<()> {
                 consume_batch(batch).await;
                 continue;
             }
-            if msg.poison {
-                // Redeliver up to 3 attempts, then dead-letter.
-                let order_id = msg.order_id.clone();
-                let producer_cx = msg.producer_cx.clone();
-                let lag_ms = msg.lag_ms;
-                let orphan = msg.orphan;
-                let enqueued_at = msg.enqueued_at;
-                for attempt in 1..=3 {
-                    consume(
-                        Msg {
-                            order_id: order_id.clone(),
-                            producer_cx: producer_cx.clone(),
-                            poison: true,
-                            lag_ms,
-                            batch: false,
-                            orphan,
-                            enqueued_at,
-                        },
-                        attempt,
-                    )
-                    .await;
-                }
-                let span =
-                    tracing::error_span!("dead_letter", otel.kind = semconv::SPAN_KIND_CONSUMER);
-                let _guard = span.enter();
-                playground_telemetry::mark_span_error("dead_letter");
-                tracing::error!(order_id = %order_id, "dead-lettered after 3 attempts");
-            } else {
-                consume(msg, 1).await;
-            }
+            consume_single(msg).await;
         }
     });
     let app = Router::new()
