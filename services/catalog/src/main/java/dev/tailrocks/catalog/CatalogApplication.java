@@ -75,8 +75,8 @@ class ProductController {
     // A14: OpenFeature flag evaluation (flagd provider) — the evaluation is
     // surfaced as feature_flag.* telemetry by the OTel hook at runtime.
     private final Client flags = OpenFeatureAPI.getInstance().getClient();
-    // A2: a Micrometer counter — exported via OTLP with trace exemplars
-    // (management.tracing.exemplars.include=all) so a metric data point links to
+    // A2: a Micrometer counter — exported via OTLP with trace exemplars when
+    // OTEL_METRICS_EXEMPLAR_FILTER=trace_based, so a metric data point links to
     // the trace that produced it. Exemplars are real on the JVM tier (the Rust
     // SDK has none yet).
     private final Counter productQueries;

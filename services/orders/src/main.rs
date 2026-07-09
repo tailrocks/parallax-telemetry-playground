@@ -162,6 +162,10 @@ async fn consume_batch(batch: Vec<Msg>) {
     .await;
 }
 
+fn batch_eligible(msg: &Msg) -> bool {
+    msg.batch && !msg.poison
+}
+
 async fn consume_single(msg: Msg) {
     if msg.poison {
         // Redeliver up to 3 attempts, then dead-letter.
@@ -209,7 +213,7 @@ async fn drain_batch(
                     break;
                 };
                 queue_depth.fetch_sub(1, Ordering::Relaxed);
-                if msg.batch {
+                if batch_eligible(&msg) {
                     batch.push(msg);
                 } else {
                     consume_single(msg).await;
@@ -271,7 +275,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             consumer_depth.fetch_sub(1, Ordering::Relaxed);
-            if msg.batch {
+            if batch_eligible(&msg) {
                 let batch = drain_batch(msg, &mut rx, &consumer_depth).await;
                 consume_batch(batch).await;
                 continue;
@@ -297,10 +301,14 @@ mod tests {
     use super::*;
 
     fn test_msg(batch: bool) -> Msg {
+        test_msg_with_poison(batch, false)
+    }
+
+    fn test_msg_with_poison(batch: bool, poison: bool) -> Msg {
         Msg {
             order_id: next_order_id(),
             producer_cx: Context::new(),
-            poison: false,
+            poison,
             lag_ms: 0,
             batch,
             orphan: false,
@@ -330,5 +338,21 @@ mod tests {
         let batch = drain_batch(test_msg(true), &mut rx, &depth).await;
         assert_eq!(batch.len(), 1);
         assert!(started.elapsed() >= BATCH_WINDOW);
+    }
+
+    #[tokio::test]
+    async fn batch_flag_does_not_hide_poison_messages() {
+        assert!(batch_eligible(&test_msg_with_poison(true, false)));
+        assert!(!batch_eligible(&test_msg_with_poison(true, true)));
+
+        let (tx, mut rx) = mpsc::channel::<Msg>(16);
+        let depth = AtomicI64::new(1);
+        tx.send(test_msg_with_poison(true, true)).await.unwrap();
+        drop(tx);
+
+        let batch = drain_batch(test_msg(true), &mut rx, &depth).await;
+
+        assert_eq!(batch.len(), 1);
+        assert_eq!(depth.load(Ordering::Relaxed), 0);
     }
 }
