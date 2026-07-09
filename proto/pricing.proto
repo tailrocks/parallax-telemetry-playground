@@ -15,6 +15,9 @@ service Pricing {
 message QuoteRequest {
   string sku = 1;
   uint32 quantity = 2;
+  // Lab-only knobs used by deterministic gRPC semantics scenarios.
+  uint32 delay_ms = 3;
+  uint32 fail_at = 4;
 }
 
 message QuoteResponse {

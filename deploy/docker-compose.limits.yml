@@ -1,0 +1,5 @@
+# Optional destructive demo overlay. Use only with scenarios/b20-container-oom.sh.
+services:
+  recommendation:
+    mem_limit: 128m
+    restart: unless-stopped

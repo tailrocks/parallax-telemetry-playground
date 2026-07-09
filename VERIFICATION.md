@@ -1,5 +1,9 @@
 # Verification runbook
 
+For the guided Parallax demo path see [`TOUR.md`](TOUR.md); for the quick
+traffic generator see `./demo.sh`. This file remains the full cross-backend
+verification runbook.
+
 What's verified in CI/sandbox vs what needs a real host. The **code/config for
 every scenario is implemented and builds**; the scenarios below need a live
 multi-runtime environment (Sentry self-hosted, a browser, a collector with a

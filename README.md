@@ -9,6 +9,7 @@ Sentry) can be compared on identical data.
 
 Full design: the Parallax repo's
 `docs/research/validation/telemetry-playground-sample-project.md`.
+Guided Parallax demo: [`TOUR.md`](TOUR.md).
 Apache-2.0 · Tailrocks.
 
 ## Architecture
@@ -19,13 +20,13 @@ web (TanStack/TS) ─HTTP─► checkout (Rust axum) ─gRPC─► pricing (Rust
                                   │                ├─GraphQL─► catalog (Java Spring GraphQL)
                                   │                ├─HTTP─► inventory / recommendation (Rust)
                                   │                └─publish─► broker ─► fulfillment (Java) ─HTTP─► notifications (Rust)
-cli (Rust) ─HTTP─► checkout            flagd (OpenFeature)   loadgen (k6)   Postgres
+cli (Rust) ─HTTP─► checkout            flagd (OpenFeature)   loadgen (k6, demo profile)   Postgres (reserved; DB scenarios later)
 ```
 
-All services export OTLP to the lab's **Rotel** (`OTEL_EXPORTER_OTLP_ENDPOINT`,
-default `host.docker.internal:4317`) **and** to Sentry via its SDK (envelope).
-One distributed trace stitches browser → Rust → Java → broker → Java → Rust via
-W3C trace context.
+All services export OTLP to a host listener on `4317`/`4318`: local
+`parallax serve` or the fan-out lab's **Rotel**. They also export to Sentry
+via SDK/envelope paths. One distributed trace stitches browser -> Rust -> Java
+-> broker -> Java -> Rust via W3C trace context.
 
 ## Status
 
@@ -71,15 +72,28 @@ W3C trace context.
 ## Run
 
 ```bash
-# Rust core (no Docker): two terminals
-cargo run --bin pricing
-PRICING_ENDPOINT=http://localhost:50051 cargo run --bin checkout
-curl "http://localhost:8088/checkout?sku=WIDGET-1&quantity=3"
+# Demo against Parallax (primary)
+# 1. In the Parallax repo:
+parallax serve
 
-# Everything, against the fan-out lab:
-#   1. start the lab (parallax repo: bench/otlp-fanout) so Rotel is on :4317
-#   2. docker compose -f deploy/docker-compose.yml up --build
-#   3. scenarios/a1-checkout.sh
+# 2. In this repo:
+./demo.sh
+
+# 3. Drive one story and open http://localhost:4000:
+scenarios/run.sh a1
+
+# Fan-out lab comparison (kept working)
+# 1. Start the lab (parallax repo: bench/otlp-fanout) so Rotel is on :4317
+# 2. docker compose -f deploy/docker-compose.yml up --build
+# 3. scenarios/a1-checkout.sh
+```
+
+CLI scenarios need the Rust binary first:
+
+```bash
+cargo build
+./target/debug/playground
+./target/debug/playground cron
 ```
 
 ## Roadmap

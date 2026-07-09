@@ -5,10 +5,11 @@
 import * as Sentry from "@sentry/tanstackstart-react";
 import { initOtel } from "./telemetry";
 
-// API origins that should receive W3C trace headers (and be matched by Sentry
-// tracePropagationTargets) — same-origin app + the checkout backend.
+// API origins matched by Sentry tracePropagationTargets. OTel app fetches use
+// tracedFetch() so they can inject trace context and session baggage explicitly.
 const checkoutUrl = import.meta.env.VITE_CHECKOUT_URL ?? "http://localhost:8088";
-const apiTargets: (string | RegExp)[] = [/^\//, checkoutUrl];
+const ordersUrl = import.meta.env.VITE_ORDERS_URL ?? "http://localhost:8092";
+const apiTargets: (string | RegExp)[] = [/^\//, checkoutUrl, ordersUrl];
 
 let started = false;
 
@@ -40,5 +41,5 @@ export function initBrowserTelemetry() {
   // Portable path: OTel WebTracerProvider → /v1/traces proxy. Fetch +
   // document-load + user-interaction instrumentation propagate traceparent to
   // the backend so the browser span joins the same distributed trace.
-  initOtel(apiTargets);
+  initOtel();
 }

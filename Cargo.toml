@@ -25,22 +25,31 @@ playground-proto = { path = "proto" }
 
 anyhow = "1"
 axum = "0.8"
+http = "1"
 tokio = { version = "1", features = ["full"] }
+tokio-metrics = "0.5"
 tonic = "0.14"
 tonic-prost = "0.14"
 tokio-stream = "0.1"
 prost = "0.14"
 tonic-prost-build = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls", "http2"] }
+# In-network Postgres is plaintext. If TLS is ever needed, use sqlx's
+# `tls-native-tls` feature; never rustls in this repo.
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "macros"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-opentelemetry = { version = "0.33", features = ["metrics"] }
 opentelemetry = "0.32"
+opentelemetry-http = "0.32"
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic", "trace", "logs", "metrics"] }
 opentelemetry-appender-tracing = "0.32"
 opentelemetry-semantic-conventions = "0.32"
+open-feature = "0.3.0"
+open-feature-flagd = "0.2.1"
 sentry = "0.48"
 sentry-tracing = "0.48"
+tower-http = { version = "0.6", features = ["cors"] }

@@ -22,4 +22,5 @@ dependencies {
     // so it is intentionally omitted; the agent owns OTel + Sentry init.
     implementation("dev.openfeature:sdk:1.21.0")
     implementation("dev.openfeature.contrib.providers:flagd:0.14.0")
+    implementation("io.opentelemetry:opentelemetry-api")
 }

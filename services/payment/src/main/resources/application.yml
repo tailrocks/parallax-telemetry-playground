@@ -10,7 +10,8 @@ sentry:
   # CPU-hot path (e.g. payment high-CPU chaos, B5) yields a trace-linked profile.
   profile-session-sample-rate: 1.0
   profile-lifecycle: trace
-management:
-  tracing:
-    exemplars:
-      include: all
+# OTel Java agent exemplar sampling is configured by
+# OTEL_METRICS_EXEMPLAR_FILTER in compose.
+logging:
+  pattern:
+    level: "trace_id=%mdc{trace_id} span_id=%mdc{span_id} %5p"

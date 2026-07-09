@@ -1,10 +1,53 @@
 {
   "$schema": "https://flagd.dev/schema/v0/flags.json",
   "flags": {
-    "paymentFailure":   { "state": "ENABLED", "variants": {"on": true, "off": false}, "defaultVariant": "off" },
-    "slowQuery":        { "state": "ENABLED", "variants": {"on": true, "off": false}, "defaultVariant": "off" },
-    "cacheLeak":        { "state": "ENABLED", "variants": {"on": true, "off": false}, "defaultVariant": "off" },
-    "poisonMessage":    { "state": "ENABLED", "variants": {"on": true, "off": false}, "defaultVariant": "off" },
-    "canaryFailure":    { "state": "ENABLED", "variants": {"on": true, "off": false}, "defaultVariant": "off" }
+    "paymentFailure": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
+    "slowQuery": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
+    "cacheLeak": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
+    "poisonMessage": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
+    "canaryFailure": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    },
+    "catalogPromo": {
+      "state": "ENABLED",
+      "variants": {
+        "on": true,
+        "off": false
+      },
+      "defaultVariant": "off"
+    }
   }
 }

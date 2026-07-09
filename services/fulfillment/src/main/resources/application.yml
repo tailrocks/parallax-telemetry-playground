@@ -12,3 +12,6 @@ sentry:
   # CPU-hot path (e.g. payment high-CPU chaos, B5) yields a trace-linked profile.
   profile-session-sample-rate: 1.0
   profile-lifecycle: trace
+logging:
+  pattern:
+    level: "trace_id=%mdc{trace_id} span_id=%mdc{span_id} %5p"

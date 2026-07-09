@@ -1,9 +1,9 @@
-# Telemetry Playground — all services. Emits OTLP to the fan-out lab's Rotel.
+# Telemetry Playground — all services. Emits OTLP to any host listener on
+# 4317/4318: local `parallax serve` (UI on :4000) or the fan-out lab's Rotel.
 #
-# The lab (separate repo: parallax bench/otlp-fanout) owns Rotel + the backends.
-# Here every service exports to OTEL_EXPORTER_OTLP_ENDPOINT, default the lab's
-# Rotel reached from a container via host.docker.internal:4317. Run the lab
-# first, then `docker compose up` here.
+# Here every service exports to OTEL_EXPORTER_OTLP_ENDPOINT, defaulting to a
+# listener reached from a container via host.docker.internal:4317. Start
+# Parallax or the lab first, then `docker compose up` here.
 #
 # Status: Rust services (checkout, pricing, inventory, recommendation,
 # notifications, orders) + Java (catalog GraphQL, payment gRPC, fulfillment
@@ -24,15 +24,23 @@ x-otlp: &otlp
   OTEL_METRICS_EXPORTER: "otlp"
   OTEL_LOGS_EXPORTER: "otlp"
   OTEL_PROPAGATORS: "tracecontext,baggage"
-  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=playground"
-  PARALLAX_ENV: "playground"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+  PARALLAX_ENV: "${PLAYGROUND_ENV:-playground}"
 
 services:
   checkout:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: checkout } }
-    environment: { <<: *otlp, PRICING_ENDPOINT: "http://pricing:50051", CHECKOUT_ADDR: "0.0.0.0:8088" }
+    environment:
+      <<: *otlp
+      PRICING_ENDPOINT: "http://pricing:50051"
+      CHECKOUT_ADDR: "0.0.0.0:8088"
+      RELEASE: "${RELEASE:-v1}"
+      GIT_SHA: "${GIT_SHA:-}"
+      PLAYGROUND_SAMPLE_RATIO: "${PLAYGROUND_SAMPLE_RATIO:-}"
+      FLAGD_HOST: "flagd"
+      FLAGD_CACHE: "disabled"
     ports: ["8088:8088"]
-    depends_on: [pricing]
+    depends_on: [pricing, inventory, recommendation, flagd]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
@@ -44,13 +52,21 @@ services:
 
   inventory:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: inventory } }
-    environment: { <<: *otlp, ADDR: "0.0.0.0:8089" }
+    environment:
+      <<: *otlp
+      ADDR: "0.0.0.0:8089"
+      DATABASE_URL: "postgres://postgres:${POSTGRES_PASSWORD:-playground}@postgres:5432/playground"
+    ports: ["8089:8089"]
+    depends_on:
+      postgres:
+        condition: service_healthy
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
   recommendation:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: recommendation } }
     environment: { <<: *otlp, ADDR: "0.0.0.0:8090" }
+    ports: ["8090:8090"]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
@@ -69,7 +85,13 @@ services:
 
   postgres:
     image: postgres:17
-    environment: { POSTGRES_PASSWORD: playground, POSTGRES_DB: playground }
+    environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}", POSTGRES_DB: playground }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d playground"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     networks: [pg]
 
   broker:
@@ -99,8 +121,16 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
       OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "catalog"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+      OTEL_INSTRUMENTATION_GRAPHQL_DATA_FETCHER_ENABLED: "true"
+      OTEL_INSTRUMENTATION_GRAPHQL_OPERATION_NAME_IN_SPAN_NAME_ENABLED: "false"
+      OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
+      OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_KEY_VALUE_PAIR_ATTRIBUTES: "true"
+      OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_MDC_ATTRIBUTES: "*"
+      OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       FLAGD_HOST: "flagd"
+      FLAGD_CACHE: "disabled"
       SERVER_PORT: "8080"
     ports: ["8080:8080"] # GraphQL (browser → catalog)
     depends_on: [flagd]
@@ -114,6 +144,11 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
       OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "payment"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+      OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
+      OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_KEY_VALUE_PAIR_ATTRIBUTES: "true"
+      OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_MDC_ATTRIBUTES: "*"
+      OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       SPRING_GRPC_SERVER_PORT: "9090"
     extra_hosts: ["host.docker.internal:host-gateway"]
@@ -126,6 +161,9 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
       OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "fulfillment"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+      OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
+      OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       KAFKA_BROKERS: "broker:9092"
       NOTIFICATIONS_URL: "http://notifications:8091"
@@ -142,9 +180,25 @@ services:
     environment:
       # Server-side OTLP proxy target (browser → /v1/traces → Rotel HTTP).
       ROTEL_OTLP_HTTP_ENDPOINT: "http://host.docker.internal:4318"
+      VITE_CHECKOUT_URL: "http://localhost:8088"
+      VITE_CHECKOUT_URL_NOPROP: "http://127.0.0.1:8088"
+      VITE_ORDERS_URL: "http://localhost:8092"
+      VITE_RELEASE: "${RELEASE:-v1}"
       PORT: "3000"
     ports: ["5173:3000"]
     extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
+  loadgen:
+    image: grafana/k6:latest
+    profiles: [demo]
+    command: ["run", "/scripts/demo.js"]
+    environment:
+      CHECKOUT_URL: "http://checkout:8088"
+      ORDERS_URL: "http://orders:8092"
+      FULFILLMENT_URL: "http://fulfillment:8080"
+    volumes: ["../loadgen:/scripts:ro"]
+    depends_on: [checkout, orders, fulfillment]
     networks: [pg]
 
 networks:
