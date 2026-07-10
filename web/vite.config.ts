@@ -1,7 +1,6 @@
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import { defineConfig } from "vite";
 import viteReact from "@vitejs/plugin-react";
-import { nitro } from "nitro/vite";
 import { sentryVitePlugin } from "@sentry/vite-plugin";
 
 // TanStack Start app. `tanstackStart` provides file-based routing + the server
@@ -15,7 +14,6 @@ export default defineConfig({
   plugins: [
     tanstackStart({ srcDirectory: "src" }),
     viteReact(),
-    nitro(),
     ...(sentryAuthToken
       ? [
           sentryVitePlugin({
