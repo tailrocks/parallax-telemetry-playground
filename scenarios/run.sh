@@ -11,6 +11,7 @@ a6              a6-graphql.sh                  catalog GraphQL field-span family
 a7              a7-subscription.ts             catalog GraphQL subscription smoke            Traces: long-lived priceChanges subscription span
 a7b             a7b-grpc-stream.sh             pricing gRPC stream events/failure/cancel    Traces: rpc.message SENT/RECEIVED events and stream_failed/cancel
 a9              a9-field-spike.sh              checkout structured log burst                Logs document fields: app_screen_name dominated by workspace-select
+a10             a10-baggage.sh                  checkout W3C tenant/tier baggage             Traces: checkout, inventory, and pricing carry tenant.id/user.tier
 a3              a3-async.sh                    orders producer/consumer                    Trace detail: producer span linked to consumer trace
 a4              a4-reverse.sh                  fulfillment -> Kafka -> notifications        Trace detail: Java async span link and Java -> Rust hop
 a12             a12-cli-run.sh                 playground CLI checkout driver              Runs: command row with exit code; cargo build first
@@ -48,6 +49,7 @@ scenario() {
     a7) echo "a7-subscription.ts|Traces: long-lived priceChanges subscription span; run with Bun" ;;
     a7b) echo "a7b-grpc-stream.sh|Traces: pricing stream SENT events, checkout RECEIVED events, stream_failed, and cancel observation" ;;
     a9) echo "a9-field-spike.sh|Logs document fields: app_screen_name dominated by workspace-select in the spike window" ;;
+    a10) echo "a10-baggage.sh|Traces: checkout, inventory, and pricing carry tenant.id/user.tier via W3C baggage" ;;
     a3) echo "a3-async.sh|Trace detail: producer span with link to consumer trace" ;;
     a4) echo "a4-reverse.sh|Trace detail: Java producer/consumer link plus Java -> Rust notifications hop" ;;
     a12) echo "a12-cli-run.sh|Runs: command row with exit code; requires cargo build first" ;;
