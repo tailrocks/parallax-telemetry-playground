@@ -21,6 +21,14 @@ test("rage-click journey records repeated promo interactions", async ({ page }) 
   await expect(promo).toBeVisible();
 });
 
+test("W4 retry fixture passes after one recorded assertion failure [retry]", async ({}, testInfo) => {
+  test.skip(
+    process.env.PLAYGROUND_TEST_FLAKY_FIXTURE !== "1",
+    "enabled only for the W4 test-observability acceptance run",
+  );
+  expect(testInfo.retry).toBe(1);
+});
+
 test("home to orders journey submits a batched order [batch]", async ({ page }) => {
   await page.route("**/order?**", async (route) => {
     await route.fulfill({

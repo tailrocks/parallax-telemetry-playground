@@ -53,7 +53,8 @@ export default class TelemetryReporter implements Reporter {
   onTestEnd(test: TestCase, result: TestResult): void {
     if (!this.provider) return;
 
-    const failed = result.status !== "passed";
+    const failed = result.status === "failed" || result.status === "timedOut" || result.status === "interrupted";
+    const status = result.status === "skipped" ? "skip" : failed ? "fail" : "pass";
     const titlePath = test.titlePath();
     const span = this.provider.getTracer(TEST_TRACER).startSpan(
       "test.case",
@@ -61,9 +62,9 @@ export default class TelemetryReporter implements Reporter {
         startTime: result.startTime,
         attributes: {
           [TEST_CASE_NAME]: titlePath.join(" › "),
-          [TEST_CASE_RESULT_STATUS]: failed ? "fail" : "pass",
+          [TEST_CASE_RESULT_STATUS]: status,
           [TEST_SUITE_NAME]: titlePath.slice(0, -1).join(" › "),
-          [TEST_SUITE_RUN_STATUS]: failed ? "fail" : "pass",
+          [TEST_SUITE_RUN_STATUS]: status,
           [PARALLAX_TEST_ID]: test.id,
           [CICD_PIPELINE_RUN_ID]: process.env.CI_RUN_ID ?? "",
           [CICD_PIPELINE_TASK_TYPE]: "playwright",
