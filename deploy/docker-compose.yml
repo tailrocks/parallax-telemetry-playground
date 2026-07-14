@@ -138,6 +138,9 @@ services:
       OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_KEY_VALUE_PAIR_ATTRIBUTES: "true"
       OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_MDC_ATTRIBUTES: "*"
       OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
+      # W5 probe: retain native exponential buckets from the JVM agent so each
+      # fan-out backend's rendering/conversion behavior can be compared.
+      OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: "base2_exponential_bucket_histogram"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       FLAGD_HOST: "flagd"
       FLAGD_CACHE: "disabled"

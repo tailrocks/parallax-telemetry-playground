@@ -71,6 +71,22 @@ the counter and inspect exemplar columns/metadata for a `trace_id` that links
 to the trace. (Rust tier has no exemplars — issue #3369 — so use the JVM
 counter.)
 
+### W5 — exponential-histogram conformance probe (JVM)
+
+Code: the `catalog` Java-agent service sets
+`OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION=base2_exponential_bucket_histogram`.
+Drive catalog GraphQL/HTTP traffic after the fan-out stack starts, then inspect
+the exported histogram's aggregation shape rather than assuming a backend
+conversion is lossless.
+
+| Backend | Expected recording evidence | Result |
+| --- | --- | --- |
+| Parallax | Native ingest disposition (currently expected to drop unsupported exponential histograms) | pending live run |
+| Maple | Histogram type/buckets visible or documented conversion | pending live run |
+| SigNoz | Histogram type/buckets visible or documented conversion | pending live run |
+| OpenObserve | Histogram type/buckets visible or documented conversion | pending live run |
+| Sentry | Metrics rendering/disposition recorded | pending live run |
+
 ### A5 / B15 — browser RUM + rage-clicks + session replay
 Code: `web` has `replayIntegration` + `browserTracingIntegration`; buttons
 "break (RUM error)" (A5) and "apply promo (unresponsive)" (B15).
