@@ -525,4 +525,27 @@ mod tests {
                 .contains("WIDGET-1")
         );
     }
+
+    #[tokio::test]
+    async fn serves_health_without_postgres_over_a_real_loopback_listener() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind inventory listener");
+        let address = listener.local_addr().expect("inventory listener address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app(AppState { db: None }))
+                .await
+                .expect("serve inventory");
+        });
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(3),
+            reqwest::get(format!("http://{address}/healthz")),
+        )
+        .await
+        .expect("inventory health timeout")
+        .expect("inventory health response");
+        assert_eq!(response.status(), StatusCode::OK);
+        server.abort();
+    }
 }

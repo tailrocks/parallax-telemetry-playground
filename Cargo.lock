@@ -1468,6 +1468,7 @@ dependencies = [
  "axum",
  "opentelemetry",
  "playground-telemetry",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",
