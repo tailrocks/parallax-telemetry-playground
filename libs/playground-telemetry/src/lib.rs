@@ -68,12 +68,27 @@ static EVENT_LOGGER: OnceLock<SdkLogger> = OnceLock::new();
 pub struct TestTelemetry {
     tracer_provider: SdkTracerProvider,
     dispatch: tracing::Dispatch,
+    parent_context: opentelemetry::Context,
+}
+
+/// Scoped test telemetry state installed by [`TestTelemetry::enter`].
+///
+/// The dispatcher must outlive the OpenTelemetry context guard: spans created
+/// while the propagated parent is attached are routed through that dispatcher.
+pub struct TestTelemetryGuard {
+    _dispatch: tracing::dispatcher::DefaultGuard,
+    _parent: opentelemetry::context::ContextGuard,
 }
 
 impl TestTelemetry {
     /// Makes the test's `tracing` spans children of the propagated test context.
-    pub fn enter(&self) -> tracing::dispatcher::DefaultGuard {
-        tracing::dispatcher::set_default(&self.dispatch)
+    pub fn enter(&self) -> TestTelemetryGuard {
+        let dispatch = tracing::dispatcher::set_default(&self.dispatch);
+        let parent = self.parent_context.clone().attach();
+        TestTelemetryGuard {
+            _dispatch: dispatch,
+            _parent: parent,
+        }
     }
 
     /// Flushes the simple exporter before the test process exits.
@@ -109,9 +124,11 @@ pub fn init_test_telemetry(service: &'static str) -> anyhow::Result<Option<TestT
     global::set_tracer_provider(provider.clone());
     let subscriber = tracing_subscriber::registry()
         .with(tracing_opentelemetry::layer().with_tracer(provider.tracer(service)));
+    let parent_context = extract_context_from_env();
     Ok(Some(TestTelemetry {
         tracer_provider: provider,
         dispatch: tracing::Dispatch::new(subscriber),
+        parent_context,
     }))
 }
 

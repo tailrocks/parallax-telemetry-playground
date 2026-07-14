@@ -72,6 +72,9 @@ mod tests {
 
     #[tokio::test]
     async fn serves_notifications_over_a_real_tcp_listener() {
+        let telemetry = playground_telemetry::init_test_telemetry("notifications-test")
+            .expect("test telemetry initializes");
+        let scope = telemetry.as_ref().map(|telemetry| telemetry.enter());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listener binds");
@@ -100,5 +103,10 @@ mod tests {
             .await
             .expect("server shuts down")
             .expect("server task joins");
+
+        drop(scope);
+        if let Some(telemetry) = telemetry {
+            telemetry.shutdown();
+        }
     }
 }

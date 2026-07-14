@@ -109,6 +109,19 @@ endpoint preserves the live-export path. On this host use
 `GRADLE_USER_HOME=/tmp/parallax-gradle` plus `-Dorg.gradle.native=false` to
 avoid the home-mounted native cache.
 
+### W4 — Rust in-process test telemetry
+
+Code: setting `PLAYGROUND_TEST_TELEMETRY=1` activates the shared Rust helper
+inside the real notifications loopback test. It extracts the supplied W3C
+`TRACEPARENT`, installs the test dispatcher and parent context as one scope,
+then explicitly shuts down the simple OTLP exporter after the test body.
+Default nextest runs remain exporter-free; the JUnit converter remains the
+complete result bridge for every Rust test.
+
+Verify: set `PLAYGROUND_TEST_TELEMETRY=1`, `TRACEPARENT`, and
+`OTEL_EXPORTER_OTLP_ENDPOINT` for a focused notifications nextest run. Inspect
+the test-run parent plus the HTTP server/client work below it in the collector.
+
 ### W5 — cross-language `PaymentError` grouping
 
 Code: Rust checkout's B1 failure and Java payment's `Quote` request with
