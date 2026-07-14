@@ -47,6 +47,23 @@ via SDK/envelope paths. One distributed trace stitches browser -> Rust -> Java
 | `web` | TanStack Start / TS | ✅ real TanStack Start app (file routing + Nitro): same-origin `/v1/traces` OTLP proxy, SSR `<meta traceparent>`, OTel browser + Sentry RUM — **builds + type-checks** (`bun run build`) |
 | `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd, k6, scenarios, compose (all services incl. Java + web; `Dockerfile.java`/`Dockerfile.web`) |
 
+## Test-telemetry conventions
+
+The checked-in generated semantic-convention files are the sole source for test
+run telemetry across the playground. Do not hand-copy these wire names:
+
+| Stack | Generated source |
+|---|---|
+| Rust | `libs/playground-telemetry/src/semconv.rs` |
+| Java | `services/semconv/src/main/java/io/tailrocks/semconv/Semconv.java` |
+| Web | `web/src/semconv.ts` |
+
+The shared test payload uses `test.case.name`, `test.case.result.status`,
+`test.suite.name`, `test.suite.run.status`, `cicd.pipeline.run.id`,
+`cicd.pipeline.task.type`, and `parallax.test.id` when an explicit stable test
+identity is available. Regenerate them only from Parallax with
+`cargo xtask semconv --playground-root ../parallax-telemetry-playground generate`.
+
 **Verified locally (2026-06-23):**
 - Rust workspace compiles (`cargo build`, fmt + clippy clean).
 - **Integrated end-to-end**: the four Rust services emit OTLP → the fan-out lab's
