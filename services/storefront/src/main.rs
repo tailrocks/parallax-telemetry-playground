@@ -223,12 +223,8 @@ fn field_error(error: impl std::fmt::Display) -> FieldError {
     FieldError::new(error.to_string(), juniper::Value::null())
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let telemetry = playground_telemetry::init("storefront")?;
-    let schema = Arc::new(Schema::new(Query, EmptyMutation::new(), Subscription));
-    let context = StoreContext::default();
-    let app = Router::new()
+fn app(schema: Arc<Schema>, context: StoreContext) -> Router {
+    Router::new()
         .route("/graphql", post(graphql::<Arc<Schema>>))
         .route(
             "/subscriptions",
@@ -240,11 +236,71 @@ async fn main() -> anyhow::Result<()> {
         .layer(Extension(schema))
         .layer(middleware::from_fn(
             playground_telemetry::http_server_observability,
-        ));
+        ))
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let telemetry = playground_telemetry::init("storefront")?;
+    let schema = Arc::new(Schema::new(Query, EmptyMutation::new(), Subscription));
+    let context = StoreContext::default();
+    let app = app(schema, context);
     let addr = std::env::var("STOREFRONT_ADDR").unwrap_or_else(|_| "0.0.0.0:8094".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(%addr, "storefront GraphQL ready: /graphql, /subscriptions, /graphiql");
     axum::serve(listener, app).await?;
     telemetry.shutdown();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    #[test]
+    fn maps_catalog_products_without_fabricating_values() {
+        let product = product_from_json(&serde_json::json!({
+            "sku": "WIDGET-1",
+            "name": "Widget",
+            "priceMinor": 1999,
+        }));
+        assert_eq!(product.sku, "WIDGET-1");
+        assert_eq!(product.name, "Widget");
+        assert_eq!(product.price_minor, 1999);
+    }
+
+    #[tokio::test]
+    async fn serves_graphiql_and_executes_introspection_without_upstreams() {
+        let schema = Arc::new(Schema::new(Query, EmptyMutation::new(), Subscription));
+        let response = app(schema.clone(), StoreContext::default())
+            .oneshot(
+                Request::builder()
+                    .uri("/graphiql")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app(schema, StoreContext::default())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/graphql")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"query":"{ __typename }"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(std::str::from_utf8(&body).unwrap().contains("Query"));
+    }
 }
