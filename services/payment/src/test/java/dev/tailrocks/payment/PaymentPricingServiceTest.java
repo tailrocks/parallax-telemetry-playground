@@ -26,6 +26,18 @@ class PaymentPricingServiceTest {
         assertNotNull(failing.error);
     }
 
+    @Test
+    void exposes_the_shared_payment_error_from_the_unary_endpoint() {
+        RecordingObserver observer = new RecordingObserver();
+        new PaymentPricingService().quote(
+            QuoteRequest.newBuilder().setSku("PAYMENT-ERROR").setQuantity(1).build(),
+            observer
+        );
+        assertTrue(observer.responses.isEmpty());
+        assertNotNull(observer.error);
+        assertTrue(observer.error.getMessage().contains("PaymentError: payment failed"));
+    }
+
     private static final class RecordingObserver implements StreamObserver<QuoteResponse> {
         private final List<QuoteResponse> responses = new ArrayList<>();
         private Throwable error;

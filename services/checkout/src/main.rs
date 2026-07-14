@@ -36,6 +36,17 @@ const MAX_BURST_FAN: u32 = 50;
 const MAX_BURST_DEPTH: u32 = 10;
 const MAX_BURST_SPANS: u64 = 2_000;
 
+#[derive(Debug)]
+struct PaymentError;
+
+impl std::fmt::Display for PaymentError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("PaymentError: payment failed")
+    }
+}
+
+impl std::error::Error for PaymentError {}
+
 /// Query flags arrive as `1`/`true`/`yes`/`on`; serde's bool wants `true`/`false`.
 fn de_flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     let s = String::deserialize(d)?;
@@ -228,15 +239,17 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
     let release_regressed = std::env::var("RELEASE").as_deref() == Ok("v2");
     if p.fail || payment_failure_flag || release_regressed {
         // B1/B12: deliberate failure → error issue + ERROR span status.
-        playground_telemetry::mark_span_error("payment_failure");
+        let error = PaymentError;
+        playground_telemetry::mark_span_error("PaymentError");
         playground_telemetry::emit_event(
             "checkout.failed",
             &[
                 ("sku", p.sku.clone()),
-                (semconv::ERROR_TYPE, "payment_failure".to_string()),
+                (semconv::ERROR_TYPE, "PaymentError".to_string()),
+                ("error.message", error.to_string()),
             ],
         );
-        tracing::error!(sku = %p.sku, payment_failure_flag, release_regressed, "payment failure (chaos)");
+        tracing::error!(error = %error, sku = %p.sku, payment_failure_flag, release_regressed, "payment failure (chaos)");
         // B4: cascading failure → degrade to a partial 200 when asked, else 502.
         if p.degrade {
             tracing::warn!("degraded: returning partial result without pricing");
@@ -747,6 +760,11 @@ mod tests {
         http::{Request, StatusCode},
     };
     use tower::ServiceExt;
+
+    #[test]
+    fn payment_error_has_the_shared_cross_language_identity() {
+        assert_eq!(PaymentError.to_string(), "PaymentError: payment failed");
+    }
 
     #[test]
     fn clamp_shape_bounds_fan_depth_and_estimated_spans() {

@@ -87,6 +87,19 @@ conversion is lossless.
 | OpenObserve | Histogram type/buckets visible or documented conversion | pending live run |
 | Sentry | Metrics rendering/disposition recorded | pending live run |
 
+### W5 — cross-language `PaymentError` grouping
+
+Code: Rust checkout's B1 failure and Java payment's `Quote` request with
+`sku=PAYMENT-ERROR` both record `error.type=PaymentError` and the exact message
+`PaymentError: payment failed` before their HTTP/gRPC transport layers render a
+failure. Java also sends the original exception to Sentry.
+
+Verify: trigger both paths against the same fan-out window. Record whether
+Sentry groups them (expected), whether Parallax's fingerprint associates them,
+and whether Maple, SigNoz, and OpenObserve retain only their trace/log error
+attributes. Do not call a shared `error.type` alone evidence of product-level
+grouping; record the rendered backend result in this section.
+
 ### A5 / B15 — browser RUM + rage-clicks + session replay
 Code: `web` has `replayIntegration` + `browserTracingIntegration`; buttons
 "break (RUM error)" (A5) and "apply promo (unresponsive)" (B15).
