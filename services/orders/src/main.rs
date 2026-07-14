@@ -444,4 +444,32 @@ mod tests {
         let queued = rx.recv().await.expect("queued message");
         assert!(queued.order_id.starts_with("order-"));
     }
+
+    #[tokio::test]
+    async fn serves_health_over_a_real_loopback_listener() {
+        let (tx, _rx) = mpsc::channel::<Msg>(1);
+        let state = App {
+            tx,
+            queue_depth: Arc::new(AtomicI64::new(0)),
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind orders listener");
+        let address = listener.local_addr().expect("orders listener address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app(state))
+                .await
+                .expect("serve orders");
+        });
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(3),
+            reqwest::get(format!("http://{address}/healthz")),
+        )
+        .await
+        .expect("orders health timeout")
+        .expect("orders health response");
+        assert_eq!(response.status(), StatusCode::OK);
+        server.abort();
+    }
 }
