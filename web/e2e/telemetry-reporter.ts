@@ -42,6 +42,8 @@ export default class TelemetryReporter implements Reporter {
         resource: resourceFromAttributes({
           [ATTR_SERVICE_NAME]: "playground-web-tests",
           [PARALLAX_RUN_ID]: process.env.PARALLAX_RUN_ID ?? "",
+          "service.version": process.env.RELEASE ?? "dev",
+          "vcs.ref.head.revision": process.env.GITHUB_SHA ?? process.env.VCS_REF ?? "",
         }),
         spanProcessors: [
           new SimpleSpanProcessor(new OTLPTraceExporter({ url: this.endpoint })),
@@ -52,20 +54,25 @@ export default class TelemetryReporter implements Reporter {
     if (!this.provider) return;
 
     const failed = result.status !== "passed";
+    const titlePath = test.titlePath();
     const span = this.provider.getTracer(TEST_TRACER).startSpan(
       "test.case",
       {
         startTime: result.startTime,
         attributes: {
-          [TEST_CASE_NAME]: test.title,
+          [TEST_CASE_NAME]: titlePath.join(" › "),
           [TEST_CASE_RESULT_STATUS]: failed ? "fail" : "pass",
-          [TEST_SUITE_NAME]: test.titlePath().slice(0, -1).join(" › "),
+          [TEST_SUITE_NAME]: titlePath.slice(0, -1).join(" › "),
           [TEST_SUITE_RUN_STATUS]: failed ? "fail" : "pass",
           [PARALLAX_TEST_ID]: test.id,
           [CICD_PIPELINE_RUN_ID]: process.env.CI_RUN_ID ?? "",
           [CICD_PIPELINE_TASK_TYPE]: "playwright",
-          "test.case.retry": result.retry,
+          "test.attempt.ordinal": result.retry + 1,
           "test.case.duration_ms": result.duration,
+          "test.case.parameters": parametersForTitle(test.title),
+          "test.configuration.browser": process.env.PLAYWRIGHT_BROWSER ?? "chromium",
+          "test.configuration.environment": process.env.PLAYGROUND_ENV ?? "playground",
+          "test.configuration.os": process.platform,
         },
       },
       parentContextFromTraceparent(traceparentForTest(test.id)),
@@ -73,6 +80,12 @@ export default class TelemetryReporter implements Reporter {
     if (failed) {
       const error = result.error;
       const message = error?.message ?? `Playwright test ${result.status}`;
+      span.setAttribute(
+        "test.case.failure.kind",
+        result.status === "timedOut" || result.status === "interrupted"
+          ? "harness_error"
+          : "assertion_failure",
+      );
       span.recordException({
         name: error?.name ?? "PlaywrightTestError",
         message,
@@ -93,6 +106,11 @@ export default class TelemetryReporter implements Reporter {
     await this.provider?.forceFlush();
     await this.provider?.shutdown();
   }
+}
+
+function parametersForTitle(title: string): string {
+  const match = title.match(/\[([^\]]+)]/);
+  return match?.[1] ?? "";
 }
 
 function parentContextFromTraceparent(traceparent: string): Context {
