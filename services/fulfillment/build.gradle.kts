@@ -7,6 +7,7 @@ plugins {
     id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
     id("com.google.protobuf") version "0.9.4"
+    id("com.atkinsondev.opentelemetry-build") version "4.6.2"
 }
 group = "dev.tailrocks"; version = "0.1.0"
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
@@ -23,7 +24,18 @@ dependencies {
     implementation("io.sentry:sentry-spring-boot-starter-jakarta:8.46.0")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
+openTelemetryBuild {
+    endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") ?: "http://rotel:4317"
+    serviceName = "fulfillment-tests"
+    customTags = mapOf("parallax.run.id" to (System.getenv("PARALLAX_RUN_ID") ?: ""))
+    taskTraceEnvironmentEnabled = true
+}
 protobuf {
     protoc { artifact = "com.google.protobuf:protoc:4.34.2" }
+}
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+    reports.junitXml.mergeReruns.set(true)
+    environment("PARALLAX_RUN_ID", System.getenv("PARALLAX_RUN_ID") ?: "")
 }
 sourceSets { main { proto { srcDir("../../proto") } } }
