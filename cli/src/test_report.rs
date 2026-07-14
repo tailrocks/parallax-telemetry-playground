@@ -17,6 +17,9 @@ use playground_telemetry::semconv;
 const FAILURE_MESSAGE: &str = "test.failure.message";
 const FAILURE_STACK: &str = "test.failure.stacktrace";
 const TEST_ATTEMPT: &str = "test.attempt.ordinal";
+const TEST_CODE_REFERENCE: &str = "test.code_reference";
+const TEST_CONFIGURATION_OS: &str = "test.configuration.os";
+const TEST_CONFIGURATION_ENVIRONMENT: &str = "test.configuration.environment";
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Summary {
@@ -80,6 +83,11 @@ pub(super) fn emit(path: &Path) -> anyhow::Result<Summary> {
 }
 
 fn emit_case(case: Case) {
+    let code_reference = code_reference(
+        &case,
+        std::env::var("NEXTEST_BINARY_ID").ok().as_deref(),
+        std::env::var("NEXTEST_TEST_NAME").ok().as_deref(),
+    );
     let mut attributes = vec![
         KeyValue::new(semconv::TEST_CASE_NAME, case.name.clone()),
         KeyValue::new(semconv::TEST_CASE_RESULT_STATUS, case.outcome.as_str()),
@@ -99,10 +107,13 @@ fn emit_case(case: Case) {
         ),
         KeyValue::new(
             semconv::PARALLAX_TEST_ID,
-            case.class_name.as_ref().map_or_else(
-                || format!("{}::{}", case.suite, case.name),
-                |class| format!("{class}::{}", case.name),
-            ),
+            explicit_test_id().unwrap_or_else(|| code_reference.clone()),
+        ),
+        KeyValue::new(TEST_CODE_REFERENCE, code_reference),
+        KeyValue::new(TEST_CONFIGURATION_OS, std::env::consts::OS),
+        KeyValue::new(
+            TEST_CONFIGURATION_ENVIRONMENT,
+            std::env::var("PARALLAX_ENV").unwrap_or_else(|_| "playground".into()),
         ),
         KeyValue::new(
             TEST_ATTEMPT,
@@ -137,6 +148,29 @@ fn emit_case(case: Case) {
         );
     }
     span.end();
+}
+
+fn explicit_test_id() -> Option<String> {
+    std::env::var(
+        semconv::PARALLAX_TEST_ID
+            .to_ascii_uppercase()
+            .replace('.', "_"),
+    )
+    .ok()
+    .filter(|value| !value.trim().is_empty())
+}
+
+fn code_reference(case: &Case, binary_id: Option<&str>, test_name: Option<&str>) -> String {
+    match (
+        binary_id.filter(|value| !value.is_empty()),
+        test_name.filter(|value| !value.is_empty()),
+    ) {
+        (Some(binary), Some(test)) => format!("{binary}::{test}"),
+        _ => case.class_name.as_ref().map_or_else(
+            || format!("{}::{}", case.suite, case.name),
+            |class| format!("{class}::{}", case.name),
+        ),
+    }
 }
 
 fn parse(document: &str) -> anyhow::Result<Vec<Case>> {
@@ -283,7 +317,7 @@ fn summarize(cases: &[Case]) -> Summary {
 
 #[cfg(test)]
 mod tests {
-    use super::{Outcome, parse, seconds_to_ms, summarize};
+    use super::{Case, Outcome, code_reference, parse, seconds_to_ms, summarize};
 
     #[test]
     fn parses_nested_suites_and_diagnostics() {
@@ -326,5 +360,26 @@ mod tests {
         assert_eq!(cases[0].outcome, Outcome::Fail);
         assert_eq!(diagnostic.message, "nope");
         assert!(diagnostic.stack.is_empty());
+    }
+
+    #[test]
+    fn uses_nextest_code_reference_without_configuration_identity() {
+        let case = Case {
+            suite: "suite".into(),
+            name: "case".into(),
+            class_name: Some("fallback::class".into()),
+            duration_ms: None,
+            outcome: Outcome::Pass,
+            diagnostic: None,
+        };
+        assert_eq!(
+            code_reference(
+                &case,
+                Some("pricing::bin/pricing"),
+                Some("tests::quote[usd]")
+            ),
+            "pricing::bin/pricing::tests::quote[usd]"
+        );
+        assert_eq!(code_reference(&case, None, None), "fallback::class::case");
     }
 }
