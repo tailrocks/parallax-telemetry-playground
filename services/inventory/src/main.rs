@@ -441,19 +441,23 @@ fn env_flag(value: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
+fn app(state: AppState) -> Router {
+    Router::new()
+        .route("/reserve", get(reserve))
+        .route("/healthz", get(|| async { "ok" }))
+        .with_state(state)
+        .layer(axum::middleware::from_fn(
+            playground_telemetry::http_server_observability,
+        ))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let telemetry = playground_telemetry::init("inventory")?;
     let state = AppState {
         db: init_db().await?,
     };
-    let app = Router::new()
-        .route("/reserve", get(reserve))
-        .route("/healthz", get(|| async { "ok" }))
-        .with_state(state)
-        .layer(axum::middleware::from_fn(
-            playground_telemetry::http_server_observability,
-        ));
+    let app = app(state);
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8089".into());
     tracing::info!(%addr, "inventory HTTP listening");
     axum::serve(tokio::net::TcpListener::bind(&addr).await?, app)
@@ -466,6 +470,11 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
 
     #[test]
     fn inventory_no_db_flag_accepts_explicit_truthy_values() {
@@ -481,5 +490,39 @@ mod tests {
         assert!(!env_flag(Some("")));
         assert!(!env_flag(Some("0")));
         assert!(!env_flag(Some("false")));
+    }
+
+    #[tokio::test]
+    async fn serves_health_and_memory_reservations_without_postgres() {
+        let state = AppState { db: None };
+        let health = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .expect("health request"),
+            )
+            .await
+            .expect("health response");
+        assert_eq!(health.status(), StatusCode::OK);
+
+        let reserve = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/reserve?sku=WIDGET-1&quantity=2")
+                    .body(Body::empty())
+                    .expect("reserve request"),
+            )
+            .await
+            .expect("reserve response");
+        assert_eq!(reserve.status(), StatusCode::OK);
+        let body = to_bytes(reserve.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        assert!(
+            std::str::from_utf8(&body)
+                .expect("UTF-8 body")
+                .contains("WIDGET-1")
+        );
     }
 }
