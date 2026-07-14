@@ -835,9 +835,7 @@ mod tests {
             .expect("bind checkout listener");
         let address = listener.local_addr().expect("checkout listener address");
         let server = tokio::spawn(async move {
-            axum::serve(listener, app())
-                .await
-                .expect("serve checkout");
+            axum::serve(listener, app()).await.expect("serve checkout");
         });
 
         let response = tokio::time::timeout(

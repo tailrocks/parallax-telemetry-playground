@@ -20,6 +20,9 @@ a short flush) that a sandbox can't provision.
   and `-Dorg.gradle.native=false`; this avoids the home-mounted native cache
   that cannot load Gradle/Jansi libraries. The live SSR/browser run requires a
   browser-capable host.
+- The complete Rust nextest `ci` profile passes 57 tests across 11 binaries;
+  its generated JUnit XML is accepted by `playground test-report` as 57 passed
+  cases with no implicit localhost exporter.
 - `parallax run start` compare-mode forward (Parallax repo, 11 tests).
 - Lab fan-out: trace → Rotel → OpenObserve (queried back by service).
 - Multi-service Rust distributed trace (checkout → pricing/inventory/recommendation).

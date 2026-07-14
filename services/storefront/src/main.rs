@@ -307,7 +307,11 @@ mod tests {
     #[tokio::test]
     async fn streams_subscription_ticks_without_an_upstream() {
         let mut ticks = Subscription::price_ticks().await;
-        let tick = ticks.next().await.expect("first tick").expect("tick result");
+        let tick = ticks
+            .next()
+            .await
+            .expect("first tick")
+            .expect("tick result");
         assert_eq!(tick.sku, "WIDGET-1");
         assert_eq!(tick.quantity, 1);
         assert_eq!(tick.total_minor, "1999");
