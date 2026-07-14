@@ -3,14 +3,17 @@ package dev.tailrocks.payment;
 import dev.tailrocks.pricing.v1.QuoteRequest;
 import dev.tailrocks.pricing.v1.QuoteResponse;
 import io.grpc.stub.StreamObserver;
+import io.tailrocks.testsupport.OpenTelemetryTestExtension;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@ExtendWith(OpenTelemetryTestExtension.class)
 class PaymentPricingServiceTest {
     @Test
     void streamsOrderedQuotesAndReportsRequestedFailure() {

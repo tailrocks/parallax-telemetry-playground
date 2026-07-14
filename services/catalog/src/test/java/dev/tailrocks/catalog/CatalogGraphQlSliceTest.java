@@ -2,9 +2,11 @@ package dev.tailrocks.catalog;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.tailrocks.testsupport.OpenTelemetryTestExtension;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.micrometer.tracing.test.autoconfigure.AutoConfigureTracing;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -20,6 +22,7 @@ import static org.mockito.Mockito.when;
 @GraphQlTest(controllers = ProductController.class)
 @AutoConfigureTracing
 @Import(CatalogGraphQlSliceTest.Meters.class)
+@ExtendWith(OpenTelemetryTestExtension.class)
 class CatalogGraphQlSliceTest {
     @Autowired
     private GraphQlTester graphQlTester;

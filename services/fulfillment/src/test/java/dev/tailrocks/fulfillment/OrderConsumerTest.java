@@ -8,14 +8,17 @@ import io.grpc.Server;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
+import io.tailrocks.testsupport.OpenTelemetryTestExtension;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+@ExtendWith(OpenTelemetryTestExtension.class)
 class OrderConsumerTest {
     @Test
     void consumes_an_order_through_payment_then_notifies_rust() throws Exception {

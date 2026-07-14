@@ -25,6 +25,7 @@ dependencies {
     implementation("dev.openfeature:sdk:1.21.0")
     implementation("dev.openfeature.contrib.providers:flagd:0.14.0")
     implementation("io.opentelemetry:opentelemetry-api")
+    compileOnly("org.junit.jupiter:junit-jupiter-api")
     runtimeOnly("org.postgresql:postgresql")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-micrometer-tracing-test")

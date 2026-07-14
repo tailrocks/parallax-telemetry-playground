@@ -1,13 +1,16 @@
 package dev.tailrocks.catalog;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.tailrocks.testsupport.OpenTelemetryTestExtension;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+@ExtendWith(OpenTelemetryTestExtension.class)
 class ProductControllerTest {
     private static final List<Product> PRODUCTS = List.of(
         new Product("1", "WIDGET-1", "Widget", 1999),

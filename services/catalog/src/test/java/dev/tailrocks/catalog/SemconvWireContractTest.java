@@ -3,13 +3,16 @@ package dev.tailrocks.catalog;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.tailrocks.semconv.Semconv;
+import io.tailrocks.testsupport.OpenTelemetryTestExtension;
 import java.lang.reflect.Field;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+@ExtendWith(OpenTelemetryTestExtension.class)
 class SemconvWireContractTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 

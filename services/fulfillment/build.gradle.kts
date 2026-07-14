@@ -11,10 +11,13 @@ plugins {
 }
 group = "dev.tailrocks"; version = "0.1.0"
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+sourceSets { main { java { srcDir("../semconv/src/main/java") } } }
 repositories { mavenCentral() }
 val otelJavaAgent = configurations.create("otelJavaAgent")
 val testOtelEndpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")?.takeIf(String::isNotBlank)
 dependencies {
+    implementation("io.opentelemetry:opentelemetry-api")
+    compileOnly("org.junit.jupiter:junit-jupiter-api")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-web")
     // Spring Boot 4 modularized auto-configuration: plain spring-kafka no longer

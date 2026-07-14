@@ -7,15 +7,18 @@ import io.grpc.ManagedChannel;
 import io.grpc.Server;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
+import io.tailrocks.testsupport.OpenTelemetryTestExtension;
 import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+@ExtendWith(OpenTelemetryTestExtension.class)
 class PaymentGrpcTransportTest {
     private Server server;
     private ManagedChannel channel;
