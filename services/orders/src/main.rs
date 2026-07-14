@@ -8,7 +8,12 @@
 //! (B8); POST /order?lag_ms=<n> → slow consumer to build queue depth (B7).
 
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, header};
-use axum::{Json, Router, extract::Query, extract::State, routing::post};
+use axum::{
+    Json, Router,
+    extract::Query,
+    extract::State,
+    routing::{get, post},
+};
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::{Context, global};
 use playground_telemetry::semconv;
@@ -293,6 +298,17 @@ fn cors_layer() -> CorsLayer {
         ])
 }
 
+fn app(state: App) -> Router {
+    Router::new()
+        .route("/order", post(publish))
+        .route("/healthz", get(|| async { "ok" }))
+        .with_state(state)
+        .layer(cors_layer())
+        .layer(axum::middleware::from_fn(
+            playground_telemetry::http_server_observability,
+        ))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let telemetry = playground_telemetry::init("orders")?;
@@ -311,13 +327,7 @@ async fn main() -> anyhow::Result<()> {
             consume_single(msg).await;
         }
     });
-    let app = Router::new()
-        .route("/order", post(publish))
-        .with_state(App { tx, queue_depth })
-        .layer(cors_layer())
-        .layer(axum::middleware::from_fn(
-            playground_telemetry::http_server_observability,
-        ));
+    let app = app(App { tx, queue_depth });
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8092".into());
     tracing::info!(%addr, "orders HTTP listening");
     axum::serve(tokio::net::TcpListener::bind(&addr).await?, app)
@@ -330,6 +340,11 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
 
     fn test_msg(batch: bool) -> Msg {
         test_msg_with_poison(batch, false)
@@ -385,5 +400,48 @@ mod tests {
 
         assert_eq!(batch.len(), 1);
         assert_eq!(depth.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn serves_health_and_enqueues_orders_over_http() {
+        let (tx, mut rx) = mpsc::channel::<Msg>(1);
+        let state = App {
+            tx,
+            queue_depth: Arc::new(AtomicI64::new(0)),
+        };
+
+        let health = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .expect("health request"),
+            )
+            .await
+            .expect("health response");
+        assert_eq!(health.status(), StatusCode::OK);
+
+        let response = app(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/order")
+                    .body(Body::empty())
+                    .expect("order request"),
+            )
+            .await
+            .expect("order response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        assert!(
+            std::str::from_utf8(&body)
+                .expect("UTF-8 body")
+                .contains("queued")
+        );
+
+        let queued = rx.recv().await.expect("queued message");
+        assert!(queued.order_id.starts_with("order-"));
     }
 }
