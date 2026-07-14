@@ -21,6 +21,15 @@ pub fn set_parent_from_headers(span: &tracing::Span, headers: &HeaderMap) {
     set_parent_if_valid(span, extract_context(headers));
 }
 
+/// Copies the A10 business baggage into a server span for backend inspection.
+pub fn stamp_business_baggage(span: &tracing::Span, context: &Context) {
+    for key in [semconv::TENANT_ID, semconv::USER_TIER] {
+        if let Some(value) = context.baggage().get(key) {
+            span.set_attribute(key, value.to_string());
+        }
+    }
+}
+
 pub fn inject_context_headers(context: &Context, headers: &mut HeaderMap) {
     global::get_text_map_propagator(|propagator| {
         propagator.inject_context(context, &mut HeaderInjector(headers));
@@ -180,17 +189,15 @@ fn env_key(key: &str) -> Option<&'static str> {
 }
 
 pub fn set_parent_from_grpc(metadata: &MetadataMap) {
-    let parent = global::get_text_map_propagator(|propagator| {
-        propagator.extract(&MetadataExtractor(metadata))
-    });
-    set_parent_if_valid(&tracing::Span::current(), parent);
+    set_parent_if_valid(&tracing::Span::current(), extract_grpc_context(metadata));
 }
 
 pub fn set_parent_from_grpc_metadata(span: &tracing::Span, metadata: &MetadataMap) {
-    let parent = global::get_text_map_propagator(|propagator| {
-        propagator.extract(&MetadataExtractor(metadata))
-    });
-    set_parent_if_valid(span, parent);
+    set_parent_if_valid(span, extract_grpc_context(metadata));
+}
+
+pub fn extract_grpc_context(metadata: &MetadataMap) -> Context {
+    global::get_text_map_propagator(|propagator| propagator.extract(&MetadataExtractor(metadata)))
 }
 
 pub fn inject_grpc_metadata(metadata: &mut MetadataMap) {

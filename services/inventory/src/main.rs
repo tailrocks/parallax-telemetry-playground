@@ -85,7 +85,9 @@ async fn reserve(
     Query(p): Query<Reserve>,
 ) -> impl IntoResponse {
     let span = tracing::info_span!("reserve", otel.kind = semconv::SPAN_KIND_SERVER);
+    let parent = playground_telemetry::extract_context(&headers);
     playground_telemetry::set_parent_from_headers(&span, &headers);
+    playground_telemetry::stamp_business_baggage(&span, &parent);
     reserve_inner(state, p).instrument(span).await
 }
 

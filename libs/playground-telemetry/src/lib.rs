@@ -25,9 +25,10 @@ pub mod semconv;
 pub use feature_flags::feature_flag;
 pub use propagation::{
     context_env, current_context, current_context_env, extract_context, extract_context_from_env,
-    inject_context_headers, inject_grpc_metadata, inject_headers, mark_span_error, set_parent_from,
-    set_parent_from_env, set_parent_from_grpc, set_parent_from_grpc_metadata,
-    set_parent_from_headers, traced_get, with_business_baggage,
+    extract_grpc_context, inject_context_headers, inject_grpc_metadata, inject_headers,
+    mark_span_error, set_parent_from, set_parent_from_env, set_parent_from_grpc,
+    set_parent_from_grpc_metadata, set_parent_from_headers, stamp_business_baggage, traced_get,
+    with_business_baggage,
 };
 
 use axum::{

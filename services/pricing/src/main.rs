@@ -26,7 +26,9 @@ impl Pricing for PricingSvc {
         request: Request<QuoteRequest>,
     ) -> Result<Response<QuoteResponse>, Status> {
         let span = tracing::info_span!("quote", otel.kind = semconv::SPAN_KIND_SERVER);
+        let parent = playground_telemetry::extract_grpc_context(request.metadata());
         playground_telemetry::set_parent_from_grpc_metadata(&span, request.metadata());
+        playground_telemetry::stamp_business_baggage(&span, &parent);
         async move {
             let grpc_timeout = grpc_timeout(request.metadata());
             let req = request.into_inner();
@@ -71,7 +73,9 @@ impl Pricing for PricingSvc {
         request: Request<QuoteRequest>,
     ) -> Result<Response<Self::QuoteStreamStream>, Status> {
         let span = tracing::info_span!("quote_stream", otel.kind = semconv::SPAN_KIND_SERVER);
+        let parent = playground_telemetry::extract_grpc_context(request.metadata());
         playground_telemetry::set_parent_from_grpc_metadata(&span, request.metadata());
+        playground_telemetry::stamp_business_baggage(&span, &parent);
         async move {
             let req = request.into_inner();
             let n = req.quantity.max(1);
