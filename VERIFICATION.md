@@ -102,6 +102,11 @@ and whether Maple, SigNoz, and OpenObserve retain only their trace/log error
 attributes. Do not call a shared `error.type` alone evidence of product-level
 grouping; record the rendered backend result in this section.
 
+The runnable driver is `CROSS_LANGUAGE_PAYMENT_ERROR=1
+scenarios/b-chaos.sh` after starting the existing
+`deploy/docker-compose.xlang.yml` overlay, which routes checkout's pricing call
+to Java payment.
+
 ### A5 / B15 — browser RUM + rage-clicks + session replay
 Code: `web` has `replayIntegration` + `browserTracingIntegration`; buttons
 "break (RUM error)" (A5) and "apply promo (unresponsive)" (B15).
