@@ -8,6 +8,8 @@ import dev.openfeature.sdk.FlagEvaluationDetails;
 import dev.openfeature.sdk.HookContext;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Repository;
 import org.springframework.graphql.data.method.annotation.Argument;
 import org.springframework.graphql.data.method.annotation.BatchMapping;
 import org.springframework.graphql.data.method.annotation.QueryMapping;
@@ -65,14 +67,11 @@ class ProductController {
     private static final long MAX_HEAP_HOLD_MS = 30_000;
     private static final String PARTIAL_ERROR_SKU = "GADGET-1";
     private static final Tracer TRACER = GlobalOpenTelemetry.getTracer("catalog-graphql-scenarios");
-    private static final List<Product> CATALOG = List.of(
-        new Product("1", "WIDGET-1", "Widget", 1999),
-        new Product("2", "GADGET-1", "Gadget", 4999)
-    );
+    private final CatalogRepository catalog;
 
     @QueryMapping
     Product product(@Argument String sku) {
-        return CATALOG.stream().filter(p -> p.sku().equals(sku)).findFirst().orElse(null);
+        return catalog.findBySku(sku);
     }
 
     // A14: OpenFeature flag evaluation (flagd provider) — the evaluation is
@@ -84,7 +83,8 @@ class ProductController {
     // SDK has none yet).
     private final Counter productQueries;
 
-    ProductController(MeterRegistry meters) {
+    ProductController(CatalogRepository catalog, MeterRegistry meters) {
+        this.catalog = catalog;
         this.productQueries = Counter.builder(Semconv.CATALOG_PRODUCT_QUERIES)
             .description("product list queries")
             .register(meters);
@@ -95,7 +95,7 @@ class ProductController {
         productQueries.increment();
         boolean promo = flags.getBooleanValue("catalogPromo", false);
         Span.current().setAttribute("catalog.promo", promo);
-        var products = new ArrayList<>(CATALOG);
+        var products = new ArrayList<>(catalog.findAll());
         if (promo) {
             Collections.reverse(products);
         }
@@ -208,12 +208,61 @@ class ProductController {
     Flux<Product> priceChanges() {
         return Flux.interval(Duration.ofSeconds(1))
             .map(tick -> {
-                Product base = CATALOG.get((int) (tick % CATALOG.size()));
+                List<Product> catalogProducts = catalog.findAll();
+                Product base = catalogProducts.get((int) (tick % catalogProducts.size()));
                 int jitter = (int) (tick % 5) * 10;
                 return new Product(base.id(), base.sku(), base.name(),
                     base.priceMinor() + jitter);
             })
             .take(10);
+    }
+}
+
+interface CatalogRepository {
+    Product findBySku(String sku);
+    List<Product> findAll();
+}
+
+@Repository
+class JdbcCatalogRepository implements CatalogRepository {
+    private final JdbcClient jdbc;
+
+    JdbcCatalogRepository(JdbcClient jdbc) {
+        this.jdbc = jdbc;
+    }
+
+    @Override
+    public Product findBySku(String sku) {
+        return jdbc.sql("""
+                SELECT id, sku, name, price_minor
+                FROM catalog_products
+                WHERE sku = :sku
+                """)
+            .param("sku", sku)
+            .query(JdbcCatalogRepository::mapProduct)
+            .optional()
+            .orElse(null);
+    }
+
+    @Override
+    public List<Product> findAll() {
+        return jdbc.sql("""
+                SELECT id, sku, name, price_minor
+                FROM catalog_products
+                ORDER BY id
+                """)
+            .query(JdbcCatalogRepository::mapProduct)
+            .list();
+    }
+
+    private static Product mapProduct(java.sql.ResultSet resultSet, int rowNum)
+        throws java.sql.SQLException {
+        return new Product(
+            resultSet.getString("id"),
+            resultSet.getString("sku"),
+            resultSet.getString("name"),
+            resultSet.getInt("price_minor")
+        );
     }
 }
 

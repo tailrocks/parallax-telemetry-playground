@@ -1,6 +1,13 @@
 spring:
   application:
     name: catalog
+  datasource:
+    url: ${CATALOG_DATABASE_URL:jdbc:postgresql://postgres:5432/playground}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:playground}
+  sql:
+    init:
+      mode: always
   graphql:
     # A7: GraphQL-over-WebSocket transport for the priceChanges subscription.
     websocket:

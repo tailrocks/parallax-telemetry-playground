@@ -9,7 +9,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class ProductControllerTest {
-    private final ProductController controller = new ProductController(new SimpleMeterRegistry());
+    private static final List<Product> PRODUCTS = List.of(
+        new Product("1", "WIDGET-1", "Widget", 1999),
+        new Product("2", "GADGET-1", "Gadget", 4999)
+    );
+    private final ProductController controller = new ProductController(new CatalogRepository() {
+        @Override
+        public Product findBySku(String sku) {
+            return PRODUCTS.stream().filter(product -> product.sku().equals(sku)).findFirst().orElse(null);
+        }
+
+        @Override
+        public List<Product> findAll() {
+            return PRODUCTS;
+        }
+    }, new SimpleMeterRegistry());
 
     @Test
     void resolvesProductsAndPreservesBatchReviewShape() {

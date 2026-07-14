@@ -141,9 +141,12 @@ services:
       SENTRY_DSN: "${SENTRY_DSN:-}"
       FLAGD_HOST: "flagd"
       FLAGD_CACHE: "disabled"
+      CATALOG_DATABASE_URL: "jdbc:postgresql://postgres:5432/playground"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}"
       SERVER_PORT: "8080"
     ports: ["8080:8080"] # GraphQL (browser → catalog)
-    depends_on: [flagd]
+    depends_on: [flagd, postgres]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 

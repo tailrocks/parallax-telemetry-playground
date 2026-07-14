@@ -17,11 +17,13 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     // A7: GraphQL-over-WebSocket transport for the priceChanges subscription.
     implementation("org.springframework.boot:spring-boot-starter-websocket")
+    implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("io.sentry:sentry-spring-boot-starter-jakarta:8.46.0")
     implementation("dev.openfeature:sdk:1.21.0")
     implementation("dev.openfeature.contrib.providers:flagd:0.14.0")
     implementation("io.opentelemetry:opentelemetry-api")
+    runtimeOnly("org.postgresql:postgresql")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
 openTelemetryBuild {
