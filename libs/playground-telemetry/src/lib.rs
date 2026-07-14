@@ -59,6 +59,66 @@ pub use semconv::TOKIO_RUNTIME_METRIC_NAMES;
 
 static EVENT_LOGGER: OnceLock<SdkLogger> = OnceLock::new();
 
+/// Opt-in telemetry for one nextest test process.
+///
+/// Set `PLAYGROUND_TEST_TELEMETRY=1` when invoking nextest. The helper uses a
+/// simple exporter and an explicit shutdown because a failing libtest process
+/// may exit before batch processors can flush. Keep the returned value alive
+/// for the test and use [`TestTelemetry::enter`] around the test body.
+pub struct TestTelemetry {
+    tracer_provider: SdkTracerProvider,
+    dispatch: tracing::Dispatch,
+}
+
+impl TestTelemetry {
+    /// Makes the test's `tracing` spans children of the propagated test context.
+    pub fn enter(&self) -> tracing::dispatcher::DefaultGuard {
+        tracing::dispatcher::set_default(&self.dispatch)
+    }
+
+    /// Flushes the simple exporter before the test process exits.
+    pub fn shutdown(self) {
+        let _ = self.tracer_provider.shutdown();
+    }
+}
+
+/// Initializes a per-process test tracer when explicitly requested.
+///
+/// `TRACEPARENT` is extracted into the current context by the existing
+/// propagator helpers, so test code can stitch outbound HTTP/gRPC spans below
+/// its runner-provided test root. No telemetry is installed by default.
+pub fn init_test_telemetry(service: &'static str) -> anyhow::Result<Option<TestTelemetry>> {
+    if !test_telemetry_enabled(std::env::var("PLAYGROUND_TEST_TELEMETRY").ok().as_deref()) {
+        return Ok(None);
+    }
+    global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
+        Box::new(TraceContextPropagator::new()),
+        Box::new(BaggagePropagator::new()),
+    ]));
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .build()?;
+    let provider = SdkTracerProvider::builder()
+        .with_resource(
+            Resource::builder()
+                .with_attributes(resource_attributes(service))
+                .build(),
+        )
+        .with_simple_exporter(exporter)
+        .build();
+    global::set_tracer_provider(provider.clone());
+    let subscriber = tracing_subscriber::registry()
+        .with(tracing_opentelemetry::layer().with_tracer(provider.tracer(service)));
+    Ok(Some(TestTelemetry {
+        tracer_provider: provider,
+        dispatch: tracing::Dispatch::new(subscriber),
+    }))
+}
+
+fn test_telemetry_enabled(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
 pub fn db_span(
     operation_name: &'static str,
     query_summary: &'static str,
@@ -618,6 +678,13 @@ mod tests {
             sample_ratio_from(Some("1.1")),
             SampleRatioSetting::Invalid
         ));
+    }
+
+    #[test]
+    fn test_telemetry_requires_explicit_opt_in() {
+        assert!(!test_telemetry_enabled(None));
+        assert!(!test_telemetry_enabled(Some("true")));
+        assert!(test_telemetry_enabled(Some("1")));
     }
 
     #[test]
