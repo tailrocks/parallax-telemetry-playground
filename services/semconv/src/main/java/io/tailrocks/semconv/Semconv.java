@@ -43,6 +43,13 @@ public final class Semconv {
     public static final String SHELL_COMMAND = "shell.command";
     public static final String USER_TIER = "user.tier";
     public static final String TENANT_ID = "tenant.id";
+    public static final String TEST_CASE_NAME = "test.case.name";
+    public static final String TEST_CASE_RESULT_STATUS = "test.case.result.status";
+    public static final String TEST_SUITE_NAME = "test.suite.name";
+    public static final String TEST_SUITE_RUN_STATUS = "test.suite.run.status";
+    public static final String CICD_PIPELINE_RUN_ID = "cicd.pipeline.run.id";
+    public static final String CICD_PIPELINE_TASK_TYPE = "cicd.pipeline.task.type";
+    public static final String PARALLAX_TEST_ID = "parallax.test.id";
     public static final String CANARY_EMAIL = "canary.email";
     public static final String CANARY_TOKEN = "canary.token";
     public static final String CANARY_CARD = "canary.card";
