@@ -305,15 +305,19 @@ async fn compute_recommendations(sku: &str) -> Vec<String> {
     .await
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let telemetry = playground_telemetry::init("recommendation")?;
-    let app = Router::new()
+fn app() -> Router {
+    Router::new()
         .route("/recommend", get(recommend))
         .route("/healthz", get(|| async { "ok" }))
         .layer(axum::middleware::from_fn(
             playground_telemetry::http_server_observability,
-        ));
+        ))
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let telemetry = playground_telemetry::init("recommendation")?;
+    let app = app();
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8090".into());
     tracing::info!(%addr, "recommendation HTTP listening");
     axum::serve(tokio::net::TcpListener::bind(&addr).await?, app)
@@ -326,6 +330,11 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
 
     #[test]
     fn cache_helper_hits_and_expires() {
@@ -369,5 +378,30 @@ mod tests {
             Duration::from_millis(MAX_TTL_MS)
         );
         assert_eq!(stampede_from(MAX_STAMPEDE + 10), MAX_STAMPEDE);
+    }
+
+    #[tokio::test]
+    async fn exposes_health_and_recommendation_http_boundaries() {
+        let health = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .expect("health request"),
+            )
+            .await
+            .expect("health response");
+        assert_eq!(health.status(), StatusCode::OK);
+
+        let missing_sku = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/recommend")
+                    .body(Body::empty())
+                    .expect("recommend request"),
+            )
+            .await
+            .expect("recommend response");
+        assert_eq!(missing_sku.status(), StatusCode::BAD_REQUEST);
     }
 }
