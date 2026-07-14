@@ -43,6 +43,11 @@ public final class Semconv {
     public static final String SHELL_COMMAND = "shell.command";
     public static final String USER_TIER = "user.tier";
     public static final String TENANT_ID = "tenant.id";
+    public static final String GRAPHQL_OPERATION_TYPE = "graphql.operation.type";
+    public static final String GRAPHQL_OPERATION_NAME = "graphql.operation.name";
+    public static final String GRAPHQL_DOCUMENT = "graphql.document";
+    public static final String GRAPHQL_FIELD_NAME = "graphql.field.name";
+    public static final String GRAPHQL_FIELD_PATH = "graphql.field.path";
     public static final String TEST_CASE_NAME = "test.case.name";
     public static final String TEST_CASE_RESULT_STATUS = "test.case.result.status";
     public static final String TEST_SUITE_NAME = "test.suite.name";
