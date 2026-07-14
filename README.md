@@ -113,6 +113,8 @@ CLI scenarios need the Rust binary first:
 cargo build
 ./target/debug/playground
 ./target/debug/playground cron
+# Convert cargo-nextest's JUnit XML into run-parented test telemetry.
+./target/debug/playground test-report target/nextest/ci/junit.xml
 ```
 
 ## Roadmap

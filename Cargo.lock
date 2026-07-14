@@ -2332,7 +2332,9 @@ name = "playground-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "opentelemetry",
  "playground-telemetry",
+ "quick-xml",
  "reqwest",
  "tokio",
  "tracing",
@@ -2533,6 +2535,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50793def1b900256624a709439404384204a5dc3a6ec580281bfaac35e882e90"
 dependencies = [
  "pulldown-cmark",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.38.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b66c2058c55a409d601666cffe35f04333cf1013010882cec174a7467cd4e21c"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

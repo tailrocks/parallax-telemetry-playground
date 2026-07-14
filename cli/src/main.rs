@@ -7,6 +7,10 @@
 //!   playground enter      child/container side of the execution-stack sim
 //! Flushes telemetry on exit (short-lived discipline).
 
+mod test_report;
+
+use std::path::Path;
+
 use tokio::process::Command;
 use tracing::Instrument;
 
@@ -24,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
 
     let telemetry = playground_telemetry::init("playground-cli")?;
     let result = match mode.as_str() {
+        "test-report" => test_report_command(&rest),
         "cron" => cron(rest).await,
         "daemon" => daemon(rest).await,
         "enter" => enter(rest).await,
@@ -39,6 +44,22 @@ async fn main() -> anyhow::Result<()> {
     };
     telemetry.shutdown(); // flush before exit
     std::process::exit(code);
+}
+
+fn test_report_command(args: &[String]) -> anyhow::Result<i32> {
+    let Some(path) = args.first() else {
+        return Err(anyhow::anyhow!("usage: playground test-report <junit.xml>"));
+    };
+    let summary = test_report::emit(Path::new(path))?;
+    println!(
+        "reported {} test cases ({} passed, {} failed, {} errors)",
+        summary.total, summary.passed, summary.failed, summary.errors
+    );
+    Ok(if summary.failed + summary.errors == 0 {
+        0
+    } else {
+        1
+    })
 }
 
 #[tracing::instrument(fields(otel.kind = semconv::SPAN_KIND_CLIENT))]
