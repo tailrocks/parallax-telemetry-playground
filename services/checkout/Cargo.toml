@@ -19,3 +19,6 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true }

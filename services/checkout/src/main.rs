@@ -714,17 +714,21 @@ fn cors_layer() -> CorsLayer {
         ])
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let telemetry = playground_telemetry::init("checkout")?;
-    let app = Router::new()
+fn app() -> Router {
+    Router::new()
         .route("/checkout", get(checkout))
         .route("/quote-stream", get(quote_stream))
         .route("/healthz", get(|| async { "ok" }))
         .layer(cors_layer())
         .layer(axum::middleware::from_fn(
             playground_telemetry::http_server_observability,
-        ));
+        ))
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let telemetry = playground_telemetry::init("checkout")?;
+    let app = app();
     let addr = std::env::var("CHECKOUT_ADDR").unwrap_or_else(|_| "0.0.0.0:8088".into());
     tracing::info!(%addr, "checkout HTTP listening");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -738,6 +742,11 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
 
     #[test]
     fn clamp_shape_bounds_fan_depth_and_estimated_spans() {
@@ -756,5 +765,19 @@ mod tests {
         assert_eq!(compare_variant(Some("v1")), "v1");
         assert_eq!(compare_variant(Some("v2")), "v2");
         assert_eq!(compare_variant(Some("other")), "v1");
+    }
+
+    #[tokio::test]
+    async fn exposes_health_without_downstream_dependencies() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .expect("health request"),
+            )
+            .await
+            .expect("health response");
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }
