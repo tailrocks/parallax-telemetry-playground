@@ -166,6 +166,32 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use playground_proto::pricing::v1::pricing_client::PricingClient;
+    use tokio_stream::wrappers::TcpListenerStream;
+
+    async fn client() -> (
+        PricingClient<tonic::transport::Channel>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener binds");
+        let address = listener.local_addr().expect("listener address");
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(PricingServer::new(PricingSvc))
+                .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .expect("server exits cleanly");
+        });
+        let client = PricingClient::connect(format!("http://{address}"))
+            .await
+            .expect("client connects");
+        (client, shutdown_tx)
+    }
 
     #[test]
     fn parses_grpc_timeout_units() {
@@ -175,5 +201,68 @@ mod tests {
 
         metadata.insert("grpc-timeout", "2S".parse().unwrap());
         assert_eq!(grpc_timeout(&metadata), Some(Duration::from_secs(2)));
+    }
+
+    #[tokio::test]
+    async fn serves_unary_and_streaming_quotes_over_grpc() {
+        let (mut client, shutdown) = client().await;
+        let response = client
+            .quote(QuoteRequest {
+                sku: "WIDGET-1".into(),
+                quantity: 3,
+                delay_ms: 0,
+                fail_at: 0,
+            })
+            .await
+            .expect("unary quote succeeds")
+            .into_inner();
+        assert_eq!(response.total_minor, 5997);
+
+        let mut stream = client
+            .quote_stream(QuoteRequest {
+                sku: "WIDGET-1".into(),
+                quantity: 3,
+                delay_ms: 1,
+                fail_at: 0,
+            })
+            .await
+            .expect("stream starts")
+            .into_inner();
+        let mut quantities = Vec::new();
+        while let Some(response) = stream.message().await.expect("stream message") {
+            quantities.push(response.quantity);
+        }
+        assert_eq!(quantities, vec![1, 2, 3]);
+        shutdown.send(()).expect("shutdown signal sends");
+    }
+
+    #[tokio::test]
+    async fn surfaces_requested_stream_failure_over_grpc() {
+        let (mut client, shutdown) = client().await;
+        let mut stream = client
+            .quote_stream(QuoteRequest {
+                sku: "WIDGET-1".into(),
+                quantity: 3,
+                delay_ms: 1,
+                fail_at: 2,
+            })
+            .await
+            .expect("stream starts")
+            .into_inner();
+        assert_eq!(
+            stream
+                .message()
+                .await
+                .expect("first item")
+                .expect("response")
+                .quantity,
+            1
+        );
+        let status = stream
+            .message()
+            .await
+            .expect_err("requested failure surfaces");
+        assert_eq!(status.code(), tonic::Code::Internal);
+        shutdown.send(()).expect("shutdown signal sends");
     }
 }
