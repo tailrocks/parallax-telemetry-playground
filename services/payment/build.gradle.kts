@@ -62,6 +62,8 @@ tasks.withType<Test>().configureEach {
     inputs.files(otelJavaAgent)
     jvmArgs("-javaagent:${otelJavaAgent.singleFile.absolutePath}")
     environment("PARALLAX_RUN_ID", System.getenv("PARALLAX_RUN_ID") ?: "")
+    environment("PARALLAX_TEST_ID", System.getenv("PARALLAX_TEST_ID") ?: "")
+    environment("PARALLAX_TEST_ENVIRONMENT", System.getenv("PARALLAX_TEST_ENVIRONMENT") ?: "local")
     environment("TRACEPARENT", System.getenv("TRACEPARENT") ?: "")
     environment("OTEL_RESOURCE_ATTRIBUTES", testResourceAttributes)
     if (testOtelEndpoint == null) {

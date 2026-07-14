@@ -33,6 +33,23 @@ public final class OpenTelemetryTestExtension implements InvocationInterceptor {
         ReflectiveInvocationContext<Method> method,
         ExtensionContext context
     ) throws Throwable {
+        intercept(invocation, method, context);
+    }
+
+    @Override
+    public void interceptTestTemplateMethod(
+        Invocation<Void> invocation,
+        ReflectiveInvocationContext<Method> method,
+        ExtensionContext context
+    ) throws Throwable {
+        intercept(invocation, method, context);
+    }
+
+    private static void intercept(
+        Invocation<Void> invocation,
+        ReflectiveInvocationContext<Method> method,
+        ExtensionContext context
+    ) throws Throwable {
         String suite = context.getRequiredTestClass().getName();
         String name = suite + "#" + method.getExecutable().getName();
         Span span = GlobalOpenTelemetry.get().getTracer("playground.junit")
@@ -44,7 +61,12 @@ public final class OpenTelemetryTestExtension implements InvocationInterceptor {
         span.setAttribute(Semconv.TEST_SUITE_RUN_STATUS, "pass");
         span.setAttribute(Semconv.CICD_PIPELINE_TASK_TYPE, "test");
         span.setAttribute(Semconv.CICD_PIPELINE_RUN_ID, System.getenv().getOrDefault("PARALLAX_RUN_ID", ""));
-        span.setAttribute(Semconv.PARALLAX_TEST_ID, name);
+        span.setAttribute(Semconv.PARALLAX_TEST_ID, testId(name));
+        span.setAttribute("test.configuration.os", System.getProperty("os.name"));
+        span.setAttribute("test.configuration.environment", System.getenv().getOrDefault("PARALLAX_TEST_ENVIRONMENT", "local"));
+        if (!context.getDisplayName().equals(method.getExecutable().getName())) {
+            span.setAttribute("test.case.parameters", context.getDisplayName());
+        }
         try (Scope ignored = span.makeCurrent()) {
             invocation.proceed();
             span.setAttribute(Semconv.TEST_CASE_RESULT_STATUS, "pass");
@@ -66,5 +88,10 @@ public final class OpenTelemetryTestExtension implements InvocationInterceptor {
         }
         return GlobalOpenTelemetry.get().getPropagators().getTextMapPropagator()
             .extract(Context.root(), Map.of("traceparent", traceparent), CARRIER);
+    }
+
+    private static String testId(String fallback) {
+        String override = System.getenv("PARALLAX_TEST_ID");
+        return override == null || override.isBlank() ? fallback : override;
     }
 }
