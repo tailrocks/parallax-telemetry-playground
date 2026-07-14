@@ -26,7 +26,19 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let telemetry = playground_telemetry::init("playground-cli")?;
+    // The report converter is useful as a local JUnit reconciliation tool as
+    // well as a live OTLP producer. Avoid the SDK's implicit localhost exporter
+    // when no collector was requested; `parallax run start` supplies the
+    // endpoint for the observable path.
+    let telemetry = if mode == "test-report"
+        && std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+            .ok()
+            .is_none_or(|endpoint| endpoint.trim().is_empty())
+    {
+        None
+    } else {
+        Some(playground_telemetry::init("playground-cli")?)
+    };
     let result = match mode.as_str() {
         "test-report" => test_report_command(&rest),
         "cron" => cron(rest).await,
@@ -42,7 +54,9 @@ async fn main() -> anyhow::Result<()> {
             1
         }
     };
-    telemetry.shutdown(); // flush before exit
+    if let Some(telemetry) = telemetry {
+        telemetry.shutdown(); // flush before exit
+    }
     std::process::exit(code);
 }
 
