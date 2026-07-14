@@ -22,9 +22,10 @@ pub mod propagation;
 pub mod semconv;
 
 pub use propagation::{
-    context_env, current_context_env, extract_context_from_env, inject_context_headers,
-    inject_grpc_metadata, inject_headers, mark_span_error, set_parent_from, set_parent_from_env,
-    set_parent_from_grpc, set_parent_from_grpc_metadata, set_parent_from_headers, traced_get,
+    context_env, current_context, current_context_env, extract_context, extract_context_from_env,
+    inject_context_headers, inject_grpc_metadata, inject_headers, mark_span_error, set_parent_from,
+    set_parent_from_env, set_parent_from_grpc, set_parent_from_grpc_metadata,
+    set_parent_from_headers, traced_get, with_business_baggage,
 };
 
 use opentelemetry::logs::{AnyValue, LogRecord, Logger, LoggerProvider as _, Severity};

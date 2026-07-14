@@ -32,6 +32,7 @@ public final class Semconv {
     public static final String TOOL_NAME = "tool.name";
     public static final String SHELL_COMMAND = "shell.command";
     public static final String USER_TIER = "user.tier";
+    public static final String TENANT_ID = "tenant.id";
     public static final String CANARY_EMAIL = "canary.email";
     public static final String CANARY_TOKEN = "canary.token";
     public static final String CANARY_CARD = "canary.card";

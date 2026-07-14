@@ -18,6 +18,7 @@ use axum::{Json, Router, extract::Query, routing::get};
 use open_feature::EvaluationContext;
 use open_feature::provider::FeatureProvider;
 use open_feature_flagd::{FlagdOptions, FlagdProvider, ResolverType};
+use opentelemetry::trace::TraceContextExt;
 use playground_proto::pricing::v1::QuoteRequest;
 use playground_proto::pricing::v1::pricing_client::PricingClient;
 use playground_telemetry::semconv;
@@ -139,7 +140,13 @@ fn env_flag(name: &str) -> bool {
 
 async fn checkout(headers: HeaderMap, Query(p): Query<CheckoutParams>) -> impl IntoResponse {
     let span = tracing::info_span!("checkout", otel.kind = semconv::SPAN_KIND_SERVER);
-    playground_telemetry::set_parent_from_headers(&span, &headers);
+    let parent = playground_telemetry::extract_context(&headers);
+    let parent = p.tenant.as_deref().map_or(parent.clone(), |tenant| {
+        playground_telemetry::with_business_baggage(&parent, tenant, &p.tier)
+    });
+    if parent.span().span_context().is_valid() {
+        let _ = span.set_parent(parent);
+    }
     checkout_inner(p).instrument(span).await
 }
 
@@ -167,9 +174,12 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
     if p.rogue_log {
         emit_rogue_log();
     }
-    // A10: business context as baggage (propagated downstream in the full design).
+    // A10: business context is attached as W3C baggage and injected by every
+    // downstream HTTP/gRPC helper for this request.
     if let Some(tenant) = &p.tenant {
-        tracing::info!(tenant = %tenant, user.tier = %p.tier, "baggage business context");
+        tracing::Span::current().set_attribute(semconv::TENANT_ID, tenant.clone());
+        tracing::Span::current().set_attribute(semconv::USER_TIER, p.tier.clone());
+        tracing::info!(tenant.id = %tenant, user.tier = %p.tier, "baggage business context");
     }
     // B10: contention — serialize on a shared lock while held.
     let _guard = if p.lock {

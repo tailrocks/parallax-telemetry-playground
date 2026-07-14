@@ -2,3 +2,4 @@
 # Java tier (catalog/payment/fulfillment) builds on the latest GraalVM LTS.
 # Gradle toolchains in each service request Java 25; mise provisions the JDK.
 java = "oracle-graalvm-25.0.3"
+"aqua:protocolbuffers/protobuf/protoc" = "35.1"

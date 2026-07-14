@@ -28,6 +28,7 @@ export const GEN_AI_OPERATION_NAME = "gen_ai.operation.name" as const;
 export const TOOL_NAME = "tool.name" as const;
 export const SHELL_COMMAND = "shell.command" as const;
 export const USER_TIER = "user.tier" as const;
+export const TENANT_ID = "tenant.id" as const;
 export const CANARY_EMAIL = "canary.email" as const;
 export const CANARY_TOKEN = "canary.token" as const;
 export const CANARY_CARD = "canary.card" as const;

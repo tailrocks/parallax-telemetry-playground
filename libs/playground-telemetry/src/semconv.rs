@@ -31,6 +31,7 @@ pub const GEN_AI_OPERATION_NAME: &str = "gen_ai.operation.name";
 pub const TOOL_NAME: &str = "tool.name";
 pub const SHELL_COMMAND: &str = "shell.command";
 pub const USER_TIER: &str = "user.tier";
+pub const TENANT_ID: &str = "tenant.id";
 pub const CANARY_EMAIL: &str = "canary.email";
 pub const CANARY_TOKEN: &str = "canary.token";
 pub const CANARY_CARD: &str = "canary.card";
