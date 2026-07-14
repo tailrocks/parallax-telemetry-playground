@@ -548,4 +548,63 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         server.abort();
     }
+
+    #[tokio::test]
+    async fn reserves_stock_against_an_opt_in_postgres_database() {
+        let Some(database_url) = std::env::var("INVENTORY_TEST_DATABASE_URL")
+            .ok()
+            .filter(|url| !url.trim().is_empty())
+        else {
+            eprintln!(
+                "skipping Postgres integration test: set INVENTORY_TEST_DATABASE_URL to a compose-provided database"
+            );
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await
+            .expect("connect test Postgres");
+        bootstrap_stock(&pool).await.expect("bootstrap test stock");
+        const TEST_SKU: &str = "W3-INVENTORY-POSTGRES-TEST";
+        sqlx::query(UPSERT_STOCK_SQL)
+            .bind(TEST_SKU)
+            .bind(10_i64)
+            .execute(&pool)
+            .await
+            .expect("seed isolated test stock");
+
+        let state = AppState {
+            db: Some(DbState {
+                pool: pool.clone(),
+                pending: Arc::new(AtomicU64::new(0)),
+                timeouts: Arc::new(AtomicU64::new(0)),
+            }),
+        };
+        let response = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/reserve?sku={TEST_SKU}&quantity=2"))
+                    .body(Body::empty())
+                    .expect("reserve request"),
+            )
+            .await
+            .expect("reserve response");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        sqlx::query("DELETE FROM stock WHERE sku = $1")
+            .bind(TEST_SKU)
+            .execute(&pool)
+            .await
+            .expect("remove isolated test stock");
+        pool.close().await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).expect("reservation JSON")["remaining"],
+            8
+        );
+    }
 }

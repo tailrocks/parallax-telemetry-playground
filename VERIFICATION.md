@@ -122,6 +122,17 @@ Verify: set `PLAYGROUND_TEST_TELEMETRY=1`, `TRACEPARENT`, and
 `OTEL_EXPORTER_OTLP_ENDPOINT` for a focused notifications nextest run. Inspect
 the test-run parent plus the HTTP server/client work below it in the collector.
 
+### W3 — inventory Postgres reservation
+
+Code: inventory's opt-in integration test uses the production SQLx pool and
+reservation route against a compose-provided Postgres URL. It seeds an isolated
+SKU, asserts the real atomic decrement, removes that row, and closes the pool.
+
+Verify: `INVENTORY_TEST_DATABASE_URL=postgres://... cargo nextest run -p
+inventory reserves_stock_against_an_opt_in_postgres_database`. Without that
+explicit variable, the test prints a skip diagnostic and leaves the normal
+Docker-free suite unchanged.
+
 ### W5 — cross-language `PaymentError` grouping
 
 Code: Rust checkout's B1 failure and Java payment's `Quote` request with
