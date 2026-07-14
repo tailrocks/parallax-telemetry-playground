@@ -303,4 +303,37 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert!(std::str::from_utf8(&body).unwrap().contains("Query"));
     }
+
+    #[tokio::test]
+    async fn streams_subscription_ticks_without_an_upstream() {
+        let mut ticks = Subscription::price_ticks().await;
+        let tick = ticks.next().await.expect("first tick").expect("tick result");
+        assert_eq!(tick.sku, "WIDGET-1");
+        assert_eq!(tick.quantity, 1);
+        assert_eq!(tick.total_minor, "1999");
+    }
+
+    #[tokio::test]
+    async fn serves_graphiql_over_a_real_loopback_listener() {
+        let schema = Arc::new(Schema::new(Query, EmptyMutation::new(), Subscription));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind storefront listener");
+        let address = listener.local_addr().expect("storefront listener address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app(schema, StoreContext::default()))
+                .await
+                .expect("serve storefront");
+        });
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(3),
+            reqwest::get(format!("http://{address}/graphiql")),
+        )
+        .await
+        .expect("graphiql request timeout")
+        .expect("graphiql response");
+        assert_eq!(response.status(), StatusCode::OK);
+        server.abort();
+    }
 }
