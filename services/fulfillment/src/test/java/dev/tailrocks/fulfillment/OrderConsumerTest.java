@@ -9,6 +9,7 @@ import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
 import io.tailrocks.testsupport.OpenTelemetryTestExtension;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -40,7 +41,8 @@ class OrderConsumerTest {
         NotificationClient notifications = mock(NotificationClient.class);
 
         try {
-            new OrderConsumer(PricingGrpc.newBlockingStub(channel), notifications).onOrder("WIDGET-1");
+            new OrderConsumer(PricingGrpc.newBlockingStub(channel), notifications)
+                .onOrder(new ConsumerRecord<>("orders", 0, 0, "order-1", "WIDGET-1"));
 
             assertEquals("WIDGET-1", request.get().getSku());
             assertEquals(1, request.get().getQuantity());
