@@ -20,7 +20,7 @@ web (TanStack/TS) ─HTTP─► checkout (Rust axum) ─gRPC─► pricing (Rust
                                   │                ├─GraphQL─► catalog (Java Spring GraphQL)
                                   │                ├─HTTP─► inventory / recommendation (Rust)
                                   │                └─publish─► broker ─► fulfillment (Java) ─HTTP─► notifications (Rust)
-cli (Rust) ─HTTP─► checkout            flagd (OpenFeature)   loadgen (k6, demo profile)   Postgres (reserved; DB scenarios later)
+cli (Rust) ─HTTP─► checkout            flagd (OpenFeature)   loadgen (k6, demo profile)   Postgres (catalog + inventory)
 ```
 
 All services export OTLP to a host listener on `4317`/`4318`: local
@@ -41,9 +41,9 @@ via SDK/envelope paths. One distributed trace stitches browser -> Rust -> Java
 | `services/storefront` | Rust Juniper / Axum | ✅ GraphQL→catalog and GraphQL→gRPC gateway with WebSocket subscriptions — **builds** |
 | `services/notifications` | Rust | ✅ reverse-hop target — **builds** |
 | `cli` | Rust | ✅ run driver — **builds** |
-| `services/catalog` | Java Spring GraphQL | ✅ **A6 DataLoader** (`@BatchMapping`) + **A14 OpenFeature/flagd** flag eval — **compiles** |
-| `services/payment` | Java Spring **gRPC** | ✅ real Spring gRPC server from the shared proto — **compiles + runs**; Rust→Java gRPC verified |
-| `services/fulfillment` | Java Spring (Kafka) | ✅ **real Kafka producer + consumer** round-trip + reverse Java→Rust hop — **compiles** |
+| `services/catalog` | Java Spring GraphQL | ✅ **A6 DataLoader** (`@BatchMapping`) + **A14 OpenFeature/flagd** flag eval + Postgres/JDBC path — source/test wiring present; this arm64 host cannot start Gradle |
+| `services/payment` | Java Spring **gRPC** | ✅ real Spring gRPC server from the shared proto — Rust→Java gRPC verified; this arm64 host cannot start Gradle |
+| `services/fulfillment` | Java Spring (Kafka) | ✅ **real Kafka producer + consumer** round-trip + reverse Java→Rust hop — source/test wiring present; this arm64 host cannot start Gradle |
 | `web` | TanStack Start / TS | ✅ real TanStack Start app (file routing + Nitro): same-origin `/v1/traces` OTLP proxy, SSR `<meta traceparent>`, OTel browser + Sentry RUM — **builds + type-checks** (`bun run build`) |
 | `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd, k6, scenarios, compose (all services incl. Java + web; `Dockerfile.java`/`Dockerfile.web`) |
 
@@ -79,7 +79,7 @@ identity is available. Regenerate them only from Parallax with
   B6 cache-leak, B7 consumer-lag, B8 poison→dead-letter, B9 N+1, B10 lock
   contention, B11 latency, B17 cron (success/fail/stuck).
 - Java services use the upstream OTel agent for fan-out plus the Spring Sentry
-  SDK for envelopes; web builds with Bun (`bun run build`).
+  SDK for envelopes; web builds and runs with Bun (`bun run build`, `bun start`).
 - **Cross-language gRPC verified**: Rust `checkout` (tonic client) → **Java
   `payment`** (Spring gRPC server, Boot 4.1 + Spring gRPC 1.1, generated from the
   shared proto) returns the Java-computed price (`3998`); the OTel Java agent

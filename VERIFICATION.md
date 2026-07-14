@@ -10,12 +10,12 @@ multi-runtime environment (Sentry self-hosted, a browser, a collector with a
 short flush) that a sandbox can't provision.
 
 ## Verified here (build/run/execute)
-- Rust workspace builds (fmt + clippy clean); Java services compile; web builds
-  (`bun run build`: Vite client + SSR + Nitro server) and type-checks
-  (`tsc --noEmit`); routes `/` and `/v1/traces` register. The live SSR/browser
-  run needs a host with working DNS (this sandbox's node `fetch`/undici has
-  none — `node -e fetch(...)` fails on any host), so the Nitro prod server's
-  per-request render can't complete here; it's a host concern, not a code defect.
+- Rust workspace builds (fmt + clippy clean); web builds (`bun run build`: Vite
+  client + SSR + Nitro server) and type-checks (`tsc --noEmit`); routes `/` and
+  `/v1/traces` register. Java source/test wiring is present, but this Linux
+  arm64 host's Gradle launcher fails before project configuration while loading
+  `libnative-platform.so`; Java compilation must be rerun on a functional
+  Gradle host. The live SSR/browser run requires a browser-capable host.
 - `parallax run start` compare-mode forward (Parallax repo, 11 tests).
 - Lab fan-out: trace → Rotel → OpenObserve (queried back by service).
 - Multi-service Rust distributed trace (checkout → pricing/inventory/recommendation).
@@ -32,8 +32,8 @@ short flush) that a sandbox can't provision.
   from/size — the lab's `smoke.sh` was fixed to match.)
 - **Rust tier emits all three OTLP signals** (traces + metrics + logs) — was
   traces-only; `cargo build` + fmt + clippy clean.
-- **A7 GraphQL subscription** resolver (`catalog`, WebSocket transport) compiles
-  (`gradlew compileJava`).
+- **A7 GraphQL subscription** resolver (`catalog`, WebSocket transport) is
+  source-covered; Java compilation awaits a functional Gradle host.
 - **A17 profiling** wired on the JVM services (Sentry continuous profiling
   config); flamegraph view needs a live Sentry (below).
 - **Sentry envelope emit path verified (2026-06-23)** — ran `checkout` with
