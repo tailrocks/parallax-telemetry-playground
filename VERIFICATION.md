@@ -5,19 +5,20 @@ traffic generator see `./demo.sh`. This file remains the full cross-backend
 verification runbook.
 
 What's verified in CI/sandbox vs what needs a real host. The **code/config for
-every scenario is implemented**; Rust and web build locally, while Java source
-execution awaits a functional Gradle host because this arm64 launcher fails
-before project configuration. The scenarios below also need a live multi-runtime
-environment (Sentry self-hosted, a browser, a collector with a short flush)
-that a sandbox can't provision.
+every scenario is implemented**; Rust, web, and the three Java test suites run
+locally. Java uses a temporary Gradle cache outside the container's native
+library mount; the scenarios below still need a live multi-runtime environment
+(Sentry self-hosted, a browser, a collector with a short flush) that a sandbox
+can't provision.
 
 ## Verified here (build/run/execute)
 - Rust workspace builds (fmt + clippy clean); web builds (`bun run build`: Vite
   client + SSR + Nitro server) and type-checks (`tsc --noEmit`); routes `/` and
-  `/v1/traces` register. Java source/test wiring is present, but this Linux
-  arm64 host's Gradle launcher fails before project configuration while loading
-  `libnative-platform.so`; Java compilation must be rerun on a functional
-  Gradle host. The live SSR/browser run requires a browser-capable host.
+  `/v1/traces` register. Catalog, payment, and fulfillment clean Gradle suites
+  pass on this Linux arm64 host with `GRADLE_USER_HOME=/tmp/parallax-gradle`
+  and `-Dorg.gradle.native=false`; this avoids the home-mounted native cache
+  that cannot load Gradle/Jansi libraries. The live SSR/browser run requires a
+  browser-capable host.
 - `parallax run start` compare-mode forward (Parallax repo, 11 tests).
 - Lab fan-out: trace → Rotel → OpenObserve (queried back by service).
 - Multi-service Rust distributed trace (checkout → pricing/inventory/recommendation).
@@ -35,7 +36,7 @@ that a sandbox can't provision.
 - **Rust tier emits all three OTLP signals** (traces + metrics + logs) — was
   traces-only; `cargo build` + fmt + clippy clean.
 - **A7 GraphQL subscription** resolver (`catalog`, WebSocket transport) is
-  source-covered; Java compilation awaits a functional Gradle host.
+  source-covered; catalog's GraphQL slice runs locally.
 - **A17 profiling** wired on the JVM services (Sentry continuous profiling
   config); flamegraph view needs a live Sentry (below).
 - **Sentry envelope emit path verified (2026-06-23)** — ran `checkout` with
@@ -100,9 +101,12 @@ authoritative retry record.
 
 Verify: run each service's Gradle tests with `TRACEPARENT`, `PARALLAX_RUN_ID`,
 and `OTEL_EXPORTER_OTLP_ENDPOINT` set, then inspect the test root, failure
-payload, and any HTTP/gRPC/Kafka/JDBC child spans in the same trace. This host
-cannot yet execute that command: Gradle fails before configuration while
-loading `libnative-platform.so` for Linux arm64.
+payload, and any HTTP/gRPC/Kafka/JDBC child spans in the same trace. With no
+endpoint, local tests explicitly set the Java agent's trace/metric/log
+exporters to `none`, preventing false connection-refused errors; a supplied
+endpoint preserves the live-export path. On this host use
+`GRADLE_USER_HOME=/tmp/parallax-gradle` plus `-Dorg.gradle.native=false` to
+avoid the home-mounted native cache.
 
 ### W5 — cross-language `PaymentError` grouping
 
