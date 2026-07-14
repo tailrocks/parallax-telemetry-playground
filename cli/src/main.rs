@@ -330,17 +330,61 @@ fn run_id(session: &str) -> String {
 }
 
 fn resource_attrs_with_run_id(run_id: &str) -> String {
-    let existing = std::env::var("OTEL_RESOURCE_ATTRIBUTES").unwrap_or_default();
+    resource_attrs_with_run_id_from(
+        std::env::var("OTEL_RESOURCE_ATTRIBUTES").ok().as_deref(),
+        run_id,
+    )
+}
+
+fn resource_attrs_with_run_id_from(existing: Option<&str>, run_id: &str) -> String {
+    let existing = existing.unwrap_or_default();
     if existing
         .split(',')
         .filter_map(|item| item.split_once('='))
         .any(|(key, _)| key.trim() == semconv::PARALLAX_RUN_ID)
     {
-        return existing;
+        return existing.to_owned();
     }
     if existing.trim().is_empty() {
         format!("{}={run_id}", semconv::PARALLAX_RUN_ID)
     } else {
         format!("{existing},{}={run_id}", semconv::PARALLAX_RUN_ID)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CronOutcome, cron_once, resource_attrs_with_run_id_from};
+
+    #[tokio::test]
+    async fn cron_outcomes_preserve_process_exit_contract() {
+        assert_eq!(
+            cron_once(CronOutcome::Ok, "test-ok", 0)
+                .await
+                .expect("ok cron"),
+            0
+        );
+        assert_eq!(
+            cron_once(CronOutcome::Fail, "test-fail", 0)
+                .await
+                .expect("fail cron"),
+            1
+        );
+    }
+
+    #[test]
+    fn resource_attributes_add_run_id_once() {
+        assert_eq!(
+            resource_attrs_with_run_id_from(None, "run-a"),
+            "parallax.run.id=run-a"
+        );
+        assert_eq!(
+            resource_attrs_with_run_id_from(Some("service.name=cli"), "run-a"),
+            "service.name=cli,parallax.run.id=run-a"
+        );
+        assert_eq!(
+            resource_attrs_with_run_id_from(Some("parallax.run.id=existing"), "run-a"),
+            "parallax.run.id=existing"
+        );
     }
 }
