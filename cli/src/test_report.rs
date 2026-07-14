@@ -20,6 +20,7 @@ const TEST_ATTEMPT: &str = "test.attempt.ordinal";
 const TEST_ATTEMPT_ID: &str = "test.attempt.id";
 const TEST_TOTAL_ATTEMPTS: &str = "test.attempt.total";
 const TEST_PARAMETERS: &str = "test.case.parameters";
+const TEST_FAILURE_KIND: &str = "test.case.failure.kind";
 const TEST_CODE_REFERENCE: &str = "test.code_reference";
 const TEST_CONFIGURATION_OS: &str = "test.configuration.os";
 const TEST_CONFIGURATION_ENVIRONMENT: &str = "test.configuration.environment";
@@ -54,7 +55,7 @@ impl Outcome {
         match self {
             Self::Pass => "pass",
             Self::Fail => "fail",
-            Self::Error => "error",
+            Self::Error => "fail",
         }
     }
 }
@@ -144,6 +145,10 @@ fn emit_case(case: Case) {
         attributes.push(KeyValue::new(TEST_PARAMETERS, parameters));
     }
     if let Some(diagnostic) = &case.diagnostic {
+        attributes.push(KeyValue::new(
+            TEST_FAILURE_KIND,
+            case.outcome.failure_kind(),
+        ));
         attributes.push(KeyValue::new(FAILURE_MESSAGE, diagnostic.message.clone()));
         if !diagnostic.stack.is_empty() {
             attributes.push(KeyValue::new(FAILURE_STACK, diagnostic.stack.clone()));
@@ -165,6 +170,16 @@ fn emit_case(case: Case) {
         );
     }
     span.end();
+}
+
+impl Outcome {
+    const fn failure_kind(self) -> &'static str {
+        match self {
+            Self::Pass => "",
+            Self::Fail => "assertion_failure",
+            Self::Error => "harness_error",
+        }
+    }
 }
 
 fn report_parent_context() -> opentelemetry::Context {
@@ -434,6 +449,15 @@ mod tests {
         assert_eq!(attempt_ordinal(Some("0")), 1);
         assert_eq!(attempt_ordinal(Some("nope")), 1);
         assert_eq!(attempt_ordinal(Some("2")), 2);
+    }
+
+    #[test]
+    fn maps_harness_errors_to_semconv_failure_status() {
+        assert_eq!(Outcome::Pass.as_str(), "pass");
+        assert_eq!(Outcome::Fail.as_str(), "fail");
+        assert_eq!(Outcome::Error.as_str(), "fail");
+        assert_eq!(Outcome::Fail.failure_kind(), "assertion_failure");
+        assert_eq!(Outcome::Error.failure_kind(), "harness_error");
     }
 
     #[test]
