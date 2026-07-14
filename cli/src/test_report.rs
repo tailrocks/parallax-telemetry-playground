@@ -17,6 +17,8 @@ use playground_telemetry::semconv;
 const FAILURE_MESSAGE: &str = "test.failure.message";
 const FAILURE_STACK: &str = "test.failure.stacktrace";
 const TEST_ATTEMPT: &str = "test.attempt.ordinal";
+const TEST_ATTEMPT_ID: &str = "test.attempt.id";
+const TEST_TOTAL_ATTEMPTS: &str = "test.attempt.total";
 const TEST_CODE_REFERENCE: &str = "test.code_reference";
 const TEST_CONFIGURATION_OS: &str = "test.configuration.os";
 const TEST_CONFIGURATION_ENVIRONMENT: &str = "test.configuration.environment";
@@ -117,12 +119,23 @@ fn emit_case(case: Case) {
         ),
         KeyValue::new(
             TEST_ATTEMPT,
-            std::env::var("NEXTEST_ATTEMPT")
-                .ok()
-                .and_then(|value| value.parse::<i64>().ok())
-                .unwrap_or(1),
+            attempt_ordinal(std::env::var("NEXTEST_ATTEMPT").ok().as_deref()),
         ),
     ];
+    if let Some(attempt_id) = std::env::var("NEXTEST_ATTEMPT_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    {
+        attributes.push(KeyValue::new(TEST_ATTEMPT_ID, attempt_id));
+    }
+    if let Some(total_attempts) = std::env::var("NEXTEST_TOTAL_ATTEMPTS")
+        .ok()
+        .as_deref()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+    {
+        attributes.push(KeyValue::new(TEST_TOTAL_ATTEMPTS, total_attempts));
+    }
     if let Some(duration_ms) = case.duration_ms {
         attributes.push(KeyValue::new("test.case.duration_ms", duration_ms as i64));
     }
@@ -157,6 +170,13 @@ fn report_parent_context() -> opentelemetry::Context {
     } else {
         playground_telemetry::current_context()
     }
+}
+
+fn attempt_ordinal(value: Option<&str>) -> i64 {
+    value
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1)
 }
 
 fn explicit_test_id() -> Option<String> {
@@ -327,7 +347,8 @@ fn summarize(cases: &[Case]) -> Summary {
 #[cfg(test)]
 mod tests {
     use super::{
-        Case, Outcome, code_reference, parse, report_parent_context, seconds_to_ms, summarize,
+        Case, Outcome, attempt_ordinal, code_reference, parse, report_parent_context,
+        seconds_to_ms, summarize,
     };
     use opentelemetry::trace::{
         SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
@@ -395,6 +416,14 @@ mod tests {
             "pricing::bin/pricing::tests::quote[usd]"
         );
         assert_eq!(code_reference(&case, None, None), "fallback::class::case");
+    }
+
+    #[test]
+    fn retry_ordinal_defaults_and_rejects_invalid_values() {
+        assert_eq!(attempt_ordinal(None), 1);
+        assert_eq!(attempt_ordinal(Some("0")), 1);
+        assert_eq!(attempt_ordinal(Some("nope")), 1);
+        assert_eq!(attempt_ordinal(Some("2")), 2);
     }
 
     #[test]
