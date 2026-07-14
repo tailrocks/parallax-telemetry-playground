@@ -10,6 +10,14 @@ import io.opentelemetry.api.trace.TraceFlags;
 import io.opentelemetry.api.trace.TraceState;
 import io.opentelemetry.context.Context;
 import io.tailrocks.testsupport.OpenTelemetryTestExtension;
+import dev.tailrocks.pricing.v1.PricingGrpc;
+import dev.tailrocks.pricing.v1.QuoteRequest;
+import dev.tailrocks.pricing.v1.QuoteResponse;
+import io.grpc.ManagedChannel;
+import io.grpc.Server;
+import io.grpc.inprocess.InProcessChannelBuilder;
+import io.grpc.inprocess.InProcessServerBuilder;
+import io.grpc.stub.StreamObserver;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -26,6 +34,8 @@ import org.springframework.kafka.test.condition.EmbeddedKafkaCondition;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.mockito.ArgumentCaptor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 @ExtendWith(OpenTelemetryTestExtension.class)
 @EmbeddedKafka(partitions = 1, topics = "orders")
@@ -92,10 +102,53 @@ class OrderProducerTest {
         try {
             broker.consumeFromAnEmbeddedTopic(consumer, "orders");
             assertEquals("published order-embedded", new OrderProducer(kafka).publish("order-embedded"));
-            assertEquals("order-embedded", KafkaTestUtils.getSingleRecord(consumer, "orders").value());
+            var record = KafkaTestUtils.getSingleRecord(consumer, "orders");
+            assertEquals("order-embedded", record.value());
+            consume_record_through_payment_and_notification(record);
         } finally {
             consumer.close();
             factory.destroy();
+        }
+    }
+
+    private static void consume_record_through_payment_and_notification(
+        org.apache.kafka.clients.consumer.ConsumerRecord<String, String> record
+    ) {
+        String name = InProcessServerBuilder.generateName();
+        AtomicReference<QuoteRequest> request = new AtomicReference<>();
+        Server server;
+        try {
+            server = InProcessServerBuilder.forName(name)
+                .directExecutor()
+                .addService(new PricingGrpc.PricingImplBase() {
+                    @Override
+                    public void quote(QuoteRequest value, StreamObserver<QuoteResponse> response) {
+                        request.set(value);
+                        response.onNext(QuoteResponse.getDefaultInstance());
+                        response.onCompleted();
+                    }
+                })
+                .build()
+                .start();
+        } catch (java.io.IOException error) {
+            throw new AssertionError("start payment test server", error);
+        }
+        ManagedChannel channel = InProcessChannelBuilder.forName(name).directExecutor().build();
+        NotificationClient notifications = mock(NotificationClient.class);
+        try {
+            new OrderConsumer(PricingGrpc.newBlockingStub(channel), notifications).onOrder(record);
+            assertEquals("order-embedded", request.get().getSku());
+            verify(notifications).notifyOrder();
+        } finally {
+            channel.shutdownNow();
+            server.shutdownNow();
+            try {
+                channel.awaitTermination(5, TimeUnit.SECONDS);
+                server.awaitTermination(5, TimeUnit.SECONDS);
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("stop payment test server", error);
+            }
         }
     }
 }
