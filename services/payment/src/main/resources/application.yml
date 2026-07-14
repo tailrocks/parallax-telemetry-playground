@@ -4,9 +4,10 @@ spring:
 sentry:
   dsn: ${SENTRY_DSN:}
   environment: ${PARALLAX_ENV:playground}
+  release: ${RELEASE:0.1.0}
   traces-sample-rate: 1.0
   # A17: continuous profiling — JVM async-profiler (GA since Sentry SDK 8.23, we
-  # run 8.44). profile-lifecycle=trace ties the profiler to sampled traces, so a
+  # run 8.46). profile-lifecycle=trace ties the profiler to sampled traces, so a
   # CPU-hot path (e.g. payment high-CPU chaos, B5) yields a trace-linked profile.
   profile-session-sample-rate: 1.0
   profile-lifecycle: trace

@@ -7,19 +7,17 @@
 #
 # Status: Rust services (checkout, pricing, inventory, recommendation,
 # notifications, orders) + Java (catalog GraphQL, payment gRPC, fulfillment
-# Kafka) + web (TanStack Start) all wired. Java uses the single Sentry+OTel
-# javaagent (deploy/Dockerfile.java); web is the Nitro server (deploy/
-# Dockerfile.web). Pin image tags at a real deploy.
+# Kafka) + web (TanStack Start) all wired. Java uses the upstream OTel agent
+# plus the Spring Sentry SDK (deploy/Dockerfile.java); web is the Nitro server
+# (deploy/Dockerfile.web). Pin image tags at a real deploy.
 
 name: telemetry-playground
 
 x-otlp: &otlp
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
   OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
-  # Force OTLP export on the Java tier: the sentry-opentelemetry agent otherwise
-  # routes spans to Sentry only and emits nothing over OTLP, so the fan-out
-  # backends never see the Java services. (Ignored by the Rust services, which
-  # build their exporters in code.)
+  # The Java tier uses the upstream OTel agent, so all three signals reach the
+  # Rotel fan-out. Rust services build their exporters in code.
   OTEL_TRACES_EXPORTER: "otlp"
   OTEL_METRICS_EXPORTER: "otlp"
   OTEL_LOGS_EXPORTER: "otlp"
@@ -111,7 +109,7 @@ services:
     ports: ["8013:8013"]
     networks: [pg]
 
-  # --- Java (single Sentry+OTel javaagent) ---
+  # --- Java (upstream OTel javaagent + Sentry Spring SDK) ---
   catalog:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: catalog } }
     environment:

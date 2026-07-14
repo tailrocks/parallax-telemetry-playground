@@ -1,6 +1,7 @@
 // Spring Boot broker consumer. Consumes order events (CONSUMER span + span link
 // to the producer), then calls the Rust notifications service over HTTP (the
-// reverse Java→Rust hop). Instrumented zero-code by the Sentry OTel agent.
+// reverse Java→Rust hop). The upstream OTel agent exports to Rotel and the
+// Sentry starter captures SDK envelopes.
 plugins {
     java
     id("org.springframework.boot") version "4.1.0"
@@ -17,7 +18,5 @@ dependencies {
     // starter pulls spring-kafka + the spring-boot-kafka autoconfig module.
     implementation("org.springframework.boot:spring-boot-starter-kafka")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    // Sentry initialized by the sentry-opentelemetry javaagent; the Spring Boot
-    // starter 8.44 is incompatible with Spring Boot 4.x (RestClientCustomizer
-    // relocation), so it is omitted. Agent owns OTel + Sentry init.
+    implementation("io.sentry:sentry-spring-boot-starter-jakarta:8.46.0")
 }

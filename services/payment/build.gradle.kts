@@ -32,6 +32,7 @@ dependencies {
     compileOnly("org.apache.tomcat:annotations-api:6.0.53")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.sentry:sentry-spring-boot-starter-jakarta:8.46.0")
     implementation("io.opentelemetry:opentelemetry-api")
 }
 // Spring Boot 4.1 graduated gRPC support: when `com.google.protobuf` is
