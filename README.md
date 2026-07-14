@@ -60,9 +60,10 @@ via SDK/envelope paths. One distributed trace stitches browser -> Rust -> Java
 - **Chaos verified**: B1 fail→502, B2 inventory 503, B3 retry/timeout, B5 high-CPU,
   B6 cache-leak, B7 consumer-lag, B8 poison→dead-letter, B9 N+1, B10 lock
   contention, B11 latency, B17 cron (success/fail/stuck).
-- All three Java services compile; web builds (`bun run build`).
+- Java services use the upstream OTel agent for fan-out plus the Spring Sentry
+  SDK for envelopes; web builds with Bun (`bun run build`).
 - **Cross-language gRPC verified**: Rust `checkout` (tonic client) → **Java
-  `payment`** (Spring gRPC server, Boot 4 + spring-grpc 1.0.3, generated from the
+  `payment`** (Spring gRPC server, Boot 4.1 + Spring gRPC 1.1, generated from the
   shared proto) returns the Java-computed price (`3998`); the OTel Java agent
   produces a proper `playground.pricing.v1.Pricing/Quote` SERVER span (rpc
   semconv). *(Note: the Java agent's OTLP→Rotel→OpenObserve delivery has an

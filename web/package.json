@@ -7,7 +7,7 @@
     "dev": "vite dev",
     "build": "vite build && tsc --noEmit",
     "preview": "vite preview",
-    "start": "node server.mjs"
+    "start": "bun server.mjs"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",

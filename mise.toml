@@ -1,4 +1,6 @@
 [tools]
+# Bun is the sole JavaScript/TypeScript runtime and package manager.
+bun = "1.3.14"
 # Java tier (catalog/payment/fulfillment) builds on the latest GraalVM LTS.
 # Gradle toolchains in each service request Java 25; mise provisions the JDK.
 java = "oracle-graalvm-25.0.3"
