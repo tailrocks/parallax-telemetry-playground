@@ -21,7 +21,10 @@ async fn main() -> anyhow::Result<()> {
     let telemetry = playground_telemetry::init("notifications")?;
     let app = Router::new()
         .route("/", get(handle))
-        .route("/healthz", get(|| async { "ok" }));
+        .route("/healthz", get(|| async { "ok" }))
+        .layer(axum::middleware::from_fn(
+            playground_telemetry::http_server_observability,
+        ));
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8091".into());
     tracing::info!(%addr, "notifications HTTP listening");
     let listener = tokio::net::TcpListener::bind(&addr).await?;

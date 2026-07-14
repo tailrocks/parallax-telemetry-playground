@@ -13,6 +13,11 @@ public final class Semconv {
     public static final String EVENT_NAME = "event.name";
     public static final String ERROR_TYPE = "error.type";
     public static final String PARALLAX_RUN_ID = "parallax.run.id";
+    public static final String HTTP_REQUEST_METHOD = "http.request.method";
+    public static final String HTTP_ROUTE = "http.route";
+    public static final String HTTP_RESPONSE_STATUS_CODE = "http.response.status_code";
+    public static final String URL_PATH = "url.path";
+    public static final String HTTP_SERVER_REQUEST_DURATION = "http.server.request.duration";
     public static final String PLAYGROUND_NAMESPACE = "playground";
     public static final String DEFAULT_ENVIRONMENT = "playground";
     public static final String SESSION_ID = "session.id";

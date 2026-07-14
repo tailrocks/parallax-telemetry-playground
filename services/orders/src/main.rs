@@ -286,7 +286,10 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/order", post(publish))
         .with_state(App { tx, queue_depth })
-        .layer(cors_layer());
+        .layer(cors_layer())
+        .layer(axum::middleware::from_fn(
+            playground_telemetry::http_server_observability,
+        ));
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8092".into());
     tracing::info!(%addr, "orders HTTP listening");
     axum::serve(tokio::net::TcpListener::bind(&addr).await?, app)

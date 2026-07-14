@@ -299,7 +299,10 @@ async fn main() -> anyhow::Result<()> {
     let telemetry = playground_telemetry::init("recommendation")?;
     let app = Router::new()
         .route("/recommend", get(recommend))
-        .route("/healthz", get(|| async { "ok" }));
+        .route("/healthz", get(|| async { "ok" }))
+        .layer(axum::middleware::from_fn(
+            playground_telemetry::http_server_observability,
+        ));
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8090".into());
     tracing::info!(%addr, "recommendation HTTP listening");
     axum::serve(tokio::net::TcpListener::bind(&addr).await?, app)

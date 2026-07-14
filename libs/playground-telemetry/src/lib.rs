@@ -28,6 +28,11 @@ pub use propagation::{
     set_parent_from_headers, traced_get, with_business_baggage,
 };
 
+use axum::{
+    extract::{MatchedPath, Request},
+    middleware::Next,
+    response::Response,
+};
 use opentelemetry::logs::{AnyValue, LogRecord, Logger, LoggerProvider as _, Severity};
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::{Span as _, SpanBuilder, TracerProvider as _};
@@ -39,7 +44,8 @@ use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
+use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::filter_fn;
@@ -68,6 +74,49 @@ pub fn db_span(
         "server.address" = "postgres",
         "server.port" = 5432_i64,
     )
+}
+
+/// Axum middleware for stable HTTP semantic conventions and RED metrics.
+///
+/// Apply with `Router::layer(axum::middleware::from_fn(http_server_observability))`
+/// after declaring routes, so `MatchedPath` resolves to the stable route rather
+/// than a cardinality-unbounded request URI.
+pub async fn http_server_observability(request: Request, next: Next) -> Response {
+    let method = request.method().as_str().to_owned();
+    let path = request.uri().path().to_owned();
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or_else(|| path.clone(), |matched| matched.as_str().to_owned());
+    let span = tracing::info_span!(
+        "http.server.request",
+        otel.kind = semconv::SPAN_KIND_SERVER,
+        http.request.method = %method,
+        http.route = %route,
+        url.path = %path,
+        http.response.status_code = tracing::field::Empty,
+    );
+    set_parent_from_headers(&span, request.headers());
+    let started = Instant::now();
+    let response = next.run(request).instrument(span.clone()).await;
+    let status = response.status().as_u16();
+    span.record("http.response.status_code", i64::from(status));
+    if status >= 500 {
+        mark_span_error("http.server.error");
+    }
+    global::meter("playground.http")
+        .f64_histogram(semconv::HTTP_SERVER_REQUEST_DURATION)
+        .with_unit("s")
+        .build()
+        .record(
+            started.elapsed().as_secs_f64(),
+            &[
+                KeyValue::new(semconv::HTTP_REQUEST_METHOD, method),
+                KeyValue::new(semconv::HTTP_ROUTE, route),
+                KeyValue::new(semconv::HTTP_RESPONSE_STATUS_CODE, i64::from(status)),
+            ],
+        );
+    response
 }
 
 /// Emit a typed OTel log event (EventName set) on the shared logs pipeline,

@@ -781,7 +781,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/checkout", get(checkout))
         .route("/quote-stream", get(quote_stream))
         .route("/healthz", get(|| async { "ok" }))
-        .layer(cors_layer());
+        .layer(cors_layer())
+        .layer(axum::middleware::from_fn(
+            playground_telemetry::http_server_observability,
+        ));
     let addr = std::env::var("CHECKOUT_ADDR").unwrap_or_else(|_| "0.0.0.0:8088".into());
     tracing::info!(%addr, "checkout HTTP listening");
     let listener = tokio::net::TcpListener::bind(&addr).await?;

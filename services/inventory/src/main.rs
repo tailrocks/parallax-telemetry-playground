@@ -448,7 +448,10 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/reserve", get(reserve))
         .route("/healthz", get(|| async { "ok" }))
-        .with_state(state);
+        .with_state(state)
+        .layer(axum::middleware::from_fn(
+            playground_telemetry::http_server_observability,
+        ));
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8089".into());
     tracing::info!(%addr, "inventory HTTP listening");
     axum::serve(tokio::net::TcpListener::bind(&addr).await?, app)

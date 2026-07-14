@@ -2203,6 +2203,7 @@ name = "playground-telemetry"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "http 1.4.2",
  "opentelemetry",
  "opentelemetry-appender-tracing",
