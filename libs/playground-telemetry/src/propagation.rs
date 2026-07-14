@@ -62,7 +62,11 @@ pub fn with_business_baggage(context: &Context, tenant: &str, tier: &str) -> Con
 
 pub fn extract_context_from_env() -> Context {
     let carrier = EnvExtractor::from_env();
-    global::get_text_map_propagator(|propagator| propagator.extract(&carrier))
+    extract_env_context(&carrier)
+}
+
+fn extract_env_context(carrier: &EnvExtractor) -> Context {
+    global::get_text_map_propagator(|propagator| propagator.extract(carrier))
 }
 
 pub fn set_parent_from_env(span: &tracing::Span) {
@@ -271,6 +275,26 @@ mod tests {
 
         assert!(vars.iter().any(|(key, _)| key == "TRACEPARENT"));
         assert!(vars.iter().all(|(key, _)| key == &key.to_ascii_uppercase()));
+    }
+
+    #[test]
+    fn env_carrier_extracts_trace_context() {
+        let _guard = propagator_lock();
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        let trace_id = TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").expect("trace id");
+        let carrier = EnvExtractor {
+            values: BTreeMap::from([(
+                "TRACEPARENT",
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_owned(),
+            )]),
+        };
+        assert_eq!(
+            extract_env_context(&carrier)
+                .span()
+                .span_context()
+                .trace_id(),
+            trace_id
+        );
     }
 
     #[test]
