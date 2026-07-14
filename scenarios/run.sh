@@ -7,8 +7,11 @@ catalog() {
   cat <<'TABLE'
 ID              Script                         Drives                                      Check in Parallax UI
 a1              a1-checkout.sh                 checkout -> pricing/inventory/recommendation Traces: checkout waterfall with downstream children
+a2              requires-live-host             JVM exemplar rendering requires a live collector/backend
+a5              requires-live-host             Playwright RUM failure requires a browser-capable live host
 a6              a6-graphql.sh                  catalog GraphQL field-span family            Traces: batched vs N+1, partial error, op-name policy
 a7              a7-subscription.ts             catalog GraphQL subscription smoke            Traces: long-lived priceChanges subscription span
+a8              requires-live-host             Java async-agent link requires the compose broker/collector host
 a7b             a7b-grpc-stream.sh             pricing gRPC stream events/failure/cancel    Traces: rpc.message SENT/RECEIVED events and stream_failed/cancel
 a9              a9-field-spike.sh              checkout structured log burst                Logs document fields: app_screen_name dominated by workspace-select
 a10             a10-baggage.sh                  checkout W3C tenant/tier baggage             Traces: checkout, inventory, and pricing carry tenant.id/user.tier
@@ -30,6 +33,13 @@ a27             a27-execution-stack.sh         CLI -> daemon -> container -> age
 a28             a28-rum-journey.sh             browser routes, web vitals, session.id       Traces: stitched browser checkout, RUM error, web_vital spans, nopropagate gap
 a29             a29-typed-events.sh            typed log events across tiers                Logs SQL/Event column: checkout/order/catalog/payment/web event names
 b-async-chaos   b-async-chaos.sh               consumer lag and poison message              Services/Traces: lag span and dead-letter error branch
+b2              requires-live-host             inventory 503 fault requires the live inventory dependency
+b5              requires-live-host             CPU-pressure fault requires a live service host
+b6              requires-live-host             flagd cache-leak fault requires flagd and a live recommendation service
+b10             requires-live-host             lock-contention fault requires the live Postgres topology
+b13             requires-live-host             slow-recommendation fault requires live downstream services
+b15             requires-live-host             Playwright rage-click requires a browser-capable live host
+b16             requires-live-host             k6 load generation requires the live checkout host
 b-chaos         b-chaos.sh                     payment failure and latency                  Issues/Services: checkout error and slow-span rendering
 b-checkout-chaos b-checkout-chaos.sh           retry timeout and N+1 fan-out                Traces: retry/timeout branch and N+1 waterfall
 b3b             b3b-grpc-deadline.sh           real grpc-timeout deadline and retry spans    Traces: rpc.grpc.status_code=4 on pricing.attempt spans
@@ -47,9 +57,12 @@ TABLE
 scenario() {
   case "$1" in
     a1) echo "a1-checkout.sh|Traces: checkout waterfall with pricing, inventory, and recommendation children" ;;
+    a2) echo "requires-live-host|JVM exemplar rendering requires a live collector/backend" ;;
+    a5) echo "requires-live-host|Playwright RUM failure requires a browser-capable live host" ;;
     a6) echo "a6-graphql.sh|Traces: batched reviews vs reviewsSlow N+1 shape, partial riskScore error, op-name policy" ;;
     a7) echo "a7-subscription.ts|Traces: long-lived priceChanges subscription span; run with Bun" ;;
     a7b) echo "a7b-grpc-stream.sh|Traces: pricing stream SENT events, checkout RECEIVED events, stream_failed, and cancel observation" ;;
+    a8) echo "requires-live-host|Java async-agent link requires the compose broker/collector host" ;;
     a9) echo "a9-field-spike.sh|Logs document fields: app_screen_name dominated by workspace-select in the spike window" ;;
     a10) echo "a10-baggage.sh|Traces: checkout, inventory, and pricing carry tenant.id/user.tier via W3C baggage" ;;
     a3) echo "a3-async.sh|Trace detail: producer span with link to consumer trace" ;;
@@ -70,6 +83,13 @@ scenario() {
     a28) echo "a28-rum-journey.sh|Traces: browser route/user-step spans, web_vital spans, stitched checkout, RUM exception, and nopropagate disconnected-trace gap" ;;
     a29) echo "a29-typed-events.sh|Logs SQL/Event column: checkout.completed, checkout.failed, order.consumed, catalog.products.served, payment.authorized, and web.checkout.submitted" ;;
     b-async-chaos) echo "b-async-chaos.sh|Services/Traces: lag span and dead-letter error branch" ;;
+    b2) echo "requires-live-host|inventory 503 fault requires the live inventory dependency" ;;
+    b5) echo "requires-live-host|CPU-pressure fault requires a live service host" ;;
+    b6) echo "requires-live-host|flagd cache-leak fault requires flagd and a live recommendation service" ;;
+    b10) echo "requires-live-host|lock-contention fault requires the live Postgres topology" ;;
+    b13) echo "requires-live-host|slow-recommendation fault requires live downstream services" ;;
+    b15) echo "requires-live-host|Playwright rage-click requires a browser-capable live host" ;;
+    b16) echo "requires-live-host|k6 load generation requires the live checkout host" ;;
     b-chaos) echo "b-chaos.sh|Issues/Services: checkout error and slow-span rendering" ;;
     b-checkout-chaos) echo "b-checkout-chaos.sh|Traces: retry/timeout branch and N+1 waterfall" ;;
     b3b) echo "b3b-grpc-deadline.sh|Traces: pricing.attempt sibling spans carry rpc.grpc.status_code=4 and deadline_exceeded" ;;
@@ -103,6 +123,8 @@ script="${entry%%|*}"
 check="${entry#*|}"
 if [[ "$id" == "a7" ]]; then
   bun "$SCRIPT_DIR/$script" "$@"
+elif [[ "$script" == "requires-live-host" ]]; then
+  echo "Scenario $id requires a live host: $check"
 else
   "$SCRIPT_DIR/$script" "$@"
 fi
