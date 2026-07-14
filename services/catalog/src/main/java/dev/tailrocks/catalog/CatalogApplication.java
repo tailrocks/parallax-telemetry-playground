@@ -25,6 +25,7 @@ import io.opentelemetry.api.logs.Severity;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
+import io.sentry.Sentry;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.LoggerFactory;
@@ -187,7 +188,10 @@ class ProductController {
     Float riskScore(Product product) {
         Span.current().setAttribute("catalog.product.sku", product.sku());
         if (PARTIAL_ERROR_SKU.equals(product.sku())) {
-            throw new IllegalStateException("risk score unavailable for " + PARTIAL_ERROR_SKU);
+            IllegalStateException error =
+                new IllegalStateException("risk score unavailable for " + PARTIAL_ERROR_SKU);
+            Sentry.captureException(error);
+            throw error;
         }
         return product.priceMinor() > 3000 ? 0.72f : 0.18f;
     }

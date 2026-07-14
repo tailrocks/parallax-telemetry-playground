@@ -50,8 +50,8 @@ short flush) that a sandbox can't provision.
 
 ### Known version blocker — Rust `sentry-opentelemetry` (shared trace_id)
 `sentry-opentelemetry` 0.48 pins `opentelemetry` **0.29**; the workspace is on
-**0.30**. Its `SentrySpanProcessor`/`SentryPropagator` are 0.29 types and won't
-attach to a 0.30 `SdkTracerProvider`, so it can't be added without downgrading
+**0.32**. Its `SentrySpanProcessor`/`SentryPropagator` are 0.29 types and won't
+attach to a 0.32 `SdkTracerProvider`, so it can't be added without downgrading
 the whole OTel stack (regressing logs/metrics). Rust Sentry issues therefore
 carry their own trace_id today; revisit when the crate reaches OTel 0.30+.
 
@@ -80,17 +80,19 @@ Verify: `bun run dev`, open the app in a browser with `VITE_SENTRY_DSN` set:
 - confirm **web vitals** (LCP/CLS/INP) appear in Sentry Performance.
 
 ### A15 / A16 — Sentry issue grouping + lifecycle
-Code: every service inits Sentry (DSN from env); Rust `tracing::error!` →
-Sentry issue (sentry-tracing), Java unhandled → Sentry, and GraphQL/field errors
-should call `Sentry.captureException`.
+Code: every service initializes Sentry from `SENTRY_DSN`; Rust `tracing::error!`
+emits a Sentry issue through `sentry-tracing`, and Java uses the Spring SDK
+starter alongside the upstream OTel agent. GraphQL/field errors should call
+`Sentry.captureException` when they are handled rather than allowed to escape.
 Verify: with `SENTRY_DSN` set, trigger the same error repeatedly (e.g.
 `/checkout?fail=1`) → one **grouped issue** with rising event count (A15); resolve
 it in Sentry, deploy `v2` (`RELEASE=v2`) that re-introduces it → Sentry marks it
 **regressed** (A16).
 
 ### A17 — profiling
-Code: JVM uses the Sentry agent; add `@sentry/profiling`-equivalent on the tiers
-that support it. CPU hot path: `/checkout?cpu_ms=200`.
+Code: JVM uses the Sentry Spring SDK's continuous-profiling configuration while
+the upstream OTel agent remains the OTLP exporter. CPU hot path:
+`/checkout?cpu_ms=200`.
 Verify: with profiling enabled + `SENTRY_DSN`, drive the hot path → a CPU profile
 with the slow function appears in Sentry Profiling.
 
