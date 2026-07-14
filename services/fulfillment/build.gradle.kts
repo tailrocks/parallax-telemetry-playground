@@ -44,6 +44,7 @@ tasks.withType<Test>().configureEach {
     inputs.files(otelJavaAgent)
     jvmArgs("-javaagent:${otelJavaAgent.singleFile.absolutePath}")
     environment("PARALLAX_RUN_ID", System.getenv("PARALLAX_RUN_ID") ?: "")
+    environment("TRACEPARENT", System.getenv("TRACEPARENT") ?: "")
     if (testOtelEndpoint == null) {
         environment("OTEL_TRACES_EXPORTER", "none")
         environment("OTEL_METRICS_EXPORTER", "none")
