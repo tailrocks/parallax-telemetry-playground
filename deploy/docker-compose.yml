@@ -6,7 +6,7 @@
 # Parallax or the lab first, then `docker compose up` here.
 #
 # Status: Rust services (checkout, pricing, inventory, recommendation,
-# notifications, orders) + Java (catalog GraphQL, payment gRPC, fulfillment
+# notifications, orders, storefront GraphQL) + Java (catalog GraphQL, payment gRPC, fulfillment
 # Kafka) + web (TanStack Start) all wired. Java uses the upstream OTel agent
 # plus the Spring Sentry SDK (deploy/Dockerfile.java); web is the Nitro server
 # (deploy/Dockerfile.web). Pin image tags at a real deploy.
@@ -78,6 +78,18 @@ services:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: orders } }
     environment: { <<: *otlp, ADDR: "0.0.0.0:8092" }
     ports: ["8092:8092"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
+  storefront:
+    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: storefront } }
+    environment:
+      <<: *otlp
+      STOREFRONT_ADDR: "0.0.0.0:8094"
+      CATALOG_GRAPHQL_URL: "http://catalog:8080/graphql"
+      PRICING_ENDPOINT: "http://pricing:50051"
+    ports: ["8094:8094"]
+    depends_on: [catalog, pricing]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 

@@ -1,0 +1,21 @@
+[package]
+name = "storefront"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+futures = { workspace = true }
+juniper = { workspace = true }
+juniper_axum = { workspace = true }
+juniper_graphql_ws = { workspace = true }
+playground-proto = { workspace = true }
+playground-telemetry = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }

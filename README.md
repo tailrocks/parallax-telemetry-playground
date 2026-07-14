@@ -38,6 +38,7 @@ via SDK/envelope paths. One distributed trace stitches browser -> Rust -> Java
 | `services/pricing` | Rust tonic | ✅ gRPC server — **builds + runs** (verified) |
 | `services/inventory` `recommendation` | Rust | ✅ HTTP services in the checkout trace — **build + run** (verified) |
 | `services/orders` | Rust | ✅ async branch: producer/consumer spans + **span link** — **builds + runs** (verified) |
+| `services/storefront` | Rust Juniper / Axum | ✅ GraphQL→catalog and GraphQL→gRPC gateway with WebSocket subscriptions — **builds** |
 | `services/notifications` | Rust | ✅ reverse-hop target — **builds** |
 | `cli` | Rust | ✅ run driver — **builds** |
 | `services/catalog` | Java Spring GraphQL | ✅ **A6 DataLoader** (`@BatchMapping`) + **A14 OpenFeature/flagd** flag eval — **compiles** |
