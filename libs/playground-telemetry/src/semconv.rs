@@ -49,6 +49,7 @@ pub const GRAPHQL_FIELD_NAME: &str = "graphql.field.name";
 pub const GRAPHQL_FIELD_PATH: &str = "graphql.field.path";
 pub const TEST_CASE_NAME: &str = "test.case.name";
 pub const TEST_CASE_RESULT_STATUS: &str = "test.case.result.status";
+pub const TEST_ARTIFACT_PATH: &str = "test.artifact.path";
 pub const TEST_SUITE_NAME: &str = "test.suite.name";
 pub const TEST_SUITE_RUN_STATUS: &str = "test.suite.run.status";
 pub const CICD_PIPELINE_RUN_ID: &str = "cicd.pipeline.run.id";

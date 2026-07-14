@@ -21,6 +21,7 @@ import {
   PARALLAX_TEST_ID,
   TEST_CASE_NAME,
   TEST_CASE_RESULT_STATUS,
+  TEST_ARTIFACT_PATH,
   TEST_SUITE_NAME,
   TEST_SUITE_RUN_STATUS,
 } from "../src/semconv";
@@ -79,6 +80,12 @@ export default class TelemetryReporter implements Reporter {
         stack: error?.stack,
       });
       span.setStatus({ code: SpanStatusCode.ERROR, message });
+    }
+    const traceArchive = result.attachments.find((attachment) =>
+      attachment.path?.endsWith("trace.zip"),
+    );
+    if (traceArchive?.path) {
+      span.setAttribute(TEST_ARTIFACT_PATH, traceArchive.path);
     }
     span.end(new Date(result.startTime.getTime() + result.duration));
   }

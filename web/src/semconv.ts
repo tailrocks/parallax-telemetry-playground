@@ -46,6 +46,7 @@ export const GRAPHQL_FIELD_NAME = "graphql.field.name" as const;
 export const GRAPHQL_FIELD_PATH = "graphql.field.path" as const;
 export const TEST_CASE_NAME = "test.case.name" as const;
 export const TEST_CASE_RESULT_STATUS = "test.case.result.status" as const;
+export const TEST_ARTIFACT_PATH = "test.artifact.path" as const;
 export const TEST_SUITE_NAME = "test.suite.name" as const;
 export const TEST_SUITE_RUN_STATUS = "test.suite.run.status" as const;
 export const CICD_PIPELINE_RUN_ID = "cicd.pipeline.run.id" as const;

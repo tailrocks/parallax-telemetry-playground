@@ -50,6 +50,7 @@ public final class Semconv {
     public static final String GRAPHQL_FIELD_PATH = "graphql.field.path";
     public static final String TEST_CASE_NAME = "test.case.name";
     public static final String TEST_CASE_RESULT_STATUS = "test.case.result.status";
+    public static final String TEST_ARTIFACT_PATH = "test.artifact.path";
     public static final String TEST_SUITE_NAME = "test.suite.name";
     public static final String TEST_SUITE_RUN_STATUS = "test.suite.run.status";
     public static final String CICD_PIPELINE_RUN_ID = "cicd.pipeline.run.id";
