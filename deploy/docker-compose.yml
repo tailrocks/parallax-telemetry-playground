@@ -176,6 +176,7 @@ services:
       OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       KAFKA_BROKERS: "broker:9092"
+      PAYMENT_GRPC_ADDRESS: "payment:9090"
       NOTIFICATIONS_URL: "http://notifications:8091"
     # POST /publish drives the cross-language async branch: Java produces to the
     # `orders` topic → consumes it → calls Rust `notifications` (reverse hop).

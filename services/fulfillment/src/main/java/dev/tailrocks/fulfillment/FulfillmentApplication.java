@@ -1,7 +1,11 @@
 package dev.tailrocks.fulfillment;
 
+import dev.tailrocks.pricing.v1.PricingGrpc;
+import dev.tailrocks.pricing.v1.QuoteRequest;
+import org.springframework.context.annotation.Bean;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.grpc.client.GrpcChannelFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
@@ -14,6 +18,11 @@ import org.springframework.web.client.RestClient;
 public class FulfillmentApplication {
     public static void main(String[] args) {
         SpringApplication.run(FulfillmentApplication.class, args);
+    }
+
+    @Bean
+    PricingGrpc.PricingBlockingStub paymentPricingClient(GrpcChannelFactory channels) {
+        return PricingGrpc.newBlockingStub(channels.createChannel("payment"));
     }
 }
 
@@ -40,10 +49,16 @@ class OrderConsumer {
     private final RestClient http = RestClient.create();
     private final String notificationsUrl =
         System.getenv().getOrDefault("NOTIFICATIONS_URL", "http://notifications:8091");
+    private final PricingGrpc.PricingBlockingStub pricing;
+
+    OrderConsumer(PricingGrpc.PricingBlockingStub pricing) {
+        this.pricing = pricing;
+    }
 
     // CONSUMER span (auto-instrumented); the reverse Java→Rust hop follows.
     @KafkaListener(topics = "orders", groupId = "fulfillment")
     void onOrder(String order) {
+        pricing.quote(QuoteRequest.newBuilder().setSku(order).setQuantity(1).build());
         http.get().uri(notificationsUrl + "/").retrieve().toBodilessEntity();
     }
 }

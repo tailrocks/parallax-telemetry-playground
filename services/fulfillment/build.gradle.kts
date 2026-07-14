@@ -6,6 +6,7 @@ plugins {
     java
     id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
+    id("com.google.protobuf") version "0.9.4"
 }
 group = "dev.tailrocks"; version = "0.1.0"
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
@@ -17,6 +18,11 @@ dependencies {
     // brings KafkaAutoConfiguration (KafkaTemplate + listener factories). The
     // starter pulls spring-kafka + the spring-boot-kafka autoconfig module.
     implementation("org.springframework.boot:spring-boot-starter-kafka")
+    implementation("org.springframework.boot:spring-boot-starter-grpc-client")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("io.sentry:sentry-spring-boot-starter-jakarta:8.46.0")
 }
+protobuf {
+    protoc { artifact = "com.google.protobuf:protoc:4.34.2" }
+}
+sourceSets { main { proto { srcDir("../../proto") } } }

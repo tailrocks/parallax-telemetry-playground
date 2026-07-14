@@ -3,6 +3,11 @@ spring:
     name: fulfillment
   kafka:
     bootstrap-servers: ${KAFKA_BROKERS:broker:9092}
+  grpc:
+    client:
+      channels:
+        payment:
+          address: ${PAYMENT_GRPC_ADDRESS:payment:9090}
 sentry:
   dsn: ${SENTRY_DSN:}
   environment: ${PARALLAX_ENV:playground}
