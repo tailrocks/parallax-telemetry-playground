@@ -89,6 +89,21 @@ conversion is lossless.
 | OpenObserve | Histogram type/buckets visible or documented conversion | pending live run |
 | Sentry | Metrics rendering/disposition recorded | pending live run |
 
+### W4 — Java test telemetry
+
+Code: catalog, payment, and fulfillment attach the pinned upstream
+`opentelemetry-javaagent` to every Gradle `Test` JVM. The existing
+OpenTelemetry Gradle plugin supplies task/per-test spans and forwards the run
+identity plus parent context; the agent instruments integration-test client
+work beneath those test executions. JUnit XML keeps `mergeReruns=true` as the
+authoritative retry record.
+
+Verify: run each service's Gradle tests with `TRACEPARENT`, `PARALLAX_RUN_ID`,
+and `OTEL_EXPORTER_OTLP_ENDPOINT` set, then inspect the test root, failure
+payload, and any HTTP/gRPC/Kafka/JDBC child spans in the same trace. This host
+cannot yet execute that command: Gradle fails before configuration while
+loading `libnative-platform.so` for Linux arm64.
+
 ### W5 — cross-language `PaymentError` grouping
 
 Code: Rust checkout's B1 failure and Java payment's `Quote` request with

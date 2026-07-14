@@ -23,6 +23,7 @@ group = "dev.tailrocks"; version = "0.1.0"
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
 sourceSets { main { java { srcDir("../semconv/src/main/java") } } }
 repositories { mavenCentral() }
+val otelJavaAgent by configurations.creating
 dependencies {
     // Spring Boot 4.1 graduated Spring gRPC: the starter is now Boot-owned and
     // split by role — payment is a gRPC server. Boot's BOM manages the
@@ -36,6 +37,8 @@ dependencies {
     implementation("io.sentry:sentry-spring-boot-starter-jakarta:8.46.0")
     implementation("io.opentelemetry:opentelemetry-api")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // Keep test traces on the same upstream agent path as the deployed JVM.
+    otelJavaAgent("io.opentelemetry.javaagent:opentelemetry-javaagent:2.29.0")
 }
 openTelemetryBuild {
     endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") ?: "http://rotel:4317"
@@ -46,6 +49,8 @@ openTelemetryBuild {
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     reports.junitXml.mergeReruns.set(true)
+    inputs.files(otelJavaAgent)
+    jvmArgs("-javaagent:${otelJavaAgent.singleFile.absolutePath}")
     environment("PARALLAX_RUN_ID", System.getenv("PARALLAX_RUN_ID") ?: "")
 }
 // Spring Boot 4.1 graduated gRPC support: when `com.google.protobuf` is
