@@ -69,4 +69,36 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
+
+    #[tokio::test]
+    async fn serves_notifications_over_a_real_tcp_listener() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener binds");
+        let address = listener.local_addr().expect("listener address");
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app())
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .expect("server exits cleanly");
+        });
+
+        let response = reqwest::get(format!("http://{address}/"))
+            .await
+            .expect("request succeeds");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.text().await.expect("response body"),
+            "notifications ok"
+        );
+
+        shutdown_tx.send(()).expect("shutdown signal sends");
+        tokio::time::timeout(std::time::Duration::from_secs(2), server)
+            .await
+            .expect("server shuts down")
+            .expect("server task joins");
+    }
 }
