@@ -5,11 +5,12 @@ traffic generator see `./demo.sh`. This file remains the full cross-backend
 verification runbook.
 
 What's verified in CI/sandbox vs what needs a real host. The **code/config for
-every scenario is implemented**; Rust, web, and the three Java test suites run
-locally. Java uses a temporary Gradle cache outside the container's native
-library mount; the scenarios below still need a live multi-runtime environment
-(Sentry self-hosted, a browser, a collector with a short flush) that a sandbox
-can't provision.
+every scenario is implemented**; Rust, web build/Vitest, and the three Java
+test suites run locally. Playwright discovery also runs locally, but browser
+execution needs a browser-capable host. Java uses a temporary Gradle cache
+outside the container's native library mount; the scenarios below still need a
+live multi-runtime environment (Sentry self-hosted, a browser, a collector with
+a short flush) that a sandbox can't provision.
 
 ## Verified here (build/run/execute)
 - Rust workspace builds (fmt + clippy clean); web builds (`bun run build`: Vite
