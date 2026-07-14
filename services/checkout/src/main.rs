@@ -827,4 +827,27 @@ mod tests {
                 .contains("payment failed")
         );
     }
+
+    #[tokio::test]
+    async fn serves_health_over_a_real_loopback_listener() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind checkout listener");
+        let address = listener.local_addr().expect("checkout listener address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app())
+                .await
+                .expect("serve checkout");
+        });
+
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            reqwest::get(format!("http://{address}/healthz")),
+        )
+        .await
+        .expect("checkout health timeout")
+        .expect("checkout health response");
+        assert_eq!(response.status(), StatusCode::OK);
+        server.abort();
+    }
 }
