@@ -20,6 +20,7 @@ plugins {
 }
 group = "dev.tailrocks"; version = "0.1.0"
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+sourceSets { main { java { srcDir("../semconv/src/main/java") } } }
 repositories { mavenCentral() }
 dependencies {
     // Spring Boot 4.1 graduated Spring gRPC: the starter is now Boot-owned and

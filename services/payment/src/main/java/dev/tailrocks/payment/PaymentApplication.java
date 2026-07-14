@@ -1,5 +1,7 @@
 package dev.tailrocks.payment;
 
+import io.tailrocks.semconv.Semconv;
+
 import dev.tailrocks.pricing.v1.PricingGrpc;
 import dev.tailrocks.pricing.v1.QuoteRequest;
 import dev.tailrocks.pricing.v1.QuoteResponse;

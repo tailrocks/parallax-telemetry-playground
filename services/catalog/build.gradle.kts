@@ -9,6 +9,7 @@ plugins {
 }
 group = "dev.tailrocks"; version = "0.1.0"
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+sourceSets { main { java { srcDir("../semconv/src/main/java") } } }
 repositories { mavenCentral() }
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-graphql")

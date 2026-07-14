@@ -1,4 +1,7 @@
-//! Shared telemetry wire-name registry for playground producers.
+//! Generated semantic-convention names for playground producers.
+//!
+//! The canonical registry is `tailrocks/parallax/telemetry/semconv/contract.yaml`
+//! at `bb2502f`; preserve these checked-in values byte-for-byte.
 
 pub const SERVICE_NAME: &str = "service.name";
 pub const SERVICE_VERSION: &str = "service.version";

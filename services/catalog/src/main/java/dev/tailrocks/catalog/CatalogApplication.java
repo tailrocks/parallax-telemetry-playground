@@ -1,5 +1,7 @@
 package dev.tailrocks.catalog;
 
+import io.tailrocks.semconv.Semconv;
+
 import dev.openfeature.contrib.providers.flagd.FlagdProvider;
 import dev.openfeature.sdk.BooleanHook;
 import dev.openfeature.sdk.FlagEvaluationDetails;
