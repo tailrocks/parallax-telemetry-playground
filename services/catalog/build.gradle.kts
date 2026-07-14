@@ -26,6 +26,9 @@ dependencies {
     implementation("io.opentelemetry:opentelemetry-api")
     runtimeOnly("org.postgresql:postgresql")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.boot:spring-boot-micrometer-tracing-test")
+    testImplementation("org.springframework.graphql:spring-graphql-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-webflux")
     // Keep test traces on the same upstream agent path as the deployed JVM.
     otelJavaAgent("io.opentelemetry.javaagent:opentelemetry-javaagent:2.29.0")
 }
