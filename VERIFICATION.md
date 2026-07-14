@@ -5,9 +5,11 @@ traffic generator see `./demo.sh`. This file remains the full cross-backend
 verification runbook.
 
 What's verified in CI/sandbox vs what needs a real host. The **code/config for
-every scenario is implemented and builds**; the scenarios below need a live
-multi-runtime environment (Sentry self-hosted, a browser, a collector with a
-short flush) that a sandbox can't provision.
+every scenario is implemented**; Rust and web build locally, while Java source
+execution awaits a functional Gradle host because this arm64 launcher fails
+before project configuration. The scenarios below also need a live multi-runtime
+environment (Sentry self-hosted, a browser, a collector with a short flush)
+that a sandbox can't provision.
 
 ## Verified here (build/run/execute)
 - Rust workspace builds (fmt + clippy clean); web builds (`bun run build`: Vite
