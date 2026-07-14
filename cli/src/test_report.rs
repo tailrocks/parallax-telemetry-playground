@@ -19,6 +19,7 @@ const FAILURE_STACK: &str = "test.failure.stacktrace";
 const TEST_ATTEMPT: &str = "test.attempt.ordinal";
 const TEST_ATTEMPT_ID: &str = "test.attempt.id";
 const TEST_TOTAL_ATTEMPTS: &str = "test.attempt.total";
+const TEST_PARAMETERS: &str = "test.case.parameters";
 const TEST_CODE_REFERENCE: &str = "test.code_reference";
 const TEST_CONFIGURATION_OS: &str = "test.configuration.os";
 const TEST_CONFIGURATION_ENVIRONMENT: &str = "test.configuration.environment";
@@ -139,6 +140,9 @@ fn emit_case(case: Case) {
     if let Some(duration_ms) = case.duration_ms {
         attributes.push(KeyValue::new("test.case.duration_ms", duration_ms as i64));
     }
+    if let Some(parameters) = test_parameters(&case.name) {
+        attributes.push(KeyValue::new(TEST_PARAMETERS, parameters));
+    }
     if let Some(diagnostic) = &case.diagnostic {
         attributes.push(KeyValue::new(FAILURE_MESSAGE, diagnostic.message.clone()));
         if !diagnostic.stack.is_empty() {
@@ -177,6 +181,12 @@ fn attempt_ordinal(value: Option<&str>) -> i64 {
         .and_then(|value| value.parse::<i64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(1)
+}
+
+fn test_parameters(name: &str) -> Option<String> {
+    let open = name.rfind('[')?;
+    let parameters = name.get(open + 1..name.len().checked_sub(1)?)?;
+    (!parameters.is_empty() && name.ends_with(']')).then(|| parameters.to_owned())
 }
 
 fn explicit_test_id() -> Option<String> {
@@ -348,7 +358,7 @@ fn summarize(cases: &[Case]) -> Summary {
 mod tests {
     use super::{
         Case, Outcome, attempt_ordinal, code_reference, parse, report_parent_context,
-        seconds_to_ms, summarize,
+        seconds_to_ms, summarize, test_parameters,
     };
     use opentelemetry::trace::{
         SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
@@ -424,6 +434,16 @@ mod tests {
         assert_eq!(attempt_ordinal(Some("0")), 1);
         assert_eq!(attempt_ordinal(Some("nope")), 1);
         assert_eq!(attempt_ordinal(Some("2")), 2);
+    }
+
+    #[test]
+    fn extracts_parameterized_test_values_without_changing_name() {
+        assert_eq!(
+            test_parameters("tests::quote[usd, pro]"),
+            Some("usd, pro".into())
+        );
+        assert_eq!(test_parameters("tests::quote"), None);
+        assert_eq!(test_parameters("tests::quote[]"), None);
     }
 
     #[test]
