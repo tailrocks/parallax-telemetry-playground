@@ -37,6 +37,7 @@ dependencies {
     implementation("io.sentry:sentry-spring-boot-starter-jakarta:8.46.0")
     implementation("io.opentelemetry:opentelemetry-api")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("io.grpc:grpc-inprocess")
     // Keep test traces on the same upstream agent path as the deployed JVM.
     otelJavaAgent("io.opentelemetry.javaagent:opentelemetry-javaagent:2.29.0")
 }
