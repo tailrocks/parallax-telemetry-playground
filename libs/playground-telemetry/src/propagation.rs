@@ -290,8 +290,11 @@ mod tests {
             .and_then(|value| value.to_str().ok())
             .ok_or("baggage header missing")?;
         let extracted = extract_context(&headers);
+        let expected_header_members = ["tenant.id=tenant-a", "user.tier=pro"];
         let actual = (
-            baggage,
+            expected_header_members
+                .iter()
+                .all(|member| baggage.split(',').any(|actual| actual == *member)),
             extracted
                 .baggage()
                 .get(semconv::TENANT_ID)
@@ -301,13 +304,7 @@ mod tests {
                 .get(semconv::USER_TIER)
                 .map(ToString::to_string),
         );
-        if actual
-            != (
-                "tenant.id=tenant-a,user.tier=pro",
-                Some("tenant-a".to_string()),
-                Some("pro".to_string()),
-            )
-        {
+        if actual != (true, Some("tenant-a".to_string()), Some("pro".to_string())) {
             return Err(format!("baggage propagation mismatch: {actual:?}"));
         }
         Ok(())

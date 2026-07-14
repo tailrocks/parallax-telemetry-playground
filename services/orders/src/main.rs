@@ -62,7 +62,14 @@ async fn publish(
     State(state): State<App>,
     Query(p): Query<Publish>,
 ) -> Json<Value> {
-    let span = tracing::info_span!("publish", otel.kind = semconv::SPAN_KIND_PRODUCER);
+    let span = tracing::info_span!(
+        "send orders",
+        otel.kind = semconv::SPAN_KIND_PRODUCER,
+        "messaging.system" = "inprocess",
+        "messaging.destination.name" = "orders",
+        "messaging.operation.name" = "send",
+        "messaging.operation.type" = "send",
+    );
     playground_telemetry::set_parent_from_headers(&span, &headers);
     publish_inner(state, p).instrument(span).await
 }
@@ -77,6 +84,7 @@ async fn publish_inner(state: App, p: Publish) -> Json<Value> {
         tracing::Span::current().context()
     };
     let order_id = next_order_id();
+    tracing::Span::current().set_attribute(semconv::MESSAGING_MESSAGE_ID, order_id.clone());
     let msg = Msg {
         order_id: order_id.clone(),
         producer_cx,
@@ -100,10 +108,15 @@ async fn publish_inner(state: App, p: Publish) -> Json<Value> {
 async fn consume(msg: Msg, attempt: u32) {
     let delivery_lag_ms = msg.enqueued_at.elapsed().as_millis() as i64;
     let span = tracing::info_span!(
-        "consume",
+        "process orders",
         otel.kind = semconv::SPAN_KIND_CONSUMER,
         order_id = %msg.order_id,
         attempt,
+        "messaging.system" = "inprocess",
+        "messaging.destination.name" = "orders",
+        "messaging.operation.name" = "process",
+        "messaging.operation.type" = "process",
+        "messaging.message.id" = %msg.order_id,
         "messaging.delivery.lag_ms" = delivery_lag_ms,
         "messaging.orphan" = msg.orphan,
     );
@@ -143,8 +156,12 @@ async fn consume_batch(batch: Vec<Msg>) {
         .max()
         .unwrap_or(0);
     let span = tracing::info_span!(
-        "consume_batch",
+        "process orders",
         otel.kind = semconv::SPAN_KIND_CONSUMER,
+        "messaging.system" = "inprocess",
+        "messaging.destination.name" = "orders",
+        "messaging.operation.name" = "process",
+        "messaging.operation.type" = "process",
         "messaging.batch.message_count" = message_count as i64,
         "messaging.delivery.lag_ms" = max_delivery_lag_ms,
     );
@@ -192,7 +209,15 @@ async fn consume_single(msg: Msg) {
             )
             .await;
         }
-        let span = tracing::error_span!("dead_letter", otel.kind = semconv::SPAN_KIND_CONSUMER);
+        let span = tracing::error_span!(
+            "process orders",
+            otel.kind = semconv::SPAN_KIND_CONSUMER,
+            "messaging.system" = "inprocess",
+            "messaging.destination.name" = "orders",
+            "messaging.operation.name" = "process",
+            "messaging.operation.type" = "process",
+            "messaging.message.id" = %order_id,
+        );
         let _guard = span.enter();
         playground_telemetry::mark_span_error("dead_letter");
         tracing::error!(order_id = %order_id, "dead-lettered after 3 attempts");
