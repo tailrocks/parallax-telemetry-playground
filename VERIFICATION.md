@@ -118,6 +118,10 @@ then explicitly shuts down the simple OTLP exporter after the test body.
 Default nextest runs remain exporter-free; the JUnit converter remains the
 complete result bridge for every Rust test.
 
+The shared deterministic unit fixture separately proves that this scope makes
+the propagated remote trace ID the active OpenTelemetry parent, without a
+collector or network dependency.
+
 Verify: set `PLAYGROUND_TEST_TELEMETRY=1`, `TRACEPARENT`, and
 `OTEL_EXPORTER_OTLP_ENDPOINT` for a focused notifications nextest run. Inspect
 the test-run parent plus the HTTP server/client work below it in the collector.

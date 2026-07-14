@@ -561,6 +561,9 @@ fn non_empty_env(name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::trace::{
+        SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
+    };
     use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord, SdkLoggerProvider};
     use std::sync::{Arc, Mutex};
 
@@ -702,6 +705,39 @@ mod tests {
         assert!(!test_telemetry_enabled(None));
         assert!(!test_telemetry_enabled(Some("true")));
         assert!(test_telemetry_enabled(Some("1")));
+    }
+
+    #[test]
+    fn test_telemetry_scope_attaches_the_propagated_parent() {
+        let trace_id =
+            TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").expect("valid trace ID");
+        let parent_context =
+            opentelemetry::Context::new().with_remote_span_context(SpanContext::new(
+                trace_id,
+                SpanId::from_hex("00f067aa0ba902b7").expect("valid span ID"),
+                TraceFlags::SAMPLED,
+                true,
+                TraceState::default(),
+            ));
+        let provider = SdkTracerProvider::builder().build();
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_opentelemetry::layer().with_tracer(provider.tracer("test")));
+        let telemetry = TestTelemetry {
+            tracer_provider: provider,
+            dispatch: tracing::Dispatch::new(subscriber),
+            parent_context,
+        };
+
+        let scope = telemetry.enter();
+        assert_eq!(
+            opentelemetry::Context::current()
+                .span()
+                .span_context()
+                .trace_id(),
+            trace_id
+        );
+        drop(scope);
+        telemetry.shutdown();
     }
 
     #[test]
