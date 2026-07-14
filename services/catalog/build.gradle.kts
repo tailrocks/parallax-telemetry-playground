@@ -12,7 +12,8 @@ group = "dev.tailrocks"; version = "0.1.0"
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
 sourceSets { main { java { srcDir("../semconv/src/main/java") } } }
 repositories { mavenCentral() }
-val otelJavaAgent by configurations.creating
+val otelJavaAgent = configurations.create("otelJavaAgent")
+val testOtelEndpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")?.takeIf(String::isNotBlank)
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-graphql")
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -27,10 +28,11 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-micrometer-tracing-test")
+    testImplementation("org.springframework.boot:spring-boot-graphql-test")
     testImplementation("org.springframework.graphql:spring-graphql-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webflux")
     // Keep test traces on the same upstream agent path as the deployed JVM.
-    otelJavaAgent("io.opentelemetry.javaagent:opentelemetry-javaagent:2.29.0")
+    add(otelJavaAgent.name, "io.opentelemetry.javaagent:opentelemetry-javaagent:2.29.0")
 }
 openTelemetryBuild {
     endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") ?: "http://rotel:4317"
@@ -44,4 +46,11 @@ tasks.withType<Test>().configureEach {
     inputs.files(otelJavaAgent)
     jvmArgs("-javaagent:${otelJavaAgent.singleFile.absolutePath}")
     environment("PARALLAX_RUN_ID", System.getenv("PARALLAX_RUN_ID") ?: "")
+    if (testOtelEndpoint == null) {
+        environment("OTEL_TRACES_EXPORTER", "none")
+        environment("OTEL_METRICS_EXPORTER", "none")
+        environment("OTEL_LOGS_EXPORTER", "none")
+    } else {
+        environment("OTEL_EXPORTER_OTLP_ENDPOINT", testOtelEndpoint)
+    }
 }
