@@ -25,6 +25,7 @@ import {
   TEST_SUITE_NAME,
   TEST_SUITE_RUN_STATUS,
 } from "../src/semconv";
+import { traceparentForTest } from "./test-trace-context";
 
 const TEST_TRACER = "playground.web.test";
 
@@ -47,8 +48,6 @@ export default class TelemetryReporter implements Reporter {
         ],
       })
     : undefined;
-  private readonly parentContext = parentContextFromEnvironment();
-
   onTestEnd(test: TestCase, result: TestResult): void {
     if (!this.provider) return;
 
@@ -69,7 +68,7 @@ export default class TelemetryReporter implements Reporter {
           "test.case.duration_ms": result.duration,
         },
       },
-      this.parentContext,
+      parentContextFromTraceparent(traceparentForTest(test.id)),
     );
     if (failed) {
       const error = result.error;
@@ -96,9 +95,7 @@ export default class TelemetryReporter implements Reporter {
   }
 }
 
-function parentContextFromEnvironment(): Context {
-  const traceparent = process.env.TRACEPARENT;
-  if (!traceparent) return ROOT_CONTEXT;
+function parentContextFromTraceparent(traceparent: string): Context {
   return new W3CTraceContextPropagator().extract(
     ROOT_CONTEXT,
     { traceparent },
