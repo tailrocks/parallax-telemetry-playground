@@ -16,15 +16,19 @@ async fn handle_inner() -> &'static str {
     "notifications ok"
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let telemetry = playground_telemetry::init("notifications")?;
-    let app = Router::new()
+fn app() -> Router {
+    Router::new()
         .route("/", get(handle))
         .route("/healthz", get(|| async { "ok" }))
         .layer(axum::middleware::from_fn(
             playground_telemetry::http_server_observability,
-        ));
+        ))
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let telemetry = playground_telemetry::init("notifications")?;
+    let app = app();
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8091".into());
     tracing::info!(%addr, "notifications HTTP listening");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -33,4 +37,36 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     telemetry.shutdown();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::app;
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn serves_notification_and_health_boundaries() {
+        let response = app()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(body.as_ref(), b"notifications ok");
+
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
 }

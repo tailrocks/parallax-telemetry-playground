@@ -1802,6 +1802,7 @@ dependencies = [
  "axum",
  "playground-telemetry",
  "tokio",
+ "tower",
  "tracing",
 ]
 
