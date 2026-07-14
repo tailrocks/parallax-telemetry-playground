@@ -22,6 +22,8 @@ rows here and in `run.sh`.
 | a20-compare | `a20-compare-pair.sh` | Two green checkout variants with structural differences. | Traces: Compare shows added reserve spans, removed recommend branch, and duration deltas. |
 | a20 | `a20-batch-fanin.sh` | Orders batch consumer drains rapid publishes into one consumer span. | Trace detail: `consume_batch` has `messaging.batch.message_count=8` and links to each producer trace. |
 | a22 | `a22-tokio-saturation.sh` | Checkout `spawn_blocking` flood plus concurrent traffic. | Services -> checkout -> Runtime lane: `tokio.runtime.*` spike; Traces: slow checkout spans in the same window. |
+| a23 | `a23-storefront-grpc.sh` | Juniper storefront GraphQL query calls Java payment over gRPC. | Traces: resolver fields followed by `Pricing/Quote` in one trace. |
+| a24 | `a24-storefront-catalog.sh` | Juniper storefront GraphQL query calls the Java catalog GraphQL API. | Traces: resolver fields followed by the catalog operation in one trace. |
 | a25 | `a25-postgres.sh` | Inventory uses real Postgres for normal reserve, `pg_sleep`, DB-N+1 SELECT fan-out, and pool exhaustion. | Traces: `db.query.text` spans for UPDATE, `pg_sleep`, SELECT fan-out, and `pool_exhausted`; Runtime: `db.client.connection.*` gauges. |
 | a26 | `a26-cache.sh` | Recommendation TTL cache cold/warm ratio, bypass, and stampede. | Metrics: `cache_hits_total`, `cache_misses_total`, `cache_size`; Traces: parallel `compute_recommendations` spans; Logs document fields: `cache.hit`. |
 | a27 | `a27-execution-stack.sh` | Host CLI to daemon to simulated container and agent/tool spans, plus orphan variant. | Runs/Story: execution beats share one run id; orphan child trace shows `browser_without_backend`. |

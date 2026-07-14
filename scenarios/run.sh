@@ -22,6 +22,8 @@ a19             a19-long-trace.sh              checkout synthetic wide/deep trac
 a20-compare     a20-compare-pair.sh            green structural checkout variants           Traces: Compare shows added reserve spans and removed recommend
 a20             a20-batch-fanin.sh             orders batch consumer links many producers   Trace detail: consume_batch has many span links
 a22             a22-tokio-saturation.sh        checkout spawn_blocking flood                Services -> checkout -> Runtime lane: tokio.runtime.* spike; Traces: slow spans
+a23             a23-storefront-grpc.sh          storefront GraphQL -> Java gRPC             Traces: GraphQL resolver then payment Pricing/Quote
+a24             a24-storefront-catalog.sh       storefront GraphQL -> catalog GraphQL       Traces: GraphQL resolver then catalog GraphQL operation
 a25             a25-postgres.sh                 inventory real Postgres and pool pressure    Traces: db spans, pg_sleep, SELECT fan-out, pool_exhausted; Runtime: db.client.connection.*
 a26             a26-cache.sh                    recommendation TTL cache and stampede       Metrics: cache_hits_total/cache_misses_total; Traces: parallel compute_recommendations
 a27             a27-execution-stack.sh         CLI -> daemon -> container -> agent          Runs/Story: stitched beats; orphan child trace has browser_without_backend
@@ -60,6 +62,8 @@ scenario() {
     a20-compare) echo "a20-compare-pair.sh|Traces: Compare shows added reserve spans, removed recommend branch, and duration deltas" ;;
     a20) echo "a20-batch-fanin.sh|Trace detail: consume_batch span carries messaging.batch.message_count and many span links" ;;
     a22) echo "a22-tokio-saturation.sh|Services -> checkout -> Runtime lane: tokio.runtime.* spike; Traces: slow checkout spans" ;;
+    a23) echo "a23-storefront-grpc.sh|Traces: storefront GraphQL resolver then Java payment Pricing/Quote gRPC server" ;;
+    a24) echo "a24-storefront-catalog.sh|Traces: storefront GraphQL resolver then Java catalog GraphQL operation" ;;
     a25) echo "a25-postgres.sh|Traces: db.query.text spans for reserve, pg_sleep, SELECT fan-out, and pool_exhausted; Runtime: db.client.connection.* gauges" ;;
     a26) echo "a26-cache.sh|Metrics: cache_hits_total/cache_misses_total and cache_size; Traces: parallel compute_recommendations spans; Logs document fields: cache.hit" ;;
     a27) echo "a27-execution-stack.sh|Runs/Story: stitched CLI -> daemon -> container -> agent beats; orphan child trace has browser_without_backend" ;;
