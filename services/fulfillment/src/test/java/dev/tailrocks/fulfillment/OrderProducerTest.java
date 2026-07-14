@@ -11,14 +11,37 @@ import io.opentelemetry.api.trace.TraceState;
 import io.opentelemetry.context.Context;
 import io.tailrocks.testsupport.OpenTelemetryTestExtension;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.header.internals.RecordHeaders;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.test.EmbeddedKafkaBroker;
+import org.springframework.kafka.test.condition.EmbeddedKafkaCondition;
+import org.springframework.kafka.test.context.EmbeddedKafka;
+import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.mockito.ArgumentCaptor;
 
 @ExtendWith(OpenTelemetryTestExtension.class)
+@EmbeddedKafka(partitions = 1, topics = "orders")
 class OrderProducerTest {
+    private static EmbeddedKafkaBroker broker;
+
+    @BeforeAll
+    static void startBroker() {
+        broker = EmbeddedKafkaCondition.getBroker();
+    }
+
+    @AfterAll
+    static void stopBroker() {
+        broker.destroy();
+    }
+
     @Test
     void publishes_the_requested_order_to_the_orders_topic() {
         @SuppressWarnings("unchecked")
@@ -49,5 +72,30 @@ class OrderProducerTest {
 
         assertEquals(span.getTraceId(), extracted.getTraceId());
         assertEquals(span.getSpanId(), extracted.getSpanId());
+    }
+
+    @Test
+    void publishes_an_order_through_an_embedded_kafka_broker() {
+        var producerProperties = KafkaTestUtils.producerProps(broker);
+        DefaultKafkaProducerFactory<String, String> factory = new DefaultKafkaProducerFactory<>(
+            producerProperties,
+            new StringSerializer(),
+            new StringSerializer()
+        );
+        KafkaTemplate<String, String> kafka = new KafkaTemplate<>(factory);
+        var consumerProperties = KafkaTestUtils.consumerProps(broker, "fulfillment-test", false);
+        Consumer<String, String> consumer = new org.apache.kafka.clients.consumer.KafkaConsumer<>(
+            consumerProperties,
+            new StringDeserializer(),
+            new StringDeserializer()
+        );
+        try {
+            broker.consumeFromAnEmbeddedTopic(consumer, "orders");
+            assertEquals("published order-embedded", new OrderProducer(kafka).publish("order-embedded"));
+            assertEquals("order-embedded", KafkaTestUtils.getSingleRecord(consumer, "orders").value());
+        } finally {
+            consumer.close();
+            factory.destroy();
+        }
     }
 }
