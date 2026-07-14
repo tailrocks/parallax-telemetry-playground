@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::Context as _;
-use opentelemetry::trace::{Span as _, Status, Tracer as _};
+use opentelemetry::trace::{Span as _, Status, TraceContextExt as _, Tracer as _};
 use opentelemetry::{KeyValue, global};
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
@@ -134,7 +134,7 @@ fn emit_case(case: Case) {
     }
 
     let tracer = global::tracer("playground.test-report");
-    let mut span = tracer.start_with_context("test.case", &playground_telemetry::current_context());
+    let mut span = tracer.start_with_context("test.case", &report_parent_context());
     span.set_attributes(attributes);
     if let Some(diagnostic) = case.diagnostic {
         span.set_status(Status::error(diagnostic.message.clone()));
@@ -148,6 +148,15 @@ fn emit_case(case: Case) {
         );
     }
     span.end();
+}
+
+fn report_parent_context() -> opentelemetry::Context {
+    let extracted = playground_telemetry::extract_context_from_env();
+    if extracted.span().span_context().is_valid() {
+        extracted
+    } else {
+        playground_telemetry::current_context()
+    }
 }
 
 fn explicit_test_id() -> Option<String> {
@@ -317,7 +326,12 @@ fn summarize(cases: &[Case]) -> Summary {
 
 #[cfg(test)]
 mod tests {
-    use super::{Case, Outcome, code_reference, parse, seconds_to_ms, summarize};
+    use super::{
+        Case, Outcome, code_reference, parse, report_parent_context, seconds_to_ms, summarize,
+    };
+    use opentelemetry::trace::{
+        SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
+    };
 
     #[test]
     fn parses_nested_suites_and_diagnostics() {
@@ -381,5 +395,21 @@ mod tests {
             "pricing::bin/pricing::tests::quote[usd]"
         );
         assert_eq!(code_reference(&case, None, None), "fallback::class::case");
+    }
+
+    #[test]
+    fn retains_current_context_when_environment_parent_is_absent() {
+        let current = opentelemetry::Context::new().with_remote_span_context(SpanContext::new(
+            TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").expect("trace id"),
+            SpanId::from_hex("00f067aa0ba902b7").expect("span id"),
+            TraceFlags::SAMPLED,
+            true,
+            TraceState::default(),
+        ));
+        let _guard = current.clone().attach();
+        assert_eq!(
+            report_parent_context().span().span_context().trace_id(),
+            current.span().span_context().trace_id()
+        );
     }
 }
