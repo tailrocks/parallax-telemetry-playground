@@ -29,6 +29,18 @@ test("W4 retry fixture passes after one recorded assertion failure [retry]", asy
   expect(testInfo.retry).toBe(1);
 });
 
+test("W4 retry fixture passes after one recorded harness timeout [harness]", async ({}, testInfo) => {
+  test.skip(
+    process.env.PLAYGROUND_TEST_FLAKY_FIXTURE !== "1",
+    "enabled only for the W4 test-observability acceptance run",
+  );
+  if (testInfo.retry === 0) {
+    testInfo.setTimeout(25);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  expect(testInfo.retry).toBe(1);
+});
+
 test("home to orders journey submits a batched order [batch]", async ({ page }) => {
   await page.route("**/order?**", async (route) => {
     await route.fulfill({
