@@ -117,6 +117,14 @@ cargo build
 ./target/debug/playground test-report target/nextest/ci/junit.xml
 ```
 
+Generate that durable report locally with the same profile used by the test
+telemetry bridge:
+
+```bash
+cargo nextest run --workspace --profile ci --no-tests=fail
+./target/debug/playground test-report target/nextest/ci/junit.xml
+```
+
 ## Roadmap
 
 Java (catalog/payment/fulfillment) + web wiring, then the async/broker, chaos

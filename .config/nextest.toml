@@ -1,0 +1,12 @@
+# The post-run JUnit document is the durable reconciliation source for test
+# attempts that cannot flush in-process OTLP (timeouts and forced exits).
+[profile.ci]
+retries = { backoff = "fixed", count = 1, delay = "1s" }
+flaky-result = "fail"
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"
+report-name = "playground-nextest-ci"
+store-success-output = false
+store-failure-output = true
