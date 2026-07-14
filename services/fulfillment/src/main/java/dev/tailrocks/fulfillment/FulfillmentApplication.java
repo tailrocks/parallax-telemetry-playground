@@ -45,20 +45,38 @@ class OrderProducer {
 }
 
 @Component
-class OrderConsumer {
-    private final RestClient http = RestClient.create();
+class NotificationClient {
+    private final RestClient http;
     private final String notificationsUrl =
         System.getenv().getOrDefault("NOTIFICATIONS_URL", "http://notifications:8091");
-    private final PricingGrpc.PricingBlockingStub pricing;
 
-    OrderConsumer(PricingGrpc.PricingBlockingStub pricing) {
+    NotificationClient() {
+        this(RestClient.create());
+    }
+
+    NotificationClient(RestClient http) {
+        this.http = http;
+    }
+
+    void notifyOrder() {
+        http.get().uri(notificationsUrl + "/").retrieve().toBodilessEntity();
+    }
+}
+
+@Component
+class OrderConsumer {
+    private final PricingGrpc.PricingBlockingStub pricing;
+    private final NotificationClient notifications;
+
+    OrderConsumer(PricingGrpc.PricingBlockingStub pricing, NotificationClient notifications) {
         this.pricing = pricing;
+        this.notifications = notifications;
     }
 
     // CONSUMER span (auto-instrumented); the reverse Java→Rust hop follows.
     @KafkaListener(topics = "orders", groupId = "fulfillment")
     void onOrder(String order) {
         pricing.quote(QuoteRequest.newBuilder().setSku(order).setQuantity(1).build());
-        http.get().uri(notificationsUrl + "/").retrieve().toBodilessEntity();
+        notifications.notifyOrder();
     }
 }
