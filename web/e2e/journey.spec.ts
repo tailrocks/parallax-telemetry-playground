@@ -14,6 +14,13 @@ test("propagation-break journey explains its intentional disconnected trace", as
   await expect(page.getByRole("link", { name: "open propagation-break variant" })).toBeVisible();
 });
 
+test("rage-click journey records repeated promo interactions", async ({ page }) => {
+  await page.goto("/");
+  const promo = page.getByRole("button", { name: "apply promo (unresponsive)" });
+  await promo.click({ clickCount: 4, delay: 40 });
+  await expect(promo).toBeVisible();
+});
+
 test("home to orders journey submits a batched order [batch]", async ({ page }) => {
   await page.route("**/order?**", async (route) => {
     await route.fulfill({
