@@ -65,6 +65,7 @@ struct ActiveCase {
     diagnostic_kind: Option<String>,
     diagnostic_message: String,
     diagnostic_stack: String,
+    reading_diagnostic: bool,
 }
 
 pub(super) fn emit(path: &Path) -> anyhow::Result<Summary> {
@@ -168,6 +169,7 @@ fn parse(document: &str) -> anyhow::Result<Vec<Case>> {
                     diagnostic_kind: None,
                     diagnostic_message: String::new(),
                     diagnostic_stack: String::new(),
+                    reading_diagnostic: false,
                 });
             }
             Event::Empty(event) if event.name().as_ref() == b"testcase" => {
@@ -184,21 +186,20 @@ fn parse(document: &str) -> anyhow::Result<Vec<Case>> {
                 if event.name().as_ref() == b"failure" || event.name().as_ref() == b"error" =>
             {
                 if let Some(active) = active_case.as_mut() {
-                    active.case.outcome = if event.name().as_ref() == b"failure" {
-                        Outcome::Fail
-                    } else {
-                        Outcome::Error
-                    };
-                    active.diagnostic_kind =
-                        Some(attribute(&event, b"type")?.unwrap_or_else(|| {
-                            String::from_utf8_lossy(event.name().as_ref()).into_owned()
-                        }));
-                    active.diagnostic_message = attribute(&event, b"message")?.unwrap_or_default();
+                    set_diagnostic(active, &event)?;
+                    active.reading_diagnostic = true;
+                }
+            }
+            Event::Empty(event)
+                if event.name().as_ref() == b"failure" || event.name().as_ref() == b"error" =>
+            {
+                if let Some(active) = active_case.as_mut() {
+                    set_diagnostic(active, &event)?;
                 }
             }
             Event::Text(text) => {
                 if let Some(active) = active_case.as_mut()
-                    && active.diagnostic_kind.is_some()
+                    && active.reading_diagnostic
                 {
                     active.diagnostic_stack.push_str(&text.decode()?);
                 }
@@ -210,6 +211,9 @@ fn parse(document: &str) -> anyhow::Result<Vec<Case>> {
                     && active.diagnostic_message.is_empty()
                 {
                     active.diagnostic_message = active.diagnostic_stack.clone();
+                }
+                if let Some(active) = active_case.as_mut() {
+                    active.reading_diagnostic = false;
                 }
             }
             Event::End(event) if event.name().as_ref() == b"testcase" => {
@@ -229,6 +233,20 @@ fn parse(document: &str) -> anyhow::Result<Vec<Case>> {
         }
     }
     Ok(cases)
+}
+
+fn set_diagnostic(active: &mut ActiveCase, event: &BytesStart<'_>) -> anyhow::Result<()> {
+    active.case.outcome = if event.name().as_ref() == b"failure" {
+        Outcome::Fail
+    } else {
+        Outcome::Error
+    };
+    active.diagnostic_kind = Some(
+        attribute(event, b"type")?
+            .unwrap_or_else(|| String::from_utf8_lossy(event.name().as_ref()).into_owned()),
+    );
+    active.diagnostic_message = attribute(event, b"message")?.unwrap_or_default();
+    Ok(())
 }
 
 fn attribute(event: &BytesStart<'_>, wanted: &[u8]) -> anyhow::Result<Option<String>> {
@@ -296,5 +314,17 @@ mod tests {
                 .expect("valid JUnit parses");
         assert_eq!(cases[0].duration_ms, None);
         assert_eq!(seconds_to_ms(Some("1.234")), Some(1234));
+    }
+
+    #[test]
+    fn parses_self_closing_failures_without_absorbing_system_output() {
+        let cases = parse(
+            r#"<testsuite name="suite"><testcase name="case"><failure type="assertion" message="nope"/><system-out>not a stack</system-out></testcase></testsuite>"#,
+        )
+        .expect("valid JUnit parses");
+        let diagnostic = cases[0].diagnostic.as_ref().expect("failure");
+        assert_eq!(cases[0].outcome, Outcome::Fail);
+        assert_eq!(diagnostic.message, "nope");
+        assert!(diagnostic.stack.is_empty());
     }
 }
