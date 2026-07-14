@@ -15,6 +15,13 @@ sourceSets { main { java { srcDir("../semconv/src/main/java") } } }
 repositories { mavenCentral() }
 val otelJavaAgent = configurations.create("otelJavaAgent")
 val testOtelEndpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")?.takeIf(String::isNotBlank)
+val testResourceAttributes = listOfNotNull(
+    System.getenv("OTEL_RESOURCE_ATTRIBUTES")?.takeIf(String::isNotBlank),
+    "service.version=$version",
+    "vcs.ref.head.revision=${System.getenv("GITHUB_SHA") ?: "local"}",
+    "test.configuration.os=${System.getProperty("os.name")}",
+    "test.configuration.environment=${System.getenv("PARALLAX_TEST_ENVIRONMENT") ?: "local"}",
+).joinToString(",")
 dependencies {
     implementation("io.opentelemetry:opentelemetry-api")
     compileOnly("org.junit.jupiter:junit-jupiter-api")
@@ -48,6 +55,7 @@ tasks.withType<Test>().configureEach {
     jvmArgs("-javaagent:${otelJavaAgent.singleFile.absolutePath}")
     environment("PARALLAX_RUN_ID", System.getenv("PARALLAX_RUN_ID") ?: "")
     environment("TRACEPARENT", System.getenv("TRACEPARENT") ?: "")
+    environment("OTEL_RESOURCE_ATTRIBUTES", testResourceAttributes)
     if (testOtelEndpoint == null) {
         environment("OTEL_TRACES_EXPORTER", "none")
         environment("OTEL_METRICS_EXPORTER", "none")
