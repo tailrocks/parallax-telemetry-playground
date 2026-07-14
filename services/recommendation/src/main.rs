@@ -168,9 +168,15 @@ async fn recommend_inner(p: Recommend) -> Json<Value> {
     if p.slow > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(p.slow)).await;
     }
-    if p.leak > 0 {
+    let cache_leak_flag = playground_telemetry::feature_flag("cacheLeak", "CACHE_LEAK").await;
+    let leak_kb = if cache_leak_flag {
+        p.leak.max(256)
+    } else {
+        p.leak
+    };
+    if leak_kb > 0 {
         let mut store = leak_store().lock().unwrap();
-        let mut bytes = vec![0u8; p.leak * 1024];
+        let mut bytes = vec![0u8; leak_kb * 1024];
         // Touch each page so the cgroup sees real RSS instead of lazily shared
         // zero pages. The buffer is never freed, so repeated calls OOM under
         // the demo limits overlay.
@@ -178,7 +184,12 @@ async fn recommend_inner(p: Recommend) -> Json<Value> {
             bytes[i] = (i % 251) as u8;
         }
         store.push(bytes);
-        tracing::warn!(kb = p.leak, held = store.len(), "cache leak (chaos)");
+        tracing::warn!(
+            kb = leak_kb,
+            held = store.len(),
+            flagd = cache_leak_flag,
+            "cache leak (chaos)"
+        );
     }
 
     let cache_enabled = cache_enabled(p.cache);

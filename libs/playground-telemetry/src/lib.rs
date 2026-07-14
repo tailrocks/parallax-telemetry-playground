@@ -18,9 +18,11 @@
 //! implement them yet, issue #3369; the JVM tier is the playground's exemplar
 //! source.)
 
+mod feature_flags;
 pub mod propagation;
 pub mod semconv;
 
+pub use feature_flags::feature_flag;
 pub use propagation::{
     context_env, current_context, current_context_env, extract_context, extract_context_from_env,
     inject_context_headers, inject_grpc_metadata, inject_headers, mark_span_error, set_parent_from,

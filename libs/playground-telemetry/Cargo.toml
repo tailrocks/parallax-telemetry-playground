@@ -18,6 +18,8 @@ opentelemetry_sdk = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
+open-feature = { workspace = true }
+open-feature-flagd = { workspace = true }
 http = { workspace = true }
 reqwest = { workspace = true }
 sentry = { workspace = true }

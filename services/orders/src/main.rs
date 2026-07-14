@@ -68,6 +68,9 @@ async fn publish(
 }
 
 async fn publish_inner(state: App, p: Publish) -> Json<Value> {
+    let poison_message_flag =
+        playground_telemetry::feature_flag("poisonMessage", "POISON_MESSAGE").await;
+    let poison = p.poison || poison_message_flag;
     let producer_cx = if p.orphan {
         Context::new()
     } else {
@@ -77,7 +80,7 @@ async fn publish_inner(state: App, p: Publish) -> Json<Value> {
     let msg = Msg {
         order_id: order_id.clone(),
         producer_cx,
-        poison: p.poison,
+        poison,
         lag_ms: p.lag_ms,
         batch: p.batch,
         orphan: p.orphan,
@@ -90,7 +93,7 @@ async fn publish_inner(state: App, p: Publish) -> Json<Value> {
         tracing::error!(%order_id, "order queue closed");
         return Json(json!({ "order_id": order_id, "status": "queue_closed" }));
     }
-    tracing::info!(%order_id, poison = p.poison, batch = p.batch, orphan = p.orphan, "order published");
+    tracing::info!(%order_id, poison, flagd = poison_message_flag, batch = p.batch, orphan = p.orphan, "order published");
     Json(json!({ "order_id": order_id, "status": "queued" }))
 }
 

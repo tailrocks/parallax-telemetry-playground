@@ -15,9 +15,6 @@
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::{Json, Router, extract::Query, routing::get};
-use open_feature::EvaluationContext;
-use open_feature::provider::FeatureProvider;
-use open_feature_flagd::{FlagdOptions, FlagdProvider, ResolverType};
 use opentelemetry::trace::TraceContextExt;
 use playground_proto::pricing::v1::QuoteRequest;
 use playground_proto::pricing::v1::pricing_client::PricingClient;
@@ -27,13 +24,11 @@ use serde_json::{Value, json};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{future::Future, pin::Pin};
-use tokio::sync::OnceCell;
 use tonic::Code;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-static FLAGD_PROVIDER: OnceCell<FlagdProvider> = OnceCell::const_new();
 static BLOCKING_POOL_DEPTH: AtomicU64 = AtomicU64::new(0);
 const MAX_BLOCK_MS: u64 = 30_000;
 const MAX_BLOCK_N: u32 = 1_024;
@@ -151,8 +146,11 @@ async fn checkout(headers: HeaderMap, Query(p): Query<CheckoutParams>) -> impl I
 }
 
 async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
-    let payment_failure_flag = feature_flag("paymentFailure", "PAYMENT_FAILURE").await;
-    let slow_query_flag = feature_flag("slowQuery", "SLOW_QUERY").await;
+    let payment_failure_flag =
+        playground_telemetry::feature_flag("paymentFailure", "PAYMENT_FAILURE").await;
+    let slow_query_flag = playground_telemetry::feature_flag("slowQuery", "SLOW_QUERY").await;
+    let canary_failure_flag =
+        playground_telemetry::feature_flag("canaryFailure", "CANARY_FAILURE").await;
     let slow_ms = if p.slow > 0 {
         p.slow
     } else if slow_query_flag {
@@ -200,7 +198,7 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
     if p.block_ms > 0 && p.block_n > 0 {
         flood_blocking_pool(p.block_ms, p.block_n).await;
     }
-    if p.canary || env_flag("CANARY") {
+    if p.canary || env_flag("CANARY") || canary_failure_flag {
         // A18: plant a redaction canary corpus so backends can be compared on
         // raw-vs-scrubbed. These are FAKE secrets for redaction testing only.
         tracing::warn!(
@@ -422,51 +420,6 @@ fn emit_rogue_log() {
     });
 }
 
-async fn feature_flag(flag_key: &'static str, env_name: &'static str) -> bool {
-    let env_override = env_flag(env_name);
-    let mut provider_name = "flagd";
-    let mut provider_value = false;
-    let mut variant = "off".to_string();
-    let mut error = String::new();
-
-    match flagd_provider().await {
-        Ok(provider) => match provider
-            .resolve_bool_value(flag_key, &EvaluationContext::default())
-            .await
-        {
-            Ok(details) => {
-                provider_value = details.value;
-                variant = details
-                    .variant
-                    .unwrap_or_else(|| if provider_value { "on" } else { "off" }.to_string());
-            }
-            Err(err) => {
-                provider_name = "env";
-                error = format!("{err:?}");
-            }
-        },
-        Err(err) => {
-            provider_name = "env";
-            error = err.to_string();
-        }
-    }
-
-    let effective = provider_value || env_override;
-    if env_override {
-        variant = "env-on".to_string();
-    }
-    tracing::info!(
-        "feature_flag.key" = flag_key,
-        "feature_flag.provider_name" = provider_name,
-        "feature_flag.variant" = %variant,
-        "feature_flag.value" = effective,
-        "feature_flag.env_override" = env_override,
-        "feature_flag.error" = %error,
-        "feature_flag.evaluation"
-    );
-    effective
-}
-
 async fn flood_blocking_pool(block_ms: u64, block_n: u32) {
     let capped_ms = block_ms.min(MAX_BLOCK_MS);
     let capped_n = block_n.min(MAX_BLOCK_N);
@@ -508,19 +461,6 @@ fn record_blocking_pool_depth() {
             .build()
     });
     gauge.record(BLOCKING_POOL_DEPTH.load(Ordering::Relaxed), &[]);
-}
-
-async fn flagd_provider() -> anyhow::Result<&'static FlagdProvider> {
-    FLAGD_PROVIDER
-        .get_or_try_init(|| async {
-            FlagdProvider::new(FlagdOptions {
-                resolver_type: ResolverType::Rpc,
-                ..Default::default()
-            })
-            .await
-            .map_err(anyhow::Error::new)
-        })
-        .await
 }
 
 /// B3: bounded retry with a per-attempt deadline around the pricing call.

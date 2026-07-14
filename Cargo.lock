@@ -414,8 +414,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
- "open-feature",
- "open-feature-flagd",
  "opentelemetry",
  "playground-proto",
  "playground-telemetry",
@@ -2205,6 +2203,8 @@ dependencies = [
  "anyhow",
  "axum",
  "http 1.4.2",
+ "open-feature",
+ "open-feature-flagd",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-http",
