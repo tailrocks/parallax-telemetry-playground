@@ -157,11 +157,18 @@ async fn checkout(headers: HeaderMap, Query(p): Query<CheckoutParams>) -> impl I
 }
 
 async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
-    let payment_failure_flag =
-        playground_telemetry::feature_flag("paymentFailure", "PAYMENT_FAILURE").await;
-    let slow_query_flag = playground_telemetry::feature_flag("slowQuery", "SLOW_QUERY").await;
-    let canary_failure_flag =
-        playground_telemetry::feature_flag("canaryFailure", "CANARY_FAILURE").await;
+    // An explicit scenario parameter must stay deterministic even when flagd is
+    // unavailable: it is the direct B1 contract and should not wait on three
+    // unrelated remote flag evaluations before returning its deliberate error.
+    let (payment_failure_flag, slow_query_flag, canary_failure_flag) = if p.fail {
+        (false, false, false)
+    } else {
+        (
+            playground_telemetry::feature_flag("paymentFailure", "PAYMENT_FAILURE").await,
+            playground_telemetry::feature_flag("slowQuery", "SLOW_QUERY").await,
+            playground_telemetry::feature_flag("canaryFailure", "CANARY_FAILURE").await,
+        )
+    };
     let slow_ms = if p.slow > 0 {
         p.slow
     } else if slow_query_flag {
@@ -756,7 +763,7 @@ async fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use axum::{
-        body::Body,
+        body::{Body, to_bytes},
         http::{Request, StatusCode},
     };
     use tower::ServiceExt;
@@ -797,5 +804,27 @@ mod tests {
             .await
             .expect("health response");
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn returns_the_shared_payment_error_without_downstream_calls() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/checkout?fail=1")
+                    .body(Body::empty())
+                    .expect("checkout failure request"),
+            )
+            .await
+            .expect("checkout failure response");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        assert!(
+            std::str::from_utf8(&body)
+                .expect("UTF-8 response")
+                .contains("payment failed")
+        );
     }
 }
