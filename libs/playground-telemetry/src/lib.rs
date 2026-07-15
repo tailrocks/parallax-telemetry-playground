@@ -4,8 +4,7 @@
 //! parallel consumers so `tracing` is the only span source and nothing is
 //! double-instrumented —
 //!   * `OpenTelemetryLayer`  — OTLP **traces** → collector,
-//!   * `MetricsLayer`        — OTLP **metrics** (counters/histograms from
-//!     `tracing` fields) → collector,
+//!   * OpenTelemetry meters  — OTLP **metrics** from explicit instruments,
 //!   * `OpenTelemetryTracingBridge` — `tracing` events → OTLP **logs**,
 //!     auto-stamped with the active trace/span id,
 //!   * `sentry-tracing`      — events → Sentry breadcrumbs/issues.
@@ -309,7 +308,7 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
     global::set_tracer_provider(tracer_provider.clone());
     let tracer = tracer_provider.tracer(service);
 
-    // --- Metrics --- (Counter/Histogram emitted from `tracing` fields by MetricsLayer)
+    // --- Metrics --- (explicit SDK counters, gauges, and histograms)
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .build()?;
@@ -364,9 +363,6 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
         .with(filter)
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_opentelemetry::layer().with_tracer(tracer))
-        .with(tracing_opentelemetry::MetricsLayer::new(
-            meter_provider.clone(),
-        ))
         .with(log_layer)
         .with(sentry_tracing::layer())
         .init();
