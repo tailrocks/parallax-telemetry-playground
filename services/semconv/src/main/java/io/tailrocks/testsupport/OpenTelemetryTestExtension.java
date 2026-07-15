@@ -78,6 +78,7 @@ public final class OpenTelemetryTestExtension implements InvocationInterceptor {
             span.setAttribute(Semconv.TEST_CASE_RESULT_STATUS, "pass");
         } catch (Throwable failure) {
             span.setAttribute(Semconv.TEST_CASE_RESULT_STATUS, "fail");
+            span.setAttribute(Semconv.TEST_SUITE_RUN_STATUS, "fail");
             span.setAttribute("test.case.failure.kind", failure instanceof AssertionError ? "assertion_failure" : "harness_error");
             span.recordException(failure);
             span.setStatus(StatusCode.ERROR, failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage());
