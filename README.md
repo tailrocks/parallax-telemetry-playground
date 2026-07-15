@@ -12,6 +12,16 @@ Full design: the Parallax repo's
 Guided Parallax demo: [`TOUR.md`](TOUR.md).
 Apache-2.0 · Tailrocks.
 
+## TypeScript policy
+
+All tracked web, server, configuration, and k6 load-generator source uses
+ordinary `.ts`/`.tsx`. Tracked `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, and
+`.cts` source/configuration is forbidden. The single web compiler project
+checks the application, Bun production server, and both k6 programs with
+`strict: true`, `allowJs: false`, `checkJs: false`, and the repository's
+additional strict flags; `scripts/check-typescript-policy.sh` fails closed on
+file or configuration drift.
+
 ## Architecture
 
 ```

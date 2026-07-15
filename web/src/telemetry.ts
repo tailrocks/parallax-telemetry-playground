@@ -70,8 +70,9 @@ export function initOtel() {
   sessionId = getSessionId();
   const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: "web",
-    [ATTR_SERVICE_VERSION]: import.meta.env.VITE_RELEASE ?? "dev",
-    [DEPLOYMENT_ENVIRONMENT_NAME]: import.meta.env.VITE_PARALLAX_ENV ?? DEFAULT_ENVIRONMENT,
+    [ATTR_SERVICE_VERSION]: import.meta.env["VITE_RELEASE"] ?? "dev",
+    [DEPLOYMENT_ENVIRONMENT_NAME]:
+      import.meta.env["VITE_PARALLAX_ENV"] ?? DEFAULT_ENVIRONMENT,
     [SESSION_ID]: sessionId,
   });
   const provider = new WebTracerProvider({

@@ -13,7 +13,7 @@ function OrdersPage() {
   const [status, setStatus] = useState("ready");
 
   async function submit() {
-    const base = import.meta.env.VITE_ORDERS_URL ?? "http://localhost:8092";
+    const base = import.meta.env["VITE_ORDERS_URL"] ?? "http://localhost:8092";
     const query = new URLSearchParams({
       lag_ms: String(lagMs),
       batch: batch ? "1" : "0",

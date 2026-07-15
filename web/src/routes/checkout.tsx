@@ -27,9 +27,9 @@ function CheckoutPage() {
   }, []);
 
   async function submit() {
-    const normalBase = import.meta.env.VITE_CHECKOUT_URL ?? "http://localhost:8088";
+    const normalBase = import.meta.env["VITE_CHECKOUT_URL"] ?? "http://localhost:8088";
     const noPropBase =
-      import.meta.env.VITE_CHECKOUT_URL_NOPROP ?? "http://127.0.0.1:8088";
+      import.meta.env["VITE_CHECKOUT_URL_NOPROP"] ?? "http://127.0.0.1:8088";
     const base = nopropagate ? noPropBase : normalBase;
     const query = new URLSearchParams({ sku, quantity: String(quantity) });
 

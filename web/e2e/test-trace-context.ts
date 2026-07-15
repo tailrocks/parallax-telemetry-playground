@@ -10,7 +10,10 @@ const W3C_TRACEPARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-0[01]$/i;
  * TRACEPARENT exists, its trace ID is retained so every test root joins that
  * Parallax Run; otherwise the test ID deterministically supplies a trace ID.
  */
-export function traceparentForTest(testId: string, runTraceparent = process.env.TRACEPARENT): string {
+export function traceparentForTest(
+  testId: string,
+  runTraceparent = process.env["TRACEPARENT"],
+): string {
   const digest = createHash("sha256").update(testId).digest("hex");
   const inheritedTraceId = runTraceparent?.match(W3C_TRACEPARENT)?.[1];
   const traceId = inheritedTraceId ?? digest.slice(0, 32);
@@ -25,16 +28,16 @@ export function testTraceparentPath(testId: string): string {
 
 export function testTraceparentDirectory(): string {
   const runIdentity =
-    process.env.PARALLAX_RUN_ID ??
-    process.env.CI_RUN_ID ??
-    process.env.TRACEPARENT ??
+    process.env["PARALLAX_RUN_ID"] ??
+    process.env["CI_RUN_ID"] ??
+    process.env["TRACEPARENT"] ??
     "standalone";
   const runKey = createHash("sha256").update(runIdentity).digest("hex");
   return join(tmpdir(), "parallax-playwright-traceparents", runKey);
 }
 
 export async function traceparentForRunningTest(testId: string): Promise<string> {
-  if (!process.env.PLAYGROUND_TEST_OTLP_ENDPOINT) return traceparentForTest(testId);
+  if (!process.env["PLAYGROUND_TEST_OTLP_ENDPOINT"]) return traceparentForTest(testId);
 
   const path = testTraceparentPath(testId);
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -42,10 +45,14 @@ export async function traceparentForRunningTest(testId: string): Promise<string>
       const traceparent = (await readFile(path, "utf8")).trim();
       if (W3C_TRACEPARENT.test(traceparent)) return traceparent;
       throw new Error(`invalid test traceparent in ${path}`);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    } catch (error: unknown) {
+      if (!isErrnoException(error) || error.code !== "ENOENT") throw error;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }
   throw new Error(`timed out waiting for Playwright test traceparent: ${testId}`);
+}
+
+function isErrnoException(value: unknown): value is NodeJS.ErrnoException {
+  return value instanceof Error && "code" in value;
 }

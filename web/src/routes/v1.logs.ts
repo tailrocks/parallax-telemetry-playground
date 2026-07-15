@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 const rotelBase =
-  process.env.ROTEL_OTLP_HTTP_ENDPOINT?.replace(/\/+$/, "") ??
+  process.env["ROTEL_OTLP_HTTP_ENDPOINT"]?.replace(/\/+$/, "") ??
   "http://localhost:4318";
 
 export const Route = createFileRoute("/v1/logs")({

@@ -209,7 +209,7 @@ services:
   loadgen:
     image: grafana/k6:latest
     profiles: [demo]
-    command: ["run", "/scripts/demo.js"]
+    command: ["run", "/scripts/demo.ts"]
     environment:
       CHECKOUT_URL: "http://checkout:8088"
       ORDERS_URL: "http://orders:8092"

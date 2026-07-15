@@ -86,6 +86,7 @@ jobs:
         with:
           install_args: "bun"
       - run: bun install --frozen-lockfile
+      - run: ../scripts/check-typescript-policy.sh
       - run: bun run test
       - run: bun run build
       - name: Install Chromium dependencies

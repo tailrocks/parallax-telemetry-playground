@@ -3,14 +3,33 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "paths": {
+      "k6": ["./node_modules/@types/k6/index.d.ts"],
+      "k6/*": ["./node_modules/@types/k6/*/index.d.ts"]
+    },
     "jsx": "react-jsx",
     "strict": true,
+    "allowJs": false,
+    "checkJs": false,
     "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "allowUnusedLabels": false,
+    "allowUnreachableCode": false,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
     "verbatimModuleSyntax": true,
+    "noEmit": true,
     "skipLibCheck": true,
-    "types": ["vite/client", "node"],
+    "types": ["vite/client", "node", "k6"],
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "server.ts", "vite.config.ts", "../loadgen/**/*.ts"]
 }
