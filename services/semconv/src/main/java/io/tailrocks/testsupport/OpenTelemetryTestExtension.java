@@ -9,12 +9,15 @@ import io.opentelemetry.context.propagation.TextMapGetter;
 import io.tailrocks.semconv.Semconv;
 import java.lang.reflect.Method;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.InvocationInterceptor;
 import org.junit.jupiter.api.extension.ReflectiveInvocationContext;
 
 /** Emits the shared test wire contract while preserving JUnit's original outcome. */
 public final class OpenTelemetryTestExtension implements InvocationInterceptor {
+    private static final Map<String, AtomicInteger> ATTEMPTS = new ConcurrentHashMap<>();
     private static final TextMapGetter<Map<String, String>> CARRIER = new TextMapGetter<>() {
         @Override
         public Iterable<String> keys(Map<String, String> carrier) {
@@ -52,6 +55,8 @@ public final class OpenTelemetryTestExtension implements InvocationInterceptor {
     ) throws Throwable {
         String suite = context.getRequiredTestClass().getName();
         String name = suite + "#" + method.getExecutable().getName();
+        long attempt = ATTEMPTS.computeIfAbsent(context.getUniqueId(), ignored -> new AtomicInteger())
+            .incrementAndGet();
         Span span = GlobalOpenTelemetry.get().getTracer("playground.junit")
             .spanBuilder("test.case")
             .setParent(parentContext())
@@ -62,6 +67,7 @@ public final class OpenTelemetryTestExtension implements InvocationInterceptor {
         span.setAttribute(Semconv.CICD_PIPELINE_TASK_TYPE, "test");
         span.setAttribute(Semconv.CICD_PIPELINE_RUN_ID, System.getenv().getOrDefault("PARALLAX_RUN_ID", ""));
         span.setAttribute(Semconv.PARALLAX_TEST_ID, testId(name));
+        span.setAttribute("test.attempt.ordinal", attempt);
         span.setAttribute("test.configuration.os", System.getProperty("os.name"));
         span.setAttribute("test.configuration.environment", System.getenv().getOrDefault("PARALLAX_TEST_ENVIRONMENT", "local"));
         if (!context.getDisplayName().equals(method.getExecutable().getName())) {

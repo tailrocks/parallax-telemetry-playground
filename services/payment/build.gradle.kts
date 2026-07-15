@@ -18,6 +18,7 @@ plugins {
     id("io.spring.dependency-management") version "1.1.7"
     id("com.google.protobuf") version "0.9.4"
     id("com.atkinsondev.opentelemetry-build") version "4.6.2"
+    id("org.gradle.test-retry") version "1.6.5"
 }
 group = "dev.tailrocks"; version = "0.1.0"
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
@@ -59,6 +60,11 @@ openTelemetryBuild {
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     reports.junitXml.mergeReruns.set(true)
+    retry {
+        maxRetries.set(1)
+        maxFailures.set(3)
+        failOnPassedAfterRetry.set(false)
+    }
     inputs.files(otelJavaAgent)
     jvmArgs("-javaagent:${otelJavaAgent.singleFile.absolutePath}")
     environment("PARALLAX_RUN_ID", System.getenv("PARALLAX_RUN_ID") ?: "")

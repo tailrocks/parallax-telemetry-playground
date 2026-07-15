@@ -118,6 +118,24 @@ endpoint preserves the live-export path. On this host use
 `GRADLE_USER_HOME=/tmp/parallax-gradle` plus `-Dorg.gradle.native=false` to
 avoid the home-mounted native cache.
 
+Payment also owns two opt-in acceptance fixtures that produce genuine
+assertion-failure and harness-error attempts followed by passes in fresh test
+JVMs. Use a unique token per run so concurrent or interrupted rehearsals cannot
+share attempt state:
+
+```bash
+PLAYGROUND_TEST_FLAKY_FIXTURE=1 \
+PLAYGROUND_TEST_ATTEMPT_TOKEN="$(git rev-parse HEAD)-$(date +%s)" \
+GRADLE_USER_HOME=/tmp/parallax-gradle \
+mise exec -- ./gradlew --no-daemon test \
+  --tests dev.tailrocks.payment.TestTelemetryAcceptanceTest \
+  -Dorg.gradle.native=false
+```
+
+The Gradle-owned retry plugin executes one retry, merged JUnit XML retains both
+outcomes, and the shared JUnit extension emits `test.attempt.ordinal` plus the
+failure taxonomy on the corresponding OTLP spans.
+
 ### W4 — Rust in-process test telemetry
 
 Code: setting `PLAYGROUND_TEST_TELEMETRY=1` activates the shared Rust helper
