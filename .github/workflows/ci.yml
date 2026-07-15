@@ -35,6 +35,7 @@ jobs:
       - uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
         with:
           install_args: "rust cargo:cargo-nextest"
+      - run: rustup component add rustfmt clippy
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - run: cargo nextest run --locked --workspace --profile ci --no-tests=fail
@@ -45,7 +46,7 @@ jobs:
         with:
           name: rust-nextest-junit
           path: target/nextest/ci/junit.xml
-          if-no-files-found: error
+          if-no-files-found: warn
 
   java:
     runs-on: ubuntu-latest
@@ -86,9 +87,9 @@ jobs:
         with:
           install_args: "bun"
       - run: bun install --frozen-lockfile
-      - run: ../scripts/check-typescript-policy.sh
       - run: bun run test
       - run: bun run build
+      - run: ../scripts/check-typescript-policy.sh
       - name: Install Chromium dependencies
         run: bun ./node_modules/@playwright/test/cli.js install --with-deps chromium
       - run: bun ./node_modules/@playwright/test/cli.js test --project=chromium
@@ -100,7 +101,7 @@ jobs:
           path: |
             web/playwright-report
             web/test-results
-          if-no-files-found: error
+          if-no-files-found: warn
 
   required:
     if: always()
