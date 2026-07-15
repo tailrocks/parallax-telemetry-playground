@@ -14,17 +14,6 @@ use quick_xml::events::{BytesStart, Event};
 
 use playground_telemetry::semconv;
 
-const FAILURE_MESSAGE: &str = "test.failure.message";
-const FAILURE_STACK: &str = "test.failure.stacktrace";
-const TEST_ATTEMPT: &str = "test.attempt.ordinal";
-const TEST_ATTEMPT_ID: &str = "test.attempt.id";
-const TEST_TOTAL_ATTEMPTS: &str = "test.attempt.total";
-const TEST_PARAMETERS: &str = "test.case.parameters";
-const TEST_FAILURE_KIND: &str = "test.case.failure.kind";
-const TEST_CODE_REFERENCE: &str = "test.code_reference";
-const TEST_CONFIGURATION_OS: &str = "test.configuration.os";
-const TEST_CONFIGURATION_ENVIRONMENT: &str = "test.configuration.environment";
-
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Summary {
     pub(super) total: usize,
@@ -56,9 +45,8 @@ enum Outcome {
 impl Outcome {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::Pass => "pass",
-            Self::Fail => "fail",
-            Self::Error => "fail",
+            Self::Pass => semconv::TEST_RESULT_STATUS_PASS,
+            Self::Fail | Self::Error => semconv::TEST_RESULT_STATUS_FAIL,
         }
     }
 }
@@ -104,9 +92,9 @@ fn emit_case(case: Case) {
         KeyValue::new(
             semconv::TEST_SUITE_RUN_STATUS,
             if case.outcome == Outcome::Pass {
-                "pass"
+                semconv::TEST_RESULT_STATUS_PASS
             } else {
-                "fail"
+                semconv::TEST_RESULT_STATUS_FAIL
             },
         ),
         KeyValue::new(semconv::CICD_PIPELINE_TASK_TYPE, "test"),
@@ -118,35 +106,41 @@ fn emit_case(case: Case) {
             semconv::PARALLAX_TEST_ID,
             explicit_test_id().unwrap_or_else(|| code_reference.clone()),
         ),
-        KeyValue::new(TEST_CODE_REFERENCE, code_reference),
-        KeyValue::new(TEST_CONFIGURATION_OS, std::env::consts::OS),
+        KeyValue::new(semconv::TEST_CODE_REFERENCE, code_reference),
+        KeyValue::new(semconv::TEST_CONFIGURATION_OS, std::env::consts::OS),
         KeyValue::new(
-            TEST_CONFIGURATION_ENVIRONMENT,
+            semconv::TEST_CONFIGURATION_ENVIRONMENT,
             std::env::var("PARALLAX_ENV").unwrap_or_else(|_| "playground".into()),
         ),
-        KeyValue::new(TEST_ATTEMPT, case.attempt_ordinal),
-        KeyValue::new(TEST_TOTAL_ATTEMPTS, case.total_attempts),
+        KeyValue::new(semconv::TEST_ATTEMPT_ORDINAL, case.attempt_ordinal),
+        KeyValue::new(semconv::TEST_ATTEMPT_TOTAL, case.total_attempts),
     ];
     if let Some(attempt_id) = std::env::var("NEXTEST_ATTEMPT_ID")
         .ok()
         .filter(|value| !value.trim().is_empty())
     {
-        attributes.push(KeyValue::new(TEST_ATTEMPT_ID, attempt_id));
+        attributes.push(KeyValue::new(semconv::TEST_ATTEMPT_ID, attempt_id));
     }
     if let Some(duration_ms) = case.duration_ms {
         attributes.push(KeyValue::new("test.case.duration_ms", duration_ms as i64));
     }
     if let Some(parameters) = test_parameters(&case.name) {
-        attributes.push(KeyValue::new(TEST_PARAMETERS, parameters));
+        attributes.push(KeyValue::new(semconv::TEST_CASE_PARAMETERS, parameters));
     }
     if let Some(diagnostic) = &case.diagnostic {
         attributes.push(KeyValue::new(
-            TEST_FAILURE_KIND,
+            semconv::TEST_CASE_FAILURE_KIND,
             case.outcome.failure_kind(),
         ));
-        attributes.push(KeyValue::new(FAILURE_MESSAGE, diagnostic.message.clone()));
+        attributes.push(KeyValue::new(
+            semconv::TEST_FAILURE_MESSAGE,
+            diagnostic.message.clone(),
+        ));
         if !diagnostic.stack.is_empty() {
-            attributes.push(KeyValue::new(FAILURE_STACK, diagnostic.stack.clone()));
+            attributes.push(KeyValue::new(
+                semconv::TEST_FAILURE_STACKTRACE,
+                diagnostic.stack.clone(),
+            ));
         }
     }
 
@@ -156,7 +150,7 @@ fn emit_case(case: Case) {
     if let Some(diagnostic) = case.diagnostic {
         span.set_status(Status::error(diagnostic.message.clone()));
         span.add_event(
-            "test.failure",
+            semconv::TEST_FAILURE_EVENT_NAME,
             vec![
                 KeyValue::new("exception.type", diagnostic.kind),
                 KeyValue::new("exception.message", diagnostic.message),
@@ -171,8 +165,8 @@ impl Outcome {
     const fn failure_kind(self) -> &'static str {
         match self {
             Self::Pass => "",
-            Self::Fail => "assertion_failure",
-            Self::Error => "harness_error",
+            Self::Fail => semconv::TEST_FAILURE_KIND_ASSERTION,
+            Self::Error => semconv::TEST_FAILURE_KIND_HARNESS,
         }
     }
 }

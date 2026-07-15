@@ -67,11 +67,11 @@ public final class OpenTelemetryTestExtension implements InvocationInterceptor {
         span.setAttribute(Semconv.CICD_PIPELINE_TASK_TYPE, "test");
         span.setAttribute(Semconv.CICD_PIPELINE_RUN_ID, System.getenv().getOrDefault("PARALLAX_RUN_ID", ""));
         span.setAttribute(Semconv.PARALLAX_TEST_ID, testId(name));
-        span.setAttribute("test.attempt.ordinal", attempt);
-        span.setAttribute("test.configuration.os", System.getProperty("os.name"));
-        span.setAttribute("test.configuration.environment", System.getenv().getOrDefault("PARALLAX_TEST_ENVIRONMENT", "local"));
+        span.setAttribute(Semconv.TEST_ATTEMPT_ORDINAL, attempt);
+        span.setAttribute(Semconv.TEST_CONFIGURATION_OS, System.getProperty("os.name"));
+        span.setAttribute(Semconv.TEST_CONFIGURATION_ENVIRONMENT, System.getenv().getOrDefault("PARALLAX_TEST_ENVIRONMENT", "local"));
         if (!context.getDisplayName().equals(method.getExecutable().getName())) {
-            span.setAttribute("test.case.parameters", context.getDisplayName());
+            span.setAttribute(Semconv.TEST_CASE_PARAMETERS, context.getDisplayName());
         }
         try (Scope ignored = span.makeCurrent()) {
             invocation.proceed();
@@ -79,7 +79,7 @@ public final class OpenTelemetryTestExtension implements InvocationInterceptor {
         } catch (Throwable failure) {
             span.setAttribute(Semconv.TEST_CASE_RESULT_STATUS, "fail");
             span.setAttribute(Semconv.TEST_SUITE_RUN_STATUS, "fail");
-            span.setAttribute("test.case.failure.kind", failure instanceof AssertionError ? "assertion_failure" : "harness_error");
+            span.setAttribute(Semconv.TEST_CASE_FAILURE_KIND, failure instanceof AssertionError ? Semconv.TEST_FAILURE_KIND_ASSERTION : Semconv.TEST_FAILURE_KIND_HARNESS);
             span.recordException(failure);
             span.setStatus(StatusCode.ERROR, failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage());
             throw failure;

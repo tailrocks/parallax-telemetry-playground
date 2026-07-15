@@ -38,6 +38,15 @@
       "owner": "shared"
     },
     {
+      "id": "vcs.ref.head.revision",
+      "rust": "VCS_REF_HEAD_REVISION",
+      "typescript": "VCS_REF_HEAD_REVISION",
+      "java": "VCS_REF_HEAD_REVISION",
+      "value": "vcs.ref.head.revision",
+      "values": null,
+      "owner": "shared"
+    },
+    {
       "id": "deployment.environment.name",
       "rust": "DEPLOYMENT_ENVIRONMENT_NAME",
       "typescript": "DEPLOYMENT_ENVIRONMENT_NAME",
@@ -403,6 +412,150 @@
       "typescript": "TEST_CASE_RESULT_STATUS",
       "java": "TEST_CASE_RESULT_STATUS",
       "value": "test.case.result.status",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.result.status.pass",
+      "rust": "TEST_RESULT_STATUS_PASS",
+      "typescript": "TEST_RESULT_STATUS_PASS",
+      "java": "TEST_RESULT_STATUS_PASS",
+      "value": "pass",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.result.status.fail",
+      "rust": "TEST_RESULT_STATUS_FAIL",
+      "typescript": "TEST_RESULT_STATUS_FAIL",
+      "java": "TEST_RESULT_STATUS_FAIL",
+      "value": "fail",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.parameters",
+      "rust": "TEST_CASE_PARAMETERS",
+      "typescript": "TEST_CASE_PARAMETERS",
+      "java": "TEST_CASE_PARAMETERS",
+      "value": "test.case.parameters",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.failure.kind",
+      "rust": "TEST_CASE_FAILURE_KIND",
+      "typescript": "TEST_CASE_FAILURE_KIND",
+      "java": "TEST_CASE_FAILURE_KIND",
+      "value": "test.case.failure.kind",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.failure.kind.assertion",
+      "rust": "TEST_FAILURE_KIND_ASSERTION",
+      "typescript": "TEST_FAILURE_KIND_ASSERTION",
+      "java": "TEST_FAILURE_KIND_ASSERTION",
+      "value": "assertion_failure",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.failure.kind.harness",
+      "rust": "TEST_FAILURE_KIND_HARNESS",
+      "typescript": "TEST_FAILURE_KIND_HARNESS",
+      "java": "TEST_FAILURE_KIND_HARNESS",
+      "value": "harness_error",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.failure.event.name",
+      "rust": "TEST_FAILURE_EVENT_NAME",
+      "typescript": "TEST_FAILURE_EVENT_NAME",
+      "java": "TEST_FAILURE_EVENT_NAME",
+      "value": "test.failure",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.failure.message",
+      "rust": "TEST_FAILURE_MESSAGE",
+      "typescript": "TEST_FAILURE_MESSAGE",
+      "java": "TEST_FAILURE_MESSAGE",
+      "value": "test.failure.message",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.failure.stacktrace",
+      "rust": "TEST_FAILURE_STACKTRACE",
+      "typescript": "TEST_FAILURE_STACKTRACE",
+      "java": "TEST_FAILURE_STACKTRACE",
+      "value": "test.failure.stacktrace",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.attempt.ordinal",
+      "rust": "TEST_ATTEMPT_ORDINAL",
+      "typescript": "TEST_ATTEMPT_ORDINAL",
+      "java": "TEST_ATTEMPT_ORDINAL",
+      "value": "test.attempt.ordinal",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.attempt.id",
+      "rust": "TEST_ATTEMPT_ID",
+      "typescript": "TEST_ATTEMPT_ID",
+      "java": "TEST_ATTEMPT_ID",
+      "value": "test.attempt.id",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.attempt.total",
+      "rust": "TEST_ATTEMPT_TOTAL",
+      "typescript": "TEST_ATTEMPT_TOTAL",
+      "java": "TEST_ATTEMPT_TOTAL",
+      "value": "test.attempt.total",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.code_reference",
+      "rust": "TEST_CODE_REFERENCE",
+      "typescript": "TEST_CODE_REFERENCE",
+      "java": "TEST_CODE_REFERENCE",
+      "value": "test.code_reference",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.configuration.os",
+      "rust": "TEST_CONFIGURATION_OS",
+      "typescript": "TEST_CONFIGURATION_OS",
+      "java": "TEST_CONFIGURATION_OS",
+      "value": "test.configuration.os",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.configuration.environment",
+      "rust": "TEST_CONFIGURATION_ENVIRONMENT",
+      "typescript": "TEST_CONFIGURATION_ENVIRONMENT",
+      "java": "TEST_CONFIGURATION_ENVIRONMENT",
+      "value": "test.configuration.environment",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.configuration.browser",
+      "rust": "TEST_CONFIGURATION_BROWSER",
+      "typescript": "TEST_CONFIGURATION_BROWSER",
+      "java": "TEST_CONFIGURATION_BROWSER",
+      "value": "test.configuration.browser",
       "values": null,
       "owner": "playground"
     },

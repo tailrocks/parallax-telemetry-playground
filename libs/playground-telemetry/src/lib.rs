@@ -515,7 +515,7 @@ fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
         attributes.push(KeyValue::new(semconv::PARALLAX_RUN_ID, run_id));
     }
     if let Some(git_sha) = non_empty_env("GIT_SHA") {
-        attributes.push(KeyValue::new("vcs.ref.head.revision", git_sha));
+        attributes.push(KeyValue::new(semconv::VCS_REF_HEAD_REVISION, git_sha));
     }
     attributes
 }

@@ -39,7 +39,7 @@ class TestTelemetryAcceptanceTest {
             return false;
         } catch (FileAlreadyExistsException retry) {
             Files.delete(marker);
-            Span.current().setAttribute("test.attempt.ordinal", 2L);
+            Span.current().setAttribute(io.tailrocks.semconv.Semconv.TEST_ATTEMPT_ORDINAL, 2L);
             return true;
         }
     }

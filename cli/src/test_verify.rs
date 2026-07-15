@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result, bail, ensure};
+use playground_telemetry::semconv;
 use serde_json::{Value, json};
 
 const POLL_ATTEMPTS: usize = 15;
@@ -116,72 +117,78 @@ fn analyze(run_id: &str, stack: &str, traces: &[Value]) -> Result<Summary> {
     );
     let tests = spans
         .iter()
-        .filter(|span| span.attributes.contains_key("test.case.name"))
+        .filter(|span| span.attributes.contains_key(semconv::TEST_CASE_NAME))
         .collect::<Vec<_>>();
     ensure!(!tests.is_empty(), "no test-attempt spans were indexed");
     ensure!(
         tests.iter().all(|span| {
-            attribute_string(&span.attributes, "parallax.run.id") == Some(run_id)
-                || attribute_string(&span.resource, "parallax.run.id") == Some(run_id)
+            attribute_string(&span.attributes, semconv::PARALLAX_RUN_ID) == Some(run_id)
+                || attribute_string(&span.resource, semconv::PARALLAX_RUN_ID) == Some(run_id)
         }),
         "one or more test spans lost the Parallax run identity"
     );
     ensure!(
         tests
             .iter()
-            .any(|span| attribute_string(&span.attributes, "parallax.test.id").is_some()),
+            .any(|span| attribute_string(&span.attributes, semconv::PARALLAX_TEST_ID).is_some()),
         "explicit test identity fixture is missing"
     );
     ensure!(
-        tests
-            .iter()
-            .any(|span| attribute_string(&span.attributes, "test.case.parameters").is_some()),
+        tests.iter().any(
+            |span| attribute_string(&span.attributes, semconv::TEST_CASE_PARAMETERS).is_some()
+        ),
         "parameterized-test fixture is missing"
     );
     ensure!(
-        tests.iter().any(|span| span
-            .attributes
-            .keys()
-            .any(|key| key.starts_with("test.configuration."))),
+        tests.iter().any(|span| {
+            [
+                semconv::TEST_CONFIGURATION_OS,
+                semconv::TEST_CONFIGURATION_ENVIRONMENT,
+                semconv::TEST_CONFIGURATION_BROWSER,
+            ]
+            .iter()
+            .any(|key| span.attributes.contains_key(*key))
+        }),
         "test configuration attributes are missing"
     );
     ensure!(
         tests.iter().any(
-            |span| attribute_i64(&span.attributes, "test.attempt.ordinal")
+            |span| attribute_i64(&span.attributes, semconv::TEST_ATTEMPT_ORDINAL)
                 .is_some_and(|ordinal| ordinal > 1)
         ),
         "retry attempt evidence is missing"
     );
     ensure!(
-        tests.iter().any(
-            |span| attribute_string(&span.attributes, "test.case.result.status") == Some("pass")
-        ),
+        tests.iter().any(|span| attribute_string(
+            &span.attributes,
+            semconv::TEST_CASE_RESULT_STATUS
+        ) == Some(semconv::TEST_RESULT_STATUS_PASS)),
         "passing test evidence is missing"
     );
     ensure!(
-        tests.iter().any(
-            |span| attribute_string(&span.attributes, "test.case.failure.kind")
-                == Some("assertion_failure")
-        ),
+        tests.iter().any(|span| attribute_string(
+            &span.attributes,
+            semconv::TEST_CASE_FAILURE_KIND
+        ) == Some(semconv::TEST_FAILURE_KIND_ASSERTION)),
         "assertion-failure evidence is missing"
     );
     ensure!(
-        tests.iter().any(
-            |span| attribute_string(&span.attributes, "test.case.failure.kind")
-                == Some("harness_error")
-        ),
+        tests.iter().any(|span| attribute_string(
+            &span.attributes,
+            semconv::TEST_CASE_FAILURE_KIND
+        ) == Some(semconv::TEST_FAILURE_KIND_HARNESS)),
         "harness-error evidence is missing"
     );
     ensure!(
         tests
             .iter()
-            .all(|span| attribute_string(&span.resource, "vcs.ref.head.revision").is_some()),
+            .all(|span| attribute_string(&span.resource, semconv::VCS_REF_HEAD_REVISION).is_some()),
         "test resource revision is missing"
     );
     ensure!(
         tests
             .iter()
-            .all(|span| attribute_string(&span.resource, "service.version").is_some()),
+            .all(|span| attribute_string(&span.resource, semconv::SERVICE_VERSION).is_some()),
         "test resource service version is missing"
     );
     ensure!(
@@ -211,7 +218,7 @@ fn analyze(run_id: &str, stack: &str, traces: &[Value]) -> Result<Summary> {
         }
         for child in by_parent.get(parent).into_iter().flatten() {
             frontier.push(child.span_id.as_str());
-            if !child.attributes.contains_key("test.case.name") {
+            if !child.attributes.contains_key(semconv::TEST_CASE_NAME) {
                 descendants += 1;
             }
         }

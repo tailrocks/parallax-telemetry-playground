@@ -1,17 +1,7 @@
-import type {
-  FullResult,
-  Reporter,
-  TestCase,
-  TestResult,
-} from "@playwright/test/reporter";
+import type { FullResult, Reporter, TestCase, TestResult } from "@playwright/test/reporter";
 import { mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import {
-  ROOT_CONTEXT,
-  SpanStatusCode,
-  type Context,
-  type Span,
-} from "@opentelemetry/api";
+import { ROOT_CONTEXT, SpanStatusCode, type Context, type Span } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
@@ -22,16 +12,25 @@ import {
   CICD_PIPELINE_TASK_TYPE,
   PARALLAX_RUN_ID,
   PARALLAX_TEST_ID,
+  SERVICE_VERSION,
+  TEST_ATTEMPT_ORDINAL,
   TEST_CASE_NAME,
+  TEST_CASE_FAILURE_KIND,
+  TEST_CASE_PARAMETERS,
   TEST_CASE_RESULT_STATUS,
+  TEST_CONFIGURATION_BROWSER,
+  TEST_CONFIGURATION_ENVIRONMENT,
+  TEST_CONFIGURATION_OS,
+  TEST_FAILURE_KIND_ASSERTION,
+  TEST_FAILURE_KIND_HARNESS,
+  TEST_RESULT_STATUS_FAIL,
+  TEST_RESULT_STATUS_PASS,
   TEST_ARTIFACT_PATH,
   TEST_SUITE_NAME,
   TEST_SUITE_RUN_STATUS,
+  VCS_REF_HEAD_REVISION,
 } from "../src/semconv";
-import {
-  testTraceparentDirectory,
-  testTraceparentPath,
-} from "./test-trace-context";
+import { testTraceparentDirectory, testTraceparentPath } from "./test-trace-context";
 
 const TEST_TRACER = "playground.web.test";
 
@@ -49,12 +48,10 @@ export default class TelemetryReporter implements Reporter {
         resource: resourceFromAttributes({
           [ATTR_SERVICE_NAME]: "playground-web-tests",
           [PARALLAX_RUN_ID]: process.env.PARALLAX_RUN_ID ?? "",
-          "service.version": process.env.RELEASE ?? "dev",
-          "vcs.ref.head.revision": process.env.GITHUB_SHA ?? process.env.VCS_REF ?? "",
+          [SERVICE_VERSION]: process.env.RELEASE ?? "dev",
+          [VCS_REF_HEAD_REVISION]: process.env.GITHUB_SHA ?? process.env.VCS_REF ?? "",
         }),
-        spanProcessors: [
-          new SimpleSpanProcessor(new OTLPTraceExporter({ url: this.endpoint })),
-        ],
+        spanProcessors: [new SimpleSpanProcessor(new OTLPTraceExporter({ url: this.endpoint }))],
       })
     : undefined;
   onBegin(): void {
@@ -77,11 +74,11 @@ export default class TelemetryReporter implements Reporter {
           [PARALLAX_TEST_ID]: test.id,
           [CICD_PIPELINE_RUN_ID]: process.env.CI_RUN_ID ?? "",
           [CICD_PIPELINE_TASK_TYPE]: "playwright",
-          "test.attempt.ordinal": result.retry + 1,
-          "test.case.parameters": parametersForTitle(test.title),
-          "test.configuration.browser": process.env.PLAYWRIGHT_BROWSER ?? "chromium",
-          "test.configuration.environment": process.env.PLAYGROUND_ENV ?? "playground",
-          "test.configuration.os": process.platform,
+          [TEST_ATTEMPT_ORDINAL]: result.retry + 1,
+          [TEST_CASE_PARAMETERS]: parametersForTitle(test.title),
+          [TEST_CONFIGURATION_BROWSER]: process.env.PLAYWRIGHT_BROWSER ?? "chromium",
+          [TEST_CONFIGURATION_ENVIRONMENT]: process.env.PLAYGROUND_ENV ?? "playground",
+          [TEST_CONFIGURATION_OS]: process.platform,
         },
       },
       runParentContext(),
@@ -103,8 +100,14 @@ export default class TelemetryReporter implements Reporter {
     if (!span) throw new Error(`missing Playwright telemetry span for ${key}`);
     this.spans.delete(key);
 
-    const failed = result.status === "failed" || result.status === "timedOut" || result.status === "interrupted";
-    const status = result.status === "skipped" ? "skip" : failed ? "fail" : "pass";
+    const failed =
+      result.status === "failed" || result.status === "timedOut" || result.status === "interrupted";
+    const status =
+      result.status === "skipped"
+        ? "skip"
+        : failed
+          ? TEST_RESULT_STATUS_FAIL
+          : TEST_RESULT_STATUS_PASS;
     span.setAttribute(TEST_CASE_RESULT_STATUS, status);
     span.setAttribute(TEST_SUITE_RUN_STATUS, status);
     span.setAttribute("test.case.duration_ms", result.duration);
@@ -112,10 +115,10 @@ export default class TelemetryReporter implements Reporter {
       const error = result.error;
       const message = error?.message ?? `Playwright test ${result.status}`;
       span.setAttribute(
-        "test.case.failure.kind",
+        TEST_CASE_FAILURE_KIND,
         result.status === "timedOut" || result.status === "interrupted"
-          ? "harness_error"
-          : "assertion_failure",
+          ? TEST_FAILURE_KIND_HARNESS
+          : TEST_FAILURE_KIND_ASSERTION,
       );
       span.recordException({
         name: error?.name ?? "PlaywrightTestError",
