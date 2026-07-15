@@ -7,8 +7,8 @@ import { initOtel } from "./telemetry";
 
 // API origins matched by Sentry tracePropagationTargets. OTel app fetches use
 // tracedFetch() so they can inject trace context and session baggage explicitly.
-const checkoutUrl = import.meta.env.VITE_CHECKOUT_URL ?? "http://localhost:8088";
-const ordersUrl = import.meta.env.VITE_ORDERS_URL ?? "http://localhost:8092";
+const checkoutUrl = import.meta.env["VITE_CHECKOUT_URL"] ?? "http://localhost:8088";
+const ordersUrl = import.meta.env["VITE_ORDERS_URL"] ?? "http://localhost:8092";
 const apiTargets: (string | RegExp)[] = [/^\//, checkoutUrl, ordersUrl];
 
 let started = false;
@@ -18,7 +18,7 @@ export function initBrowserTelemetry() {
   started = true;
 
   Sentry.init({
-    dsn: import.meta.env.VITE_SENTRY_DSN,
+    dsn: import.meta.env["VITE_SENTRY_DSN"],
     environment: "playground",
     // Pin per run for lab repeatability (see spec §8 sampling note).
     tracesSampleRate: 1.0,

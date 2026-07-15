@@ -4,14 +4,10 @@
 #
 # Instrumentation: the UPSTREAM OpenTelemetry Java agent (OTLP export to the
 # lab's Rotel → fan-out to every backend). We deliberately do NOT use Sentry's
-# `sentry-opentelemetry-agent`: it installs Sentry's own SpanProcessor and emits
-# nothing over OTLP even with OTEL_TRACES_EXPORTER=otlp set, so the fan-out
-# backends never see the Java services (reproduced live 2026-06-23 — the
-# LoggingSpanExporter printed zero spans, no span reached any backend). OTLP
-# fan-out is the lab's whole point; Sentry still receives the Java traces/logs
-# as a Rotel OTLP backend. (A Sentry *SDK envelope* path for Java is separately
-# blocked upstream: the Sentry Spring Boot starter 8.44 references the relocated
-# RestClientCustomizer and does not load on Spring Boot 4.x.)
+# `sentry-opentelemetry-agent`: it replaces the exporter pipeline and prevents
+# the fan-out backends from seeing Java signals. Each service instead includes
+# the Spring Boot 4-compatible Sentry SDK starter, which emits Sentry envelopes
+# while this upstream agent remains the sole OTLP instrumentation/export path.
 ARG SERVICE
 ARG JDK=25
 ARG OTEL_AGENT_VERSION=2.29.0

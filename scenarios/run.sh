@@ -7,10 +7,14 @@ catalog() {
   cat <<'TABLE'
 ID              Script                         Drives                                      Check in Parallax UI
 a1              a1-checkout.sh                 checkout -> pricing/inventory/recommendation Traces: checkout waterfall with downstream children
+a2              a2-exemplars.sh                catalog JVM exemplar traffic                  Metrics: trace-linked catalog counter exemplars
+a5              a5-rum-error.sh                Playwright forced RUM error                   Traces/Issues: browser failure with replay/error evidence
 a6              a6-graphql.sh                  catalog GraphQL field-span family            Traces: batched vs N+1, partial error, op-name policy
 a7              a7-subscription.ts             catalog GraphQL subscription smoke            Traces: long-lived priceChanges subscription span
+a8              a8-java-async.sh               Java fulfillment Kafka link path              Traces: Java producer/consumer link and Rust notification hop
 a7b             a7b-grpc-stream.sh             pricing gRPC stream events/failure/cancel    Traces: rpc.message SENT/RECEIVED events and stream_failed/cancel
 a9              a9-field-spike.sh              checkout structured log burst                Logs document fields: app_screen_name dominated by workspace-select
+a10             a10-baggage.sh                  checkout W3C tenant/tier baggage             Traces: checkout, inventory, and pricing carry tenant.id/user.tier
 a3              a3-async.sh                    orders producer/consumer                    Trace detail: producer span linked to consumer trace
 a4              a4-reverse.sh                  fulfillment -> Kafka -> notifications        Trace detail: Java async span link and Java -> Rust hop
 a12             a12-cli-run.sh                 playground CLI checkout driver              Runs: command row with exit code; cargo build first
@@ -21,12 +25,21 @@ a19             a19-long-trace.sh              checkout synthetic wide/deep trac
 a20-compare     a20-compare-pair.sh            green structural checkout variants           Traces: Compare shows added reserve spans and removed recommend
 a20             a20-batch-fanin.sh             orders batch consumer links many producers   Trace detail: consume_batch has many span links
 a22             a22-tokio-saturation.sh        checkout spawn_blocking flood                Services -> checkout -> Runtime lane: tokio.runtime.* spike; Traces: slow spans
+a23             a23-storefront-grpc.sh          storefront GraphQL -> Java gRPC             Traces: GraphQL resolver then payment Pricing/Quote
+a24             a24-storefront-catalog.sh       storefront GraphQL -> catalog GraphQL       Traces: GraphQL resolver then catalog GraphQL operation
 a25             a25-postgres.sh                 inventory real Postgres and pool pressure    Traces: db spans, pg_sleep, SELECT fan-out, pool_exhausted; Runtime: db.client.connection.*
 a26             a26-cache.sh                    recommendation TTL cache and stampede       Metrics: cache_hits_total/cache_misses_total; Traces: parallel compute_recommendations
 a27             a27-execution-stack.sh         CLI -> daemon -> container -> agent          Runs/Story: stitched beats; orphan child trace has browser_without_backend
 a28             a28-rum-journey.sh             browser routes, web vitals, session.id       Traces: stitched browser checkout, RUM error, web_vital spans, nopropagate gap
 a29             a29-typed-events.sh            typed log events across tiers                Logs SQL/Event column: checkout/order/catalog/payment/web event names
 b-async-chaos   b-async-chaos.sh               consumer lag and poison message              Services/Traces: lag span and dead-letter error branch
+b2              b2-inventory-failure.sh        deterministic inventory 503                  Traces/Issues: inventory failure and checkout impact
+b5              b5-cpu-pressure.sh             bounded checkout CPU hot path                 Services: checkout CPU/runtime saturation
+b6              b6-cache-leak.sh               recommendation cache-leak traffic             Metrics: memory growth plus feature-flag evaluation
+b10             b10-lock-contention.sh         concurrent shared-lock checkout requests      Traces: serialized contention delay
+b13             b13-slow-recommendation.sh     deterministic recommendation slowness          Traces: slow recommendation/degradation
+b15             b15-rage-click.sh              Playwright checkout/promo journey             RUM: rage-click/replay evidence
+b16             b16-load.sh                    k6 checkout load entry                         Metrics/traces: sustained checkout load
 b-chaos         b-chaos.sh                     payment failure and latency                  Issues/Services: checkout error and slow-span rendering
 b-checkout-chaos b-checkout-chaos.sh           retry timeout and N+1 fan-out                Traces: retry/timeout branch and N+1 waterfall
 b3b             b3b-grpc-deadline.sh           real grpc-timeout deadline and retry spans    Traces: rpc.grpc.status_code=4 on pricing.attempt spans
@@ -44,10 +57,14 @@ TABLE
 scenario() {
   case "$1" in
     a1) echo "a1-checkout.sh|Traces: checkout waterfall with pricing, inventory, and recommendation children" ;;
+    a2) echo "a2-exemplars.sh|Metrics: trace-linked catalog.product.queries exemplars" ;;
+    a5) echo "a5-rum-error.sh|Traces/Issues: forced RUM error with browser test evidence" ;;
     a6) echo "a6-graphql.sh|Traces: batched reviews vs reviewsSlow N+1 shape, partial riskScore error, op-name policy" ;;
     a7) echo "a7-subscription.ts|Traces: long-lived priceChanges subscription span; run with Bun" ;;
     a7b) echo "a7b-grpc-stream.sh|Traces: pricing stream SENT events, checkout RECEIVED events, stream_failed, and cancel observation" ;;
+    a8) echo "a8-java-async.sh|Traces: Java fulfillment producer/consumer link and Rust notification hop" ;;
     a9) echo "a9-field-spike.sh|Logs document fields: app_screen_name dominated by workspace-select in the spike window" ;;
+    a10) echo "a10-baggage.sh|Traces: checkout, inventory, and pricing carry tenant.id/user.tier via W3C baggage" ;;
     a3) echo "a3-async.sh|Trace detail: producer span with link to consumer trace" ;;
     a4) echo "a4-reverse.sh|Trace detail: Java producer/consumer link plus Java -> Rust notifications hop" ;;
     a12) echo "a12-cli-run.sh|Runs: command row with exit code; requires cargo build first" ;;
@@ -58,12 +75,21 @@ scenario() {
     a20-compare) echo "a20-compare-pair.sh|Traces: Compare shows added reserve spans, removed recommend branch, and duration deltas" ;;
     a20) echo "a20-batch-fanin.sh|Trace detail: consume_batch span carries messaging.batch.message_count and many span links" ;;
     a22) echo "a22-tokio-saturation.sh|Services -> checkout -> Runtime lane: tokio.runtime.* spike; Traces: slow checkout spans" ;;
+    a23) echo "a23-storefront-grpc.sh|Traces: storefront GraphQL resolver then Java payment Pricing/Quote gRPC server" ;;
+    a24) echo "a24-storefront-catalog.sh|Traces: storefront GraphQL resolver then Java catalog GraphQL operation" ;;
     a25) echo "a25-postgres.sh|Traces: db.query.text spans for reserve, pg_sleep, SELECT fan-out, and pool_exhausted; Runtime: db.client.connection.* gauges" ;;
     a26) echo "a26-cache.sh|Metrics: cache_hits_total/cache_misses_total and cache_size; Traces: parallel compute_recommendations spans; Logs document fields: cache.hit" ;;
     a27) echo "a27-execution-stack.sh|Runs/Story: stitched CLI -> daemon -> container -> agent beats; orphan child trace has browser_without_backend" ;;
     a28) echo "a28-rum-journey.sh|Traces: browser route/user-step spans, web_vital spans, stitched checkout, RUM exception, and nopropagate disconnected-trace gap" ;;
     a29) echo "a29-typed-events.sh|Logs SQL/Event column: checkout.completed, checkout.failed, order.consumed, catalog.products.served, payment.authorized, and web.checkout.submitted" ;;
     b-async-chaos) echo "b-async-chaos.sh|Services/Traces: lag span and dead-letter error branch" ;;
+    b2) echo "b2-inventory-failure.sh|Traces/Issues: inventory failure and checkout impact" ;;
+    b5) echo "b5-cpu-pressure.sh|Services: checkout CPU/runtime saturation and slow request spans" ;;
+    b6) echo "b6-cache-leak.sh|Metrics: recommendation memory growth and feature-flag evaluation" ;;
+    b10) echo "b10-lock-contention.sh|Traces: serialized checkout contention delay" ;;
+    b13) echo "b13-slow-recommendation.sh|Traces: slow recommendation and dependent degradation" ;;
+    b15) echo "b15-rage-click.sh|RUM: rage-click/replay evidence from the Playwright journey" ;;
+    b16) echo "b16-load.sh|Metrics/traces: sustained checkout load from k6" ;;
     b-chaos) echo "b-chaos.sh|Issues/Services: checkout error and slow-span rendering" ;;
     b-checkout-chaos) echo "b-checkout-chaos.sh|Traces: retry/timeout branch and N+1 waterfall" ;;
     b3b) echo "b3b-grpc-deadline.sh|Traces: pricing.attempt sibling spans carry rpc.grpc.status_code=4 and deadline_exceeded" ;;
@@ -97,6 +123,8 @@ script="${entry%%|*}"
 check="${entry#*|}"
 if [[ "$id" == "a7" ]]; then
   bun "$SCRIPT_DIR/$script" "$@"
+elif [[ "$script" == "requires-live-host" ]]; then
+  echo "Scenario $id requires a live host: $check"
 else
   "$SCRIPT_DIR/$script" "$@"
 fi

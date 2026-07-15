@@ -15,9 +15,7 @@
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::{Json, Router, extract::Query, routing::get};
-use open_feature::EvaluationContext;
-use open_feature::provider::FeatureProvider;
-use open_feature_flagd::{FlagdOptions, FlagdProvider, ResolverType};
+use opentelemetry::trace::TraceContextExt;
 use playground_proto::pricing::v1::QuoteRequest;
 use playground_proto::pricing::v1::pricing_client::PricingClient;
 use playground_telemetry::semconv;
@@ -26,19 +24,28 @@ use serde_json::{Value, json};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{future::Future, pin::Pin};
-use tokio::sync::OnceCell;
 use tonic::Code;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-static FLAGD_PROVIDER: OnceCell<FlagdProvider> = OnceCell::const_new();
 static BLOCKING_POOL_DEPTH: AtomicU64 = AtomicU64::new(0);
 const MAX_BLOCK_MS: u64 = 30_000;
 const MAX_BLOCK_N: u32 = 1_024;
 const MAX_BURST_FAN: u32 = 50;
 const MAX_BURST_DEPTH: u32 = 10;
 const MAX_BURST_SPANS: u64 = 2_000;
+
+#[derive(Debug)]
+struct PaymentError;
+
+impl std::fmt::Display for PaymentError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("PaymentError: payment failed")
+    }
+}
+
+impl std::error::Error for PaymentError {}
 
 /// Query flags arrive as `1`/`true`/`yes`/`on`; serde's bool wants `true`/`false`.
 fn de_flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
@@ -139,13 +146,29 @@ fn env_flag(name: &str) -> bool {
 
 async fn checkout(headers: HeaderMap, Query(p): Query<CheckoutParams>) -> impl IntoResponse {
     let span = tracing::info_span!("checkout", otel.kind = semconv::SPAN_KIND_SERVER);
-    playground_telemetry::set_parent_from_headers(&span, &headers);
+    let parent = playground_telemetry::extract_context(&headers);
+    let parent = p.tenant.as_deref().map_or(parent.clone(), |tenant| {
+        playground_telemetry::with_business_baggage(&parent, tenant, &p.tier)
+    });
+    if parent.span().span_context().is_valid() {
+        let _ = span.set_parent(parent);
+    }
     checkout_inner(p).instrument(span).await
 }
 
 async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
-    let payment_failure_flag = feature_flag("paymentFailure", "PAYMENT_FAILURE").await;
-    let slow_query_flag = feature_flag("slowQuery", "SLOW_QUERY").await;
+    // An explicit scenario parameter must stay deterministic even when flagd is
+    // unavailable: it is the direct B1 contract and should not wait on three
+    // unrelated remote flag evaluations before returning its deliberate error.
+    let (payment_failure_flag, slow_query_flag, canary_failure_flag) = if p.fail {
+        (false, false, false)
+    } else {
+        (
+            playground_telemetry::feature_flag("paymentFailure", "PAYMENT_FAILURE").await,
+            playground_telemetry::feature_flag("slowQuery", "SLOW_QUERY").await,
+            playground_telemetry::feature_flag("canaryFailure", "CANARY_FAILURE").await,
+        )
+    };
     let slow_ms = if p.slow > 0 {
         p.slow
     } else if slow_query_flag {
@@ -167,9 +190,12 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
     if p.rogue_log {
         emit_rogue_log();
     }
-    // A10: business context as baggage (propagated downstream in the full design).
+    // A10: business context is attached as W3C baggage and injected by every
+    // downstream HTTP/gRPC helper for this request.
     if let Some(tenant) = &p.tenant {
-        tracing::info!(tenant = %tenant, user.tier = %p.tier, "baggage business context");
+        tracing::Span::current().set_attribute(semconv::TENANT_ID, tenant.clone());
+        tracing::Span::current().set_attribute(semconv::USER_TIER, p.tier.clone());
+        tracing::info!(tenant.id = %tenant, user.tier = %p.tier, "baggage business context");
     }
     // B10: contention — serialize on a shared lock while held.
     let _guard = if p.lock {
@@ -190,7 +216,7 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
     if p.block_ms > 0 && p.block_n > 0 {
         flood_blocking_pool(p.block_ms, p.block_n).await;
     }
-    if p.canary || env_flag("CANARY") {
+    if p.canary || env_flag("CANARY") || canary_failure_flag {
         // A18: plant a redaction canary corpus so backends can be compared on
         // raw-vs-scrubbed. These are FAKE secrets for redaction testing only.
         tracing::warn!(
@@ -220,15 +246,17 @@ async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
     let release_regressed = std::env::var("RELEASE").as_deref() == Ok("v2");
     if p.fail || payment_failure_flag || release_regressed {
         // B1/B12: deliberate failure → error issue + ERROR span status.
-        playground_telemetry::mark_span_error("payment_failure");
+        let error = PaymentError;
+        playground_telemetry::mark_span_error("PaymentError");
         playground_telemetry::emit_event(
             "checkout.failed",
             &[
                 ("sku", p.sku.clone()),
-                (semconv::ERROR_TYPE, "payment_failure".to_string()),
+                (semconv::ERROR_TYPE, "PaymentError".to_string()),
+                ("error.message", error.to_string()),
             ],
         );
-        tracing::error!(sku = %p.sku, payment_failure_flag, release_regressed, "payment failure (chaos)");
+        tracing::error!(error = %error, sku = %p.sku, payment_failure_flag, release_regressed, "payment failure (chaos)");
         // B4: cascading failure → degrade to a partial 200 when asked, else 502.
         if p.degrade {
             tracing::warn!("degraded: returning partial result without pricing");
@@ -412,51 +440,6 @@ fn emit_rogue_log() {
     });
 }
 
-async fn feature_flag(flag_key: &'static str, env_name: &'static str) -> bool {
-    let env_override = env_flag(env_name);
-    let mut provider_name = "flagd";
-    let mut provider_value = false;
-    let mut variant = "off".to_string();
-    let mut error = String::new();
-
-    match flagd_provider().await {
-        Ok(provider) => match provider
-            .resolve_bool_value(flag_key, &EvaluationContext::default())
-            .await
-        {
-            Ok(details) => {
-                provider_value = details.value;
-                variant = details
-                    .variant
-                    .unwrap_or_else(|| if provider_value { "on" } else { "off" }.to_string());
-            }
-            Err(err) => {
-                provider_name = "env";
-                error = format!("{err:?}");
-            }
-        },
-        Err(err) => {
-            provider_name = "env";
-            error = err.to_string();
-        }
-    }
-
-    let effective = provider_value || env_override;
-    if env_override {
-        variant = "env-on".to_string();
-    }
-    tracing::info!(
-        "feature_flag.key" = flag_key,
-        "feature_flag.provider_name" = provider_name,
-        "feature_flag.variant" = %variant,
-        "feature_flag.value" = effective,
-        "feature_flag.env_override" = env_override,
-        "feature_flag.error" = %error,
-        "feature_flag.evaluation"
-    );
-    effective
-}
-
 async fn flood_blocking_pool(block_ms: u64, block_n: u32) {
     let capped_ms = block_ms.min(MAX_BLOCK_MS);
     let capped_n = block_n.min(MAX_BLOCK_N);
@@ -498,19 +481,6 @@ fn record_blocking_pool_depth() {
             .build()
     });
     gauge.record(BLOCKING_POOL_DEPTH.load(Ordering::Relaxed), &[]);
-}
-
-async fn flagd_provider() -> anyhow::Result<&'static FlagdProvider> {
-    FLAGD_PROVIDER
-        .get_or_try_init(|| async {
-            FlagdProvider::new(FlagdOptions {
-                resolver_type: ResolverType::Rpc,
-                ..Default::default()
-            })
-            .await
-            .map_err(anyhow::Error::new)
-        })
-        .await
 }
 
 /// B3: bounded retry with a per-attempt deadline around the pricing call.
@@ -764,14 +734,21 @@ fn cors_layer() -> CorsLayer {
         ])
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let telemetry = playground_telemetry::init("checkout")?;
-    let app = Router::new()
+fn app() -> Router {
+    Router::new()
         .route("/checkout", get(checkout))
         .route("/quote-stream", get(quote_stream))
         .route("/healthz", get(|| async { "ok" }))
-        .layer(cors_layer());
+        .layer(cors_layer())
+        .layer(axum::middleware::from_fn(
+            playground_telemetry::http_server_observability,
+        ))
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let telemetry = playground_telemetry::init("checkout")?;
+    let app = app();
     let addr = std::env::var("CHECKOUT_ADDR").unwrap_or_else(|_| "0.0.0.0:8088".into());
     tracing::info!(%addr, "checkout HTTP listening");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -785,6 +762,16 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    #[test]
+    fn payment_error_has_the_shared_cross_language_identity() {
+        assert_eq!(PaymentError.to_string(), "PaymentError: payment failed");
+    }
 
     #[test]
     fn clamp_shape_bounds_fan_depth_and_estimated_spans() {
@@ -803,5 +790,62 @@ mod tests {
         assert_eq!(compare_variant(Some("v1")), "v1");
         assert_eq!(compare_variant(Some("v2")), "v2");
         assert_eq!(compare_variant(Some("other")), "v1");
+    }
+
+    #[tokio::test]
+    async fn exposes_health_without_downstream_dependencies() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .expect("health request"),
+            )
+            .await
+            .expect("health response");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn returns_the_shared_payment_error_without_downstream_calls() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/checkout?fail=1")
+                    .body(Body::empty())
+                    .expect("checkout failure request"),
+            )
+            .await
+            .expect("checkout failure response");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        assert!(
+            std::str::from_utf8(&body)
+                .expect("UTF-8 response")
+                .contains("payment failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn serves_health_over_a_real_loopback_listener() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind checkout listener");
+        let address = listener.local_addr().expect("checkout listener address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app()).await.expect("serve checkout");
+        });
+
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            reqwest::get(format!("http://{address}/healthz")),
+        )
+        .await
+        .expect("checkout health timeout")
+        .expect("checkout health response");
+        assert_eq!(response.status(), StatusCode::OK);
+        server.abort();
     }
 }

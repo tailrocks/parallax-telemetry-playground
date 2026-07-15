@@ -168,9 +168,15 @@ async fn recommend_inner(p: Recommend) -> Json<Value> {
     if p.slow > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(p.slow)).await;
     }
-    if p.leak > 0 {
+    let cache_leak_flag = playground_telemetry::feature_flag("cacheLeak", "CACHE_LEAK").await;
+    let leak_kb = if cache_leak_flag {
+        p.leak.max(256)
+    } else {
+        p.leak
+    };
+    if leak_kb > 0 {
         let mut store = leak_store().lock().unwrap();
-        let mut bytes = vec![0u8; p.leak * 1024];
+        let mut bytes = vec![0u8; leak_kb * 1024];
         // Touch each page so the cgroup sees real RSS instead of lazily shared
         // zero pages. The buffer is never freed, so repeated calls OOM under
         // the demo limits overlay.
@@ -178,7 +184,12 @@ async fn recommend_inner(p: Recommend) -> Json<Value> {
             bytes[i] = (i % 251) as u8;
         }
         store.push(bytes);
-        tracing::warn!(kb = p.leak, held = store.len(), "cache leak (chaos)");
+        tracing::warn!(
+            kb = leak_kb,
+            held = store.len(),
+            flagd = cache_leak_flag,
+            "cache leak (chaos)"
+        );
     }
 
     let cache_enabled = cache_enabled(p.cache);
@@ -294,12 +305,19 @@ async fn compute_recommendations(sku: &str) -> Vec<String> {
     .await
 }
 
+fn app() -> Router {
+    Router::new()
+        .route("/recommend", get(recommend))
+        .route("/healthz", get(|| async { "ok" }))
+        .layer(axum::middleware::from_fn(
+            playground_telemetry::http_server_observability,
+        ))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let telemetry = playground_telemetry::init("recommendation")?;
-    let app = Router::new()
-        .route("/recommend", get(recommend))
-        .route("/healthz", get(|| async { "ok" }));
+    let app = app();
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8090".into());
     tracing::info!(%addr, "recommendation HTTP listening");
     axum::serve(tokio::net::TcpListener::bind(&addr).await?, app)
@@ -312,6 +330,11 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
 
     #[test]
     fn cache_helper_hits_and_expires() {
@@ -355,5 +378,55 @@ mod tests {
             Duration::from_millis(MAX_TTL_MS)
         );
         assert_eq!(stampede_from(MAX_STAMPEDE + 10), MAX_STAMPEDE);
+    }
+
+    #[tokio::test]
+    async fn exposes_health_and_recommendation_http_boundaries() {
+        let health = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .expect("health request"),
+            )
+            .await
+            .expect("health response");
+        assert_eq!(health.status(), StatusCode::OK);
+
+        let missing_sku = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/recommend")
+                    .body(Body::empty())
+                    .expect("recommend request"),
+            )
+            .await
+            .expect("recommend response");
+        assert_eq!(missing_sku.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn serves_health_over_a_real_loopback_listener() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind recommendation listener");
+        let address = listener
+            .local_addr()
+            .expect("recommendation listener address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app())
+                .await
+                .expect("serve recommendation");
+        });
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(3),
+            reqwest::get(format!("http://{address}/healthz")),
+        )
+        .await
+        .expect("recommendation health timeout")
+        .expect("recommendation health response");
+        assert_eq!(response.status(), StatusCode::OK);
+        server.abort();
     }
 }

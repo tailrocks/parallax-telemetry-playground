@@ -17,10 +17,22 @@ plugins {
     id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
     id("com.google.protobuf") version "0.9.4"
+    id("com.atkinsondev.opentelemetry-build") version "4.6.2"
+    id("org.gradle.test-retry") version "1.6.5"
 }
 group = "dev.tailrocks"; version = "0.1.0"
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+sourceSets { main { java { srcDir("../semconv/src/main/java") } } }
 repositories { mavenCentral() }
+val otelJavaAgent = configurations.create("otelJavaAgent")
+val testOtelEndpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")?.takeIf(String::isNotBlank)
+val testResourceAttributes = listOfNotNull(
+    System.getenv("OTEL_RESOURCE_ATTRIBUTES")?.takeIf(String::isNotBlank),
+    "service.version=$version",
+    "vcs.ref.head.revision=${System.getenv("GITHUB_SHA") ?: "local"}",
+    "test.configuration.os=${System.getProperty("os.name")}",
+    "test.configuration.environment=${System.getenv("PARALLAX_TEST_ENVIRONMENT") ?: "local"}",
+).joinToString(",")
 dependencies {
     // Spring Boot 4.1 graduated Spring gRPC: the starter is now Boot-owned and
     // split by role — payment is a gRPC server. Boot's BOM manages the
@@ -31,7 +43,42 @@ dependencies {
     compileOnly("org.apache.tomcat:annotations-api:6.0.53")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.sentry:sentry-spring-boot-starter-jakarta:8.46.0")
     implementation("io.opentelemetry:opentelemetry-api")
+    compileOnly("org.junit.jupiter:junit-jupiter-api")
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("io.grpc:grpc-inprocess")
+    // Keep test traces on the same upstream agent path as the deployed JVM.
+    add(otelJavaAgent.name, "io.opentelemetry.javaagent:opentelemetry-javaagent:2.29.0")
+}
+openTelemetryBuild {
+    endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") ?: "http://rotel:4317"
+    serviceName = "payment-tests"
+    customTags = mapOf("parallax.run.id" to (System.getenv("PARALLAX_RUN_ID") ?: ""))
+    taskTraceEnvironmentEnabled = true
+}
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+    reports.junitXml.mergeReruns.set(true)
+    retry {
+        maxRetries.set(1)
+        maxFailures.set(3)
+        failOnPassedAfterRetry.set(false)
+    }
+    inputs.files(otelJavaAgent)
+    jvmArgs("-javaagent:${otelJavaAgent.singleFile.absolutePath}")
+    environment("PARALLAX_RUN_ID", System.getenv("PARALLAX_RUN_ID") ?: "")
+    environment("PARALLAX_TEST_ID", System.getenv("PARALLAX_TEST_ID") ?: "")
+    environment("PARALLAX_TEST_ENVIRONMENT", System.getenv("PARALLAX_TEST_ENVIRONMENT") ?: "local")
+    environment("TRACEPARENT", System.getenv("TRACEPARENT") ?: "")
+    environment("OTEL_RESOURCE_ATTRIBUTES", testResourceAttributes)
+    if (testOtelEndpoint == null) {
+        environment("OTEL_TRACES_EXPORTER", "none")
+        environment("OTEL_METRICS_EXPORTER", "none")
+        environment("OTEL_LOGS_EXPORTER", "none")
+    } else {
+        environment("OTEL_EXPORTER_OTLP_ENDPOINT", testOtelEndpoint)
+    }
 }
 // Spring Boot 4.1 graduated gRPC support: when `com.google.protobuf` is
 // applied, Boot's Gradle plugin registers the `grpc` protoc locator AND

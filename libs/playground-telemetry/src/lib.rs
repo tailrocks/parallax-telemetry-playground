@@ -4,8 +4,7 @@
 //! parallel consumers so `tracing` is the only span source and nothing is
 //! double-instrumented —
 //!   * `OpenTelemetryLayer`  — OTLP **traces** → collector,
-//!   * `MetricsLayer`        — OTLP **metrics** (counters/histograms from
-//!     `tracing` fields) → collector,
+//!   * OpenTelemetry meters  — OTLP **metrics** from explicit instruments,
 //!   * `OpenTelemetryTracingBridge` — `tracing` events → OTLP **logs**,
 //!     auto-stamped with the active trace/span id,
 //!   * `sentry-tracing`      — events → Sentry breadcrumbs/issues.
@@ -18,18 +17,27 @@
 //! implement them yet, issue #3369; the JVM tier is the playground's exemplar
 //! source.)
 
+mod feature_flags;
 pub mod propagation;
 pub mod semconv;
 
+pub use feature_flags::feature_flag;
 pub use propagation::{
-    context_env, current_context_env, extract_context_from_env, inject_context_headers,
-    inject_grpc_metadata, inject_headers, mark_span_error, set_parent_from, set_parent_from_env,
-    set_parent_from_grpc, set_parent_from_grpc_metadata, set_parent_from_headers, traced_get,
+    context_env, current_context, current_context_env, extract_context, extract_context_from_env,
+    extract_grpc_context, inject_context_headers, inject_grpc_metadata, inject_headers,
+    mark_span_error, set_parent_from, set_parent_from_env, set_parent_from_grpc,
+    set_parent_from_grpc_metadata, set_parent_from_headers, stamp_business_baggage, traced_get,
+    with_business_baggage,
 };
 
+use axum::{
+    extract::{MatchedPath, Request},
+    middleware::Next,
+    response::Response,
+};
 use opentelemetry::logs::{AnyValue, LogRecord, Logger, LoggerProvider as _, Severity};
 use opentelemetry::propagation::TextMapCompositePropagator;
-use opentelemetry::trace::{Span as _, SpanBuilder, TracerProvider as _};
+use opentelemetry::trace::{Span as _, SpanBuilder, Status, TracerProvider as _};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
@@ -38,7 +46,8 @@ use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
+use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::filter_fn;
@@ -48,6 +57,83 @@ use tracing_subscriber::util::SubscriberInitExt;
 pub use semconv::TOKIO_RUNTIME_METRIC_NAMES;
 
 static EVENT_LOGGER: OnceLock<SdkLogger> = OnceLock::new();
+
+/// Opt-in telemetry for one nextest test process.
+///
+/// Set `PLAYGROUND_TEST_TELEMETRY=1` when invoking nextest. The helper uses a
+/// simple exporter and an explicit shutdown because a failing libtest process
+/// may exit before batch processors can flush. Keep the returned value alive
+/// for the test and use [`TestTelemetry::enter`] around the test body.
+pub struct TestTelemetry {
+    tracer_provider: SdkTracerProvider,
+    dispatch: tracing::Dispatch,
+    parent_context: opentelemetry::Context,
+}
+
+/// Scoped test telemetry state installed by [`TestTelemetry::enter`].
+///
+/// The dispatcher must outlive the OpenTelemetry context guard: spans created
+/// while the propagated parent is attached are routed through that dispatcher.
+pub struct TestTelemetryGuard {
+    _dispatch: tracing::dispatcher::DefaultGuard,
+    _parent: opentelemetry::context::ContextGuard,
+}
+
+impl TestTelemetry {
+    /// Makes the test's `tracing` spans children of the propagated test context.
+    pub fn enter(&self) -> TestTelemetryGuard {
+        let dispatch = tracing::dispatcher::set_default(&self.dispatch);
+        let parent = self.parent_context.clone().attach();
+        TestTelemetryGuard {
+            _dispatch: dispatch,
+            _parent: parent,
+        }
+    }
+
+    /// Flushes the simple exporter before the test process exits.
+    pub fn shutdown(self) {
+        let _ = self.tracer_provider.shutdown();
+    }
+}
+
+/// Initializes a per-process test tracer when explicitly requested.
+///
+/// `TRACEPARENT` is extracted into the current context by the existing
+/// propagator helpers, so test code can stitch outbound HTTP/gRPC spans below
+/// its runner-provided test root. No telemetry is installed by default.
+pub fn init_test_telemetry(service: &'static str) -> anyhow::Result<Option<TestTelemetry>> {
+    if !test_telemetry_enabled(std::env::var("PLAYGROUND_TEST_TELEMETRY").ok().as_deref()) {
+        return Ok(None);
+    }
+    global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
+        Box::new(TraceContextPropagator::new()),
+        Box::new(BaggagePropagator::new()),
+    ]));
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .build()?;
+    let provider = SdkTracerProvider::builder()
+        .with_resource(
+            Resource::builder()
+                .with_attributes(resource_attributes(service))
+                .build(),
+        )
+        .with_simple_exporter(exporter)
+        .build();
+    global::set_tracer_provider(provider.clone());
+    let subscriber = tracing_subscriber::registry()
+        .with(tracing_opentelemetry::layer().with_tracer(provider.tracer(service)));
+    let parent_context = extract_context_from_env();
+    Ok(Some(TestTelemetry {
+        tracer_provider: provider,
+        dispatch: tracing::Dispatch::new(subscriber),
+        parent_context,
+    }))
+}
+
+fn test_telemetry_enabled(value: Option<&str>) -> bool {
+    value == Some("1")
+}
 
 pub fn db_span(
     operation_name: &'static str,
@@ -67,6 +153,55 @@ pub fn db_span(
         "server.address" = "postgres",
         "server.port" = 5432_i64,
     )
+}
+
+/// Axum middleware for stable HTTP semantic conventions and RED metrics.
+///
+/// Apply with `Router::layer(axum::middleware::from_fn(http_server_observability))`
+/// after declaring routes, so `MatchedPath` resolves to the stable route rather
+/// than a cardinality-unbounded request URI.
+pub async fn http_server_observability(request: Request, next: Next) -> Response {
+    let method = request.method().as_str().to_owned();
+    let path = request.uri().path().to_owned();
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or_else(|| path.clone(), |matched| matched.as_str().to_owned());
+    let span = tracing::info_span!(
+        "http.server.request",
+        otel.kind = semconv::SPAN_KIND_SERVER,
+        http.request.method = %method,
+        http.route = %route,
+        url.path = %path,
+        http.response.status_code = tracing::field::Empty,
+        error.type = tracing::field::Empty,
+    );
+    set_parent_from_headers(&span, request.headers());
+    let started = Instant::now();
+    let response = next.run(request).instrument(span.clone()).await;
+    let status = response.status().as_u16();
+    span.record("http.response.status_code", i64::from(status));
+    if let Some(error_type) = http_server_error_type(status) {
+        span.record(semconv::ERROR_TYPE, error_type);
+        span.set_status(Status::error(error_type));
+    }
+    global::meter("playground.http")
+        .f64_histogram(semconv::HTTP_SERVER_REQUEST_DURATION)
+        .with_unit("s")
+        .build()
+        .record(
+            started.elapsed().as_secs_f64(),
+            &[
+                KeyValue::new(semconv::HTTP_REQUEST_METHOD, method),
+                KeyValue::new(semconv::HTTP_ROUTE, route),
+                KeyValue::new(semconv::HTTP_RESPONSE_STATUS_CODE, i64::from(status)),
+            ],
+        );
+    response
+}
+
+fn http_server_error_type(status: u16) -> Option<&'static str> {
+    (status >= 500).then_some("http.server.error")
 }
 
 /// Emit a typed OTel log event (EventName set) on the shared logs pipeline,
@@ -173,7 +308,7 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
     global::set_tracer_provider(tracer_provider.clone());
     let tracer = tracer_provider.tracer(service);
 
-    // --- Metrics --- (Counter/Histogram emitted from `tracing` fields by MetricsLayer)
+    // --- Metrics --- (explicit SDK counters, gauges, and histograms)
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .build()?;
@@ -228,9 +363,6 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
         .with(filter)
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_opentelemetry::layer().with_tracer(tracer))
-        .with(tracing_opentelemetry::MetricsLayer::new(
-            meter_provider.clone(),
-        ))
         .with(log_layer)
         .with(sentry_tracing::layer())
         .init();
@@ -379,7 +511,7 @@ fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
         attributes.push(KeyValue::new(semconv::PARALLAX_RUN_ID, run_id));
     }
     if let Some(git_sha) = non_empty_env("GIT_SHA") {
-        attributes.push(KeyValue::new("vcs.ref.head.revision", git_sha));
+        attributes.push(KeyValue::new(semconv::VCS_REF_HEAD_REVISION, git_sha));
     }
     attributes
 }
@@ -431,8 +563,18 @@ fn non_empty_env(name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::trace::{
+        SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
+    };
     use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord, SdkLoggerProvider};
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn http_server_errors_follow_otel_server_status_rules() {
+        assert_eq!(http_server_error_type(499), None);
+        assert_eq!(http_server_error_type(500), Some("http.server.error"));
+        assert_eq!(http_server_error_type(599), Some("http.server.error"));
+    }
 
     #[derive(Debug, Clone, Default)]
     struct CaptureLogExporter {
@@ -565,6 +707,46 @@ mod tests {
             sample_ratio_from(Some("1.1")),
             SampleRatioSetting::Invalid
         ));
+    }
+
+    #[test]
+    fn test_telemetry_requires_explicit_opt_in() {
+        assert!(!test_telemetry_enabled(None));
+        assert!(!test_telemetry_enabled(Some("true")));
+        assert!(test_telemetry_enabled(Some("1")));
+    }
+
+    #[test]
+    fn test_telemetry_scope_attaches_the_propagated_parent() {
+        let trace_id =
+            TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").expect("valid trace ID");
+        let parent_context =
+            opentelemetry::Context::new().with_remote_span_context(SpanContext::new(
+                trace_id,
+                SpanId::from_hex("00f067aa0ba902b7").expect("valid span ID"),
+                TraceFlags::SAMPLED,
+                true,
+                TraceState::default(),
+            ));
+        let provider = SdkTracerProvider::builder().build();
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_opentelemetry::layer().with_tracer(provider.tracer("test")));
+        let telemetry = TestTelemetry {
+            tracer_provider: provider,
+            dispatch: tracing::Dispatch::new(subscriber),
+            parent_context,
+        };
+
+        let scope = telemetry.enter();
+        assert_eq!(
+            opentelemetry::Context::current()
+                .span()
+                .span_context()
+                .trace_id(),
+            trace_id
+        );
+        drop(scope);
+        telemetry.shutdown();
     }
 
     #[test]

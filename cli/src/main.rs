@@ -7,6 +7,12 @@
 //!   playground enter      child/container side of the execution-stack sim
 //! Flushes telemetry on exit (short-lived discipline).
 
+mod test_report;
+mod test_verify;
+
+use std::path::Path;
+use std::process::Command as ProcessCommand;
+
 use tokio::process::Command;
 use tracing::Instrument;
 
@@ -22,8 +28,22 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let telemetry = playground_telemetry::init("playground-cli")?;
+    // The report converter is useful as a local JUnit reconciliation tool as
+    // well as a live OTLP producer. Avoid the SDK's implicit localhost exporter
+    // when no collector was requested; `parallax run start` supplies the
+    // endpoint for the observable path.
+    let telemetry = if matches!(mode.as_str(), "test-report" | "test-verify")
+        && std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+            .ok()
+            .is_none_or(|endpoint| endpoint.trim().is_empty())
+    {
+        None
+    } else {
+        Some(playground_telemetry::init("playground-cli")?)
+    };
     let result = match mode.as_str() {
+        "test-report" => test_report_command(&rest),
+        "test-verify" => test_verify_command(&rest).await,
         "cron" => cron(rest).await,
         "daemon" => daemon(rest).await,
         "enter" => enter(rest).await,
@@ -37,8 +57,40 @@ async fn main() -> anyhow::Result<()> {
             1
         }
     };
-    telemetry.shutdown(); // flush before exit
+    if let Some(telemetry) = telemetry {
+        telemetry.shutdown(); // flush before exit
+    }
     std::process::exit(code);
+}
+
+async fn test_verify_command(args: &[String]) -> anyhow::Result<i32> {
+    let [run_id, stack, rest @ ..] = args else {
+        return Err(anyhow::anyhow!(
+            "usage: playground test-verify <run-id> <rust|java|web> [parallax-api-url]"
+        ));
+    };
+    let api_url = rest
+        .first()
+        .map(String::as_str)
+        .unwrap_or("http://127.0.0.1:4000");
+    let summary = test_verify::verify(api_url, run_id, stack).await?;
+    println!(
+        "verified {stack} observable run {run_id}: {} traces, {} test attempts, {} app descendants",
+        summary.traces, summary.test_attempts, summary.app_descendants
+    );
+    Ok(0)
+}
+
+fn test_report_command(args: &[String]) -> anyhow::Result<i32> {
+    let Some(path) = args.first() else {
+        return Err(anyhow::anyhow!("usage: playground test-report <junit.xml>"));
+    };
+    let summary = test_report::emit(Path::new(path))?;
+    println!(
+        "reported {} test attempts ({} passed, {} failed, {} errors)",
+        summary.total, summary.passed, summary.failed, summary.errors
+    );
+    Ok(if summary.final_failures == 0 { 0 } else { 1 })
 }
 
 #[tracing::instrument(fields(otel.kind = semconv::SPAN_KIND_CLIENT))]
@@ -78,31 +130,16 @@ async fn daemon_session(session: String, run_id: String, orphan: bool) -> anyhow
         orphan
     );
     async move {
-        let mut child = Command::new(std::env::current_exe()?);
-        child.arg("enter").arg("--session").arg(&session);
-        child.env("PARALLAX_RUN_ID", &run_id);
-        child.env(
-            "OTEL_RESOURCE_ATTRIBUTES",
-            resource_attrs_with_run_id(&run_id),
+        let carrier = playground_telemetry::current_context_env();
+        let child = execution_child_command(
+            &std::env::current_exe()?,
+            &session,
+            &run_id,
+            orphan,
+            &carrier,
+            std::env::var("OTEL_RESOURCE_ATTRIBUTES").ok().as_deref(),
         );
-        if orphan {
-            child.arg("--orphan");
-            child.env_remove("TRACEPARENT");
-            child.env_remove("TRACESTATE");
-            child.env_remove("BAGGAGE");
-        } else {
-            for (key, value) in playground_telemetry::current_context_env() {
-                child.env(key, value);
-            }
-            child.env(
-                "BAGGAGE",
-                format!(
-                    "{}={session},{}={run_id}",
-                    semconv::PARALLAX_SESSION_ID,
-                    semconv::PARALLAX_RUN_ID
-                ),
-            );
-        }
+        let mut child = Command::from(child);
 
         tracing::info!(%session, %run_id, orphan, "spawning execution child");
         let status = child.status().await?;
@@ -115,6 +152,42 @@ async fn daemon_session(session: String, run_id: String, orphan: bool) -> anyhow
     }
     .instrument(span)
     .await
+}
+
+fn execution_child_command(
+    executable: &Path,
+    session: &str,
+    run_id: &str,
+    orphan: bool,
+    carrier: &[(String, String)],
+    resource_attributes: Option<&str>,
+) -> ProcessCommand {
+    let mut child = ProcessCommand::new(executable);
+    child.arg("enter").arg("--session").arg(session);
+    child.env("PARALLAX_RUN_ID", run_id);
+    child.env(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        resource_attrs_with_run_id_from(resource_attributes, run_id),
+    );
+    if orphan {
+        child.arg("--orphan");
+        child.env_remove("TRACEPARENT");
+        child.env_remove("TRACESTATE");
+        child.env_remove("BAGGAGE");
+    } else {
+        for (key, value) in carrier {
+            child.env(key, value);
+        }
+        child.env(
+            "BAGGAGE",
+            format!(
+                "{}={session},{}={run_id}",
+                semconv::PARALLAX_SESSION_ID,
+                semconv::PARALLAX_RUN_ID
+            ),
+        );
+    }
+    child
 }
 
 async fn enter(args: Vec<String>) -> anyhow::Result<i32> {
@@ -308,18 +381,136 @@ fn run_id(session: &str) -> String {
     std::env::var("PARALLAX_RUN_ID").unwrap_or_else(|_| session.to_string())
 }
 
-fn resource_attrs_with_run_id(run_id: &str) -> String {
-    let existing = std::env::var("OTEL_RESOURCE_ATTRIBUTES").unwrap_or_default();
+fn resource_attrs_with_run_id_from(existing: Option<&str>, run_id: &str) -> String {
+    let existing = existing.unwrap_or_default();
     if existing
         .split(',')
         .filter_map(|item| item.split_once('='))
         .any(|(key, _)| key.trim() == semconv::PARALLAX_RUN_ID)
     {
-        return existing;
+        return existing.to_owned();
     }
     if existing.trim().is_empty() {
         format!("{}={run_id}", semconv::PARALLAX_RUN_ID)
     } else {
         format!("{existing},{}={run_id}", semconv::PARALLAX_RUN_ID)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::ffi::OsString;
+    use std::path::Path;
+
+    use super::{CronOutcome, cron_once, execution_child_command, resource_attrs_with_run_id_from};
+
+    #[tokio::test]
+    async fn cron_outcomes_preserve_process_exit_contract() {
+        assert_eq!(
+            cron_once(CronOutcome::Ok, "test-ok", 0)
+                .await
+                .expect("ok cron"),
+            0
+        );
+        assert_eq!(
+            cron_once(CronOutcome::Fail, "test-fail", 0)
+                .await
+                .expect("fail cron"),
+            1
+        );
+    }
+
+    #[test]
+    fn resource_attributes_add_run_id_once() {
+        assert_eq!(
+            resource_attrs_with_run_id_from(None, "run-a"),
+            "parallax.run.id=run-a"
+        );
+        assert_eq!(
+            resource_attrs_with_run_id_from(Some("service.name=cli"), "run-a"),
+            "service.name=cli,parallax.run.id=run-a"
+        );
+        assert_eq!(
+            resource_attrs_with_run_id_from(Some("parallax.run.id=existing"), "run-a"),
+            "parallax.run.id=existing"
+        );
+    }
+
+    #[test]
+    fn execution_child_propagates_or_removes_the_process_carrier() {
+        let carrier = vec![
+            ("TRACEPARENT".to_owned(), "00-abc-def-01".to_owned()),
+            ("TRACESTATE".to_owned(), "vendor=value".to_owned()),
+        ];
+        let linked = execution_child_command(
+            Path::new("playground"),
+            "session-a",
+            "run-a",
+            false,
+            &carrier,
+            Some("service.name=cli"),
+        );
+        let linked_env = linked
+            .get_envs()
+            .map(|(key, value)| (key.to_owned(), value.map(ToOwned::to_owned)))
+            .collect::<HashMap<OsString, Option<OsString>>>();
+        assert_eq!(
+            linked_env.get(&OsString::from("TRACEPARENT")),
+            Some(&Some(OsString::from("00-abc-def-01")))
+        );
+        assert_eq!(
+            linked_env.get(&OsString::from("OTEL_RESOURCE_ATTRIBUTES")),
+            Some(&Some(OsString::from(
+                "service.name=cli,parallax.run.id=run-a"
+            )))
+        );
+        assert_eq!(
+            linked_env.get(&OsString::from("BAGGAGE")),
+            Some(&Some(OsString::from(
+                "parallax.session.id=session-a,parallax.run.id=run-a"
+            )))
+        );
+
+        let orphan = execution_child_command(
+            Path::new("playground"),
+            "session-a",
+            "run-a",
+            true,
+            &carrier,
+            None,
+        );
+        let orphan_env = orphan
+            .get_envs()
+            .map(|(key, value)| (key.to_owned(), value.map(ToOwned::to_owned)))
+            .collect::<HashMap<OsString, Option<OsString>>>();
+        assert_eq!(orphan_env.get(&OsString::from("TRACEPARENT")), Some(&None));
+        assert_eq!(orphan_env.get(&OsString::from("TRACESTATE")), Some(&None));
+        assert_eq!(orphan_env.get(&OsString::from("BAGGAGE")), Some(&None));
+    }
+
+    fn w4_acceptance_attempt() -> u32 {
+        if std::env::var("PLAYGROUND_TEST_FLAKY_FIXTURE").as_deref() != Ok("1") {
+            return 2;
+        }
+        std::env::var("NEXTEST_ATTEMPT")
+            .expect("W4 acceptance fixtures require cargo-nextest")
+            .parse()
+            .expect("NEXTEST_ATTEMPT must be a positive integer")
+    }
+
+    #[test]
+    fn w4_assertion_failure_passes_on_retry() {
+        assert!(
+            w4_acceptance_attempt() > 1,
+            "intentional first-attempt assertion failure"
+        );
+    }
+
+    #[test]
+    fn w4_harness_error_passes_on_retry() {
+        if w4_acceptance_attempt() == 1 {
+            std::process::abort();
+        }
     }
 }

@@ -1,8 +1,9 @@
 use crate::semconv;
 use http::HeaderMap;
+use opentelemetry::baggage::BaggageExt;
 use opentelemetry::propagation::{Extractor, Injector};
 use opentelemetry::trace::{Status, TraceContextExt};
-use opentelemetry::{Context, global};
+use opentelemetry::{Context, KeyValue, global};
 use opentelemetry_http::{HeaderExtractor, HeaderInjector};
 use std::collections::BTreeMap;
 use tonic::metadata::{Ascii, KeyRef, MetadataKey, MetadataMap};
@@ -20,6 +21,15 @@ pub fn set_parent_from_headers(span: &tracing::Span, headers: &HeaderMap) {
     set_parent_if_valid(span, extract_context(headers));
 }
 
+/// Copies the A10 business baggage into a server span for backend inspection.
+pub fn stamp_business_baggage(span: &tracing::Span, context: &Context) {
+    for key in [semconv::TENANT_ID, semconv::USER_TIER] {
+        if let Some(value) = context.baggage().get(key) {
+            span.set_attribute(key, value.to_string());
+        }
+    }
+}
+
 pub fn inject_context_headers(context: &Context, headers: &mut HeaderMap) {
     global::get_text_map_propagator(|propagator| {
         propagator.inject_context(context, &mut HeaderInjector(headers));
@@ -27,12 +37,36 @@ pub fn inject_context_headers(context: &Context, headers: &mut HeaderMap) {
 }
 
 pub fn inject_headers(headers: &mut HeaderMap) {
-    inject_context_headers(&tracing::Span::current().context(), headers);
+    inject_context_headers(&current_context(), headers);
+}
+
+/// Combine the current tracing span with W3C baggage attached to this task.
+#[must_use]
+pub fn current_context() -> Context {
+    let baggage = Context::current()
+        .baggage()
+        .iter()
+        .map(|(key, (value, _))| KeyValue::new(key.clone(), value.clone()))
+        .collect::<Vec<_>>();
+    tracing::Span::current().context().with_baggage(baggage)
+}
+
+/// Add the business context used by the A10 propagation scenario.
+#[must_use]
+pub fn with_business_baggage(context: &Context, tenant: &str, tier: &str) -> Context {
+    context.with_baggage([
+        KeyValue::new(semconv::TENANT_ID, tenant.to_owned()),
+        KeyValue::new(semconv::USER_TIER, tier.to_owned()),
+    ])
 }
 
 pub fn extract_context_from_env() -> Context {
     let carrier = EnvExtractor::from_env();
-    global::get_text_map_propagator(|propagator| propagator.extract(&carrier))
+    extract_env_context(&carrier)
+}
+
+fn extract_env_context(carrier: &EnvExtractor) -> Context {
+    global::get_text_map_propagator(|propagator| propagator.extract(carrier))
 }
 
 pub fn set_parent_from_env(span: &tracing::Span) {
@@ -159,21 +193,19 @@ fn env_key(key: &str) -> Option<&'static str> {
 }
 
 pub fn set_parent_from_grpc(metadata: &MetadataMap) {
-    let parent = global::get_text_map_propagator(|propagator| {
-        propagator.extract(&MetadataExtractor(metadata))
-    });
-    set_parent_if_valid(&tracing::Span::current(), parent);
+    set_parent_if_valid(&tracing::Span::current(), extract_grpc_context(metadata));
 }
 
 pub fn set_parent_from_grpc_metadata(span: &tracing::Span, metadata: &MetadataMap) {
-    let parent = global::get_text_map_propagator(|propagator| {
-        propagator.extract(&MetadataExtractor(metadata))
-    });
-    set_parent_if_valid(span, parent);
+    set_parent_if_valid(span, extract_grpc_context(metadata));
+}
+
+pub fn extract_grpc_context(metadata: &MetadataMap) -> Context {
+    global::get_text_map_propagator(|propagator| propagator.extract(&MetadataExtractor(metadata)))
 }
 
 pub fn inject_grpc_metadata(metadata: &mut MetadataMap) {
-    let context = tracing::Span::current().context();
+    let context = current_context();
     global::get_text_map_propagator(|propagator| {
         propagator.inject_context(&context, &mut MetadataInjector(metadata));
     });
@@ -195,10 +227,19 @@ fn set_parent_if_valid(span: &tracing::Span, parent: Context) {
 mod tests {
     use super::*;
     use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
-    use opentelemetry_sdk::propagation::TraceContextPropagator;
+    use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    fn propagator_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("propagator lock")
+    }
 
     #[test]
     fn http_headers_round_trip_trace_context() {
+        let _guard = propagator_lock();
         global::set_text_map_propagator(TraceContextPropagator::new());
         let trace_id = TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").expect("trace id");
         let span_context = SpanContext::new(
@@ -219,6 +260,7 @@ mod tests {
 
     #[test]
     fn env_carrier_injects_trace_context_names() {
+        let _guard = propagator_lock();
         global::set_text_map_propagator(TraceContextPropagator::new());
         let trace_id = TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").expect("trace id");
         let span_context = SpanContext::new(
@@ -233,5 +275,62 @@ mod tests {
 
         assert!(vars.iter().any(|(key, _)| key == "TRACEPARENT"));
         assert!(vars.iter().all(|(key, _)| key == &key.to_ascii_uppercase()));
+    }
+
+    #[test]
+    fn env_carrier_extracts_trace_context() {
+        let _guard = propagator_lock();
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        let trace_id = TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").expect("trace id");
+        let carrier = EnvExtractor {
+            values: BTreeMap::from([(
+                "TRACEPARENT",
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_owned(),
+            )]),
+        };
+        assert_eq!(
+            extract_env_context(&carrier)
+                .span()
+                .span_context()
+                .trace_id(),
+            trace_id
+        );
+    }
+
+    #[test]
+    fn business_baggage_round_trips_through_http_headers() -> Result<(), String> {
+        let _guard = propagator_lock();
+        global::set_text_map_propagator(
+            opentelemetry::propagation::TextMapCompositePropagator::new(vec![
+                Box::new(TraceContextPropagator::new()),
+                Box::new(BaggagePropagator::new()),
+            ]),
+        );
+        let context = with_business_baggage(&Context::new(), "tenant-a", "pro");
+        let mut headers = HeaderMap::new();
+        inject_context_headers(&context, &mut headers);
+        let baggage = headers
+            .get("baggage")
+            .and_then(|value| value.to_str().ok())
+            .ok_or("baggage header missing")?;
+        let extracted = extract_context(&headers);
+        let expected_header_members = ["tenant.id=tenant-a", "user.tier=pro"];
+        let actual = (
+            expected_header_members
+                .iter()
+                .all(|member| baggage.split(',').any(|actual| actual == *member)),
+            extracted
+                .baggage()
+                .get(semconv::TENANT_ID)
+                .map(ToString::to_string),
+            extracted
+                .baggage()
+                .get(semconv::USER_TIER)
+                .map(ToString::to_string),
+        );
+        if actual != (true, Some("tenant-a".to_string()), Some("pro".to_string())) {
+            return Err(format!("baggage propagation mismatch: {actual:?}"));
+        }
+        Ok(())
     }
 }

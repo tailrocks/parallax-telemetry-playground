@@ -1,26 +1,68 @@
-// Spring Boot + GraphQL catalog service. Instrumented zero-code by the Sentry
-// OpenTelemetry agent (run with -javaagent:sentry-opentelemetry-agent.jar and
-// SENTRY_AUTO_INIT=false); the Sentry Spring Boot starter inits the SDK.
+// Spring Boot + GraphQL catalog service. The upstream OpenTelemetry Java agent
+// preserves OTLP fan-out while the Sentry Spring Boot starter owns Sentry SDK
+// envelopes and exception capture.
 plugins {
     java
     id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
+    id("com.atkinsondev.opentelemetry-build") version "4.6.2"
     // id("io.sentry.jvm.gradle") version "5.0.0" // source context upload
 }
 group = "dev.tailrocks"; version = "0.1.0"
 java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+sourceSets { main { java { srcDir("../semconv/src/main/java") } } }
 repositories { mavenCentral() }
+val otelJavaAgent = configurations.create("otelJavaAgent")
+val testOtelEndpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")?.takeIf(String::isNotBlank)
+val testResourceAttributes = listOfNotNull(
+    System.getenv("OTEL_RESOURCE_ATTRIBUTES")?.takeIf(String::isNotBlank),
+    "service.version=$version",
+    "vcs.ref.head.revision=${System.getenv("GITHUB_SHA") ?: "local"}",
+    "test.configuration.os=${System.getProperty("os.name")}",
+    "test.configuration.environment=${System.getenv("PARALLAX_TEST_ENVIRONMENT") ?: "local"}",
+).joinToString(",")
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-graphql")
     implementation("org.springframework.boot:spring-boot-starter-web")
     // A7: GraphQL-over-WebSocket transport for the priceChanges subscription.
     implementation("org.springframework.boot:spring-boot-starter-websocket")
+    implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    // Sentry is initialized by the sentry-opentelemetry javaagent. The Sentry
-    // Spring Boot starter 8.44 is incompatible with Spring Boot 4.x (references
-    // the relocated org.springframework.boot.web.client.RestClientCustomizer),
-    // so it is intentionally omitted; the agent owns OTel + Sentry init.
+    implementation("io.sentry:sentry-spring-boot-starter-jakarta:8.46.0")
     implementation("dev.openfeature:sdk:1.21.0")
     implementation("dev.openfeature.contrib.providers:flagd:0.14.0")
     implementation("io.opentelemetry:opentelemetry-api")
+    compileOnly("org.junit.jupiter:junit-jupiter-api")
+    runtimeOnly("org.postgresql:postgresql")
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.boot:spring-boot-micrometer-tracing-test")
+    testImplementation("org.springframework.boot:spring-boot-graphql-test")
+    testImplementation("org.springframework.graphql:spring-graphql-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-webflux")
+    // Keep test traces on the same upstream agent path as the deployed JVM.
+    add(otelJavaAgent.name, "io.opentelemetry.javaagent:opentelemetry-javaagent:2.29.0")
+}
+openTelemetryBuild {
+    endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") ?: "http://rotel:4317"
+    serviceName = "catalog-tests"
+    customTags = mapOf("parallax.run.id" to (System.getenv("PARALLAX_RUN_ID") ?: ""))
+    taskTraceEnvironmentEnabled = true
+}
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+    reports.junitXml.mergeReruns.set(true)
+    inputs.files(otelJavaAgent)
+    jvmArgs("-javaagent:${otelJavaAgent.singleFile.absolutePath}")
+    environment("PARALLAX_RUN_ID", System.getenv("PARALLAX_RUN_ID") ?: "")
+    environment("PARALLAX_TEST_ID", System.getenv("PARALLAX_TEST_ID") ?: "")
+    environment("PARALLAX_TEST_ENVIRONMENT", System.getenv("PARALLAX_TEST_ENVIRONMENT") ?: "local")
+    environment("TRACEPARENT", System.getenv("TRACEPARENT") ?: "")
+    environment("OTEL_RESOURCE_ATTRIBUTES", testResourceAttributes)
+    if (testOtelEndpoint == null) {
+        environment("OTEL_TRACES_EXPORTER", "none")
+        environment("OTEL_METRICS_EXPORTER", "none")
+        environment("OTEL_LOGS_EXPORTER", "none")
+    } else {
+        environment("OTEL_EXPORTER_OTLP_ENDPOINT", testOtelEndpoint)
+    }
 }

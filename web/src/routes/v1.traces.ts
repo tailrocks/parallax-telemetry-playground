@@ -9,7 +9,7 @@ import { createFileRoute } from "@tanstack/react-router";
 // `/v1/traces`). Defaults: in Docker the web server reaches Rotel at
 // `http://rotel:4318`; for host dev, `http://localhost:4318`.
 const rotelBase =
-  process.env.ROTEL_OTLP_HTTP_ENDPOINT?.replace(/\/+$/, "") ??
+  process.env["ROTEL_OTLP_HTTP_ENDPOINT"]?.replace(/\/+$/, "") ??
   "http://localhost:4318";
 
 export const Route = createFileRoute("/v1/traces")({

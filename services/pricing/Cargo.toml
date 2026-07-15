@@ -12,3 +12,6 @@ tokio = { workspace = true }
 tonic = { workspace = true }
 tokio-stream = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true }

@@ -12,7 +12,7 @@ function Home() {
   const [out, setOut] = useState("start a browser journey");
 
   async function breakRum() {
-    const base = import.meta.env.VITE_CHECKOUT_URL ?? "http://localhost:8088";
+    const base = import.meta.env["VITE_CHECKOUT_URL"] ?? "http://localhost:8088";
     try {
       await runTracedStep(
         UI_CLICK,

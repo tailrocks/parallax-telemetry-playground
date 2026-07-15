@@ -1,0 +1,840 @@
+{
+  "schema_version": 1,
+  "constants": [
+    {
+      "id": "service.name",
+      "rust": "SERVICE_NAME",
+      "typescript": "SERVICE_NAME",
+      "java": "SERVICE_NAME",
+      "value": "service.name",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "service.namespace",
+      "rust": "SERVICE_NAMESPACE",
+      "typescript": "SERVICE_NAMESPACE",
+      "java": "SERVICE_NAMESPACE",
+      "value": "service.namespace",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "service.instance.id",
+      "rust": "SERVICE_INSTANCE_ID",
+      "typescript": "SERVICE_INSTANCE_ID",
+      "java": "SERVICE_INSTANCE_ID",
+      "value": "service.instance.id",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "service.version",
+      "rust": "SERVICE_VERSION",
+      "typescript": "SERVICE_VERSION",
+      "java": "SERVICE_VERSION",
+      "value": "service.version",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "vcs.ref.head.revision",
+      "rust": "VCS_REF_HEAD_REVISION",
+      "typescript": "VCS_REF_HEAD_REVISION",
+      "java": "VCS_REF_HEAD_REVISION",
+      "value": "vcs.ref.head.revision",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "deployment.environment.name",
+      "rust": "DEPLOYMENT_ENVIRONMENT_NAME",
+      "typescript": "DEPLOYMENT_ENVIRONMENT_NAME",
+      "java": "DEPLOYMENT_ENVIRONMENT_NAME",
+      "value": "deployment.environment.name",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "event.name",
+      "rust": "EVENT_NAME",
+      "typescript": "EVENT_NAME",
+      "java": "EVENT_NAME",
+      "value": "event.name",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "error.type",
+      "rust": "ERROR_TYPE",
+      "typescript": "ERROR_TYPE",
+      "java": "ERROR_TYPE",
+      "value": "error.type",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "parallax.run.id",
+      "rust": "PARALLAX_RUN_ID",
+      "typescript": "PARALLAX_RUN_ID",
+      "java": "PARALLAX_RUN_ID",
+      "value": "parallax.run.id",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "http.request.method",
+      "rust": "HTTP_REQUEST_METHOD",
+      "typescript": "HTTP_REQUEST_METHOD",
+      "java": "HTTP_REQUEST_METHOD",
+      "value": "http.request.method",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "http.route",
+      "rust": "HTTP_ROUTE",
+      "typescript": "HTTP_ROUTE",
+      "java": "HTTP_ROUTE",
+      "value": "http.route",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "http.response.status_code",
+      "rust": "HTTP_RESPONSE_STATUS_CODE",
+      "typescript": "HTTP_RESPONSE_STATUS_CODE",
+      "java": "HTTP_RESPONSE_STATUS_CODE",
+      "value": "http.response.status_code",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "url.path",
+      "rust": "URL_PATH",
+      "typescript": "URL_PATH",
+      "java": "URL_PATH",
+      "value": "url.path",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "http.server.request.duration",
+      "rust": "HTTP_SERVER_REQUEST_DURATION",
+      "typescript": "HTTP_SERVER_REQUEST_DURATION",
+      "java": "HTTP_SERVER_REQUEST_DURATION",
+      "value": "http.server.request.duration",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "messaging.system",
+      "rust": "MESSAGING_SYSTEM",
+      "typescript": "MESSAGING_SYSTEM",
+      "java": "MESSAGING_SYSTEM",
+      "value": "messaging.system",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "messaging.destination.name",
+      "rust": "MESSAGING_DESTINATION_NAME",
+      "typescript": "MESSAGING_DESTINATION_NAME",
+      "java": "MESSAGING_DESTINATION_NAME",
+      "value": "messaging.destination.name",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "messaging.operation.name",
+      "rust": "MESSAGING_OPERATION_NAME",
+      "typescript": "MESSAGING_OPERATION_NAME",
+      "java": "MESSAGING_OPERATION_NAME",
+      "value": "messaging.operation.name",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "messaging.operation.type",
+      "rust": "MESSAGING_OPERATION_TYPE",
+      "typescript": "MESSAGING_OPERATION_TYPE",
+      "java": "MESSAGING_OPERATION_TYPE",
+      "value": "messaging.operation.type",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "messaging.message.id",
+      "rust": "MESSAGING_MESSAGE_ID",
+      "typescript": "MESSAGING_MESSAGE_ID",
+      "java": "MESSAGING_MESSAGE_ID",
+      "value": "messaging.message.id",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "playground.namespace",
+      "rust": "PLAYGROUND_NAMESPACE",
+      "typescript": "PLAYGROUND_NAMESPACE",
+      "java": "PLAYGROUND_NAMESPACE",
+      "value": "playground",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "playground.default.environment",
+      "rust": "DEFAULT_ENVIRONMENT",
+      "typescript": "DEFAULT_ENVIRONMENT",
+      "java": "DEFAULT_ENVIRONMENT",
+      "value": "playground",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "session.id",
+      "rust": "SESSION_ID",
+      "typescript": "SESSION_ID",
+      "java": "SESSION_ID",
+      "value": "session.id",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "app.screen.name",
+      "rust": "APP_SCREEN_NAME",
+      "typescript": "APP_SCREEN_NAME",
+      "java": "APP_SCREEN_NAME",
+      "value": "app.screen.name",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "app.widget.name",
+      "rust": "APP_WIDGET_NAME",
+      "typescript": "APP_WIDGET_NAME",
+      "java": "APP_WIDGET_NAME",
+      "value": "app.widget.name",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "telemetry.propagation.disabled",
+      "rust": "TELEMETRY_PROPAGATION_DISABLED",
+      "typescript": "TELEMETRY_PROPAGATION_DISABLED",
+      "java": "TELEMETRY_PROPAGATION_DISABLED",
+      "value": "telemetry.propagation.disabled",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "otel.kind",
+      "rust": "OTEL_KIND",
+      "typescript": "OTEL_KIND",
+      "java": "OTEL_KIND",
+      "value": "otel.kind",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "span.kind.client",
+      "rust": "SPAN_KIND_CLIENT",
+      "typescript": "SPAN_KIND_CLIENT",
+      "java": "SPAN_KIND_CLIENT",
+      "value": "client",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "span.kind.server",
+      "rust": "SPAN_KIND_SERVER",
+      "typescript": "SPAN_KIND_SERVER",
+      "java": "SPAN_KIND_SERVER",
+      "value": "server",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "span.kind.internal",
+      "rust": "SPAN_KIND_INTERNAL",
+      "typescript": "SPAN_KIND_INTERNAL",
+      "java": "SPAN_KIND_INTERNAL",
+      "value": "internal",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "span.kind.producer",
+      "rust": "SPAN_KIND_PRODUCER",
+      "typescript": "SPAN_KIND_PRODUCER",
+      "java": "SPAN_KIND_PRODUCER",
+      "value": "producer",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "span.kind.consumer",
+      "rust": "SPAN_KIND_CONSUMER",
+      "typescript": "SPAN_KIND_CONSUMER",
+      "java": "SPAN_KIND_CONSUMER",
+      "value": "consumer",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "parallax.session.id",
+      "rust": "PARALLAX_SESSION_ID",
+      "typescript": "PARALLAX_SESSION_ID",
+      "java": "PARALLAX_SESSION_ID",
+      "value": "parallax.session.id",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "parallax.execution.layer",
+      "rust": "PARALLAX_EXECUTION_LAYER",
+      "typescript": "PARALLAX_EXECUTION_LAYER",
+      "java": "PARALLAX_EXECUTION_LAYER",
+      "value": "parallax.execution.layer",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "parallax.agent.id",
+      "rust": "PARALLAX_AGENT_ID",
+      "typescript": "PARALLAX_AGENT_ID",
+      "java": "PARALLAX_AGENT_ID",
+      "value": "parallax.agent.id",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "gen_ai.operation.name",
+      "rust": "GEN_AI_OPERATION_NAME",
+      "typescript": "GEN_AI_OPERATION_NAME",
+      "java": "GEN_AI_OPERATION_NAME",
+      "value": "gen_ai.operation.name",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "tool.name",
+      "rust": "TOOL_NAME",
+      "typescript": "TOOL_NAME",
+      "java": "TOOL_NAME",
+      "value": "tool.name",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "shell.command",
+      "rust": "SHELL_COMMAND",
+      "typescript": "SHELL_COMMAND",
+      "java": "SHELL_COMMAND",
+      "value": "shell.command",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "user.tier",
+      "rust": "USER_TIER",
+      "typescript": "USER_TIER",
+      "java": "USER_TIER",
+      "value": "user.tier",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "tenant.id",
+      "rust": "TENANT_ID",
+      "typescript": "TENANT_ID",
+      "java": "TENANT_ID",
+      "value": "tenant.id",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "graphql.operation.type",
+      "rust": "GRAPHQL_OPERATION_TYPE",
+      "typescript": "GRAPHQL_OPERATION_TYPE",
+      "java": "GRAPHQL_OPERATION_TYPE",
+      "value": "graphql.operation.type",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "graphql.operation.name",
+      "rust": "GRAPHQL_OPERATION_NAME",
+      "typescript": "GRAPHQL_OPERATION_NAME",
+      "java": "GRAPHQL_OPERATION_NAME",
+      "value": "graphql.operation.name",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "graphql.document",
+      "rust": "GRAPHQL_DOCUMENT",
+      "typescript": "GRAPHQL_DOCUMENT",
+      "java": "GRAPHQL_DOCUMENT",
+      "value": "graphql.document",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "graphql.field.name",
+      "rust": "GRAPHQL_FIELD_NAME",
+      "typescript": "GRAPHQL_FIELD_NAME",
+      "java": "GRAPHQL_FIELD_NAME",
+      "value": "graphql.field.name",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "graphql.field.path",
+      "rust": "GRAPHQL_FIELD_PATH",
+      "typescript": "GRAPHQL_FIELD_PATH",
+      "java": "GRAPHQL_FIELD_PATH",
+      "value": "graphql.field.path",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.name",
+      "rust": "TEST_CASE_NAME",
+      "typescript": "TEST_CASE_NAME",
+      "java": "TEST_CASE_NAME",
+      "value": "test.case.name",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.result.status",
+      "rust": "TEST_CASE_RESULT_STATUS",
+      "typescript": "TEST_CASE_RESULT_STATUS",
+      "java": "TEST_CASE_RESULT_STATUS",
+      "value": "test.case.result.status",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.result.status.pass",
+      "rust": "TEST_RESULT_STATUS_PASS",
+      "typescript": "TEST_RESULT_STATUS_PASS",
+      "java": "TEST_RESULT_STATUS_PASS",
+      "value": "pass",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.result.status.fail",
+      "rust": "TEST_RESULT_STATUS_FAIL",
+      "typescript": "TEST_RESULT_STATUS_FAIL",
+      "java": "TEST_RESULT_STATUS_FAIL",
+      "value": "fail",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.parameters",
+      "rust": "TEST_CASE_PARAMETERS",
+      "typescript": "TEST_CASE_PARAMETERS",
+      "java": "TEST_CASE_PARAMETERS",
+      "value": "test.case.parameters",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.failure.kind",
+      "rust": "TEST_CASE_FAILURE_KIND",
+      "typescript": "TEST_CASE_FAILURE_KIND",
+      "java": "TEST_CASE_FAILURE_KIND",
+      "value": "test.case.failure.kind",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.failure.kind.assertion",
+      "rust": "TEST_FAILURE_KIND_ASSERTION",
+      "typescript": "TEST_FAILURE_KIND_ASSERTION",
+      "java": "TEST_FAILURE_KIND_ASSERTION",
+      "value": "assertion_failure",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.case.failure.kind.harness",
+      "rust": "TEST_FAILURE_KIND_HARNESS",
+      "typescript": "TEST_FAILURE_KIND_HARNESS",
+      "java": "TEST_FAILURE_KIND_HARNESS",
+      "value": "harness_error",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.failure.event.name",
+      "rust": "TEST_FAILURE_EVENT_NAME",
+      "typescript": "TEST_FAILURE_EVENT_NAME",
+      "java": "TEST_FAILURE_EVENT_NAME",
+      "value": "test.failure",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.failure.message",
+      "rust": "TEST_FAILURE_MESSAGE",
+      "typescript": "TEST_FAILURE_MESSAGE",
+      "java": "TEST_FAILURE_MESSAGE",
+      "value": "test.failure.message",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.failure.stacktrace",
+      "rust": "TEST_FAILURE_STACKTRACE",
+      "typescript": "TEST_FAILURE_STACKTRACE",
+      "java": "TEST_FAILURE_STACKTRACE",
+      "value": "test.failure.stacktrace",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.attempt.ordinal",
+      "rust": "TEST_ATTEMPT_ORDINAL",
+      "typescript": "TEST_ATTEMPT_ORDINAL",
+      "java": "TEST_ATTEMPT_ORDINAL",
+      "value": "test.attempt.ordinal",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.attempt.id",
+      "rust": "TEST_ATTEMPT_ID",
+      "typescript": "TEST_ATTEMPT_ID",
+      "java": "TEST_ATTEMPT_ID",
+      "value": "test.attempt.id",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.attempt.total",
+      "rust": "TEST_ATTEMPT_TOTAL",
+      "typescript": "TEST_ATTEMPT_TOTAL",
+      "java": "TEST_ATTEMPT_TOTAL",
+      "value": "test.attempt.total",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.code_reference",
+      "rust": "TEST_CODE_REFERENCE",
+      "typescript": "TEST_CODE_REFERENCE",
+      "java": "TEST_CODE_REFERENCE",
+      "value": "test.code_reference",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.configuration.os",
+      "rust": "TEST_CONFIGURATION_OS",
+      "typescript": "TEST_CONFIGURATION_OS",
+      "java": "TEST_CONFIGURATION_OS",
+      "value": "test.configuration.os",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.configuration.environment",
+      "rust": "TEST_CONFIGURATION_ENVIRONMENT",
+      "typescript": "TEST_CONFIGURATION_ENVIRONMENT",
+      "java": "TEST_CONFIGURATION_ENVIRONMENT",
+      "value": "test.configuration.environment",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.configuration.browser",
+      "rust": "TEST_CONFIGURATION_BROWSER",
+      "typescript": "TEST_CONFIGURATION_BROWSER",
+      "java": "TEST_CONFIGURATION_BROWSER",
+      "value": "test.configuration.browser",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.artifact.path",
+      "rust": "TEST_ARTIFACT_PATH",
+      "typescript": "TEST_ARTIFACT_PATH",
+      "java": "TEST_ARTIFACT_PATH",
+      "value": "test.artifact.path",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.suite.name",
+      "rust": "TEST_SUITE_NAME",
+      "typescript": "TEST_SUITE_NAME",
+      "java": "TEST_SUITE_NAME",
+      "value": "test.suite.name",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "test.suite.run.status",
+      "rust": "TEST_SUITE_RUN_STATUS",
+      "typescript": "TEST_SUITE_RUN_STATUS",
+      "java": "TEST_SUITE_RUN_STATUS",
+      "value": "test.suite.run.status",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "cicd.pipeline.run.id",
+      "rust": "CICD_PIPELINE_RUN_ID",
+      "typescript": "CICD_PIPELINE_RUN_ID",
+      "java": "CICD_PIPELINE_RUN_ID",
+      "value": "cicd.pipeline.run.id",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "cicd.pipeline.task.type",
+      "rust": "CICD_PIPELINE_TASK_TYPE",
+      "typescript": "CICD_PIPELINE_TASK_TYPE",
+      "java": "CICD_PIPELINE_TASK_TYPE",
+      "value": "cicd.pipeline.task.type",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "parallax.test.id",
+      "rust": "PARALLAX_TEST_ID",
+      "typescript": "PARALLAX_TEST_ID",
+      "java": "PARALLAX_TEST_ID",
+      "value": "parallax.test.id",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "canary.email",
+      "rust": "CANARY_EMAIL",
+      "typescript": "CANARY_EMAIL",
+      "java": "CANARY_EMAIL",
+      "value": "canary.email",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "canary.token",
+      "rust": "CANARY_TOKEN",
+      "typescript": "CANARY_TOKEN",
+      "java": "CANARY_TOKEN",
+      "value": "canary.token",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "canary.card",
+      "rust": "CANARY_CARD",
+      "typescript": "CANARY_CARD",
+      "java": "CANARY_CARD",
+      "value": "canary.card",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "canary.jwt",
+      "rust": "CANARY_JWT",
+      "typescript": "CANARY_JWT",
+      "java": "CANARY_JWT",
+      "value": "canary.jwt",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "web.checkout.submitted",
+      "rust": "WEB_CHECKOUT_SUBMITTED",
+      "typescript": "WEB_CHECKOUT_SUBMITTED",
+      "java": "WEB_CHECKOUT_SUBMITTED",
+      "value": "web.checkout.submitted",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "catalog.products.served",
+      "rust": "CATALOG_PRODUCTS_SERVED",
+      "typescript": "CATALOG_PRODUCTS_SERVED",
+      "java": "CATALOG_PRODUCTS_SERVED",
+      "value": "catalog.products.served",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "catalog.product.queries",
+      "rust": "CATALOG_PRODUCT_QUERIES",
+      "typescript": "CATALOG_PRODUCT_QUERIES",
+      "java": "CATALOG_PRODUCT_QUERIES",
+      "value": "catalog.product.queries",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "payment.authorized",
+      "rust": "PAYMENT_AUTHORIZED",
+      "typescript": "PAYMENT_AUTHORIZED",
+      "java": "PAYMENT_AUTHORIZED",
+      "value": "payment.authorized",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "ui.click",
+      "rust": "UI_CLICK",
+      "typescript": "UI_CLICK",
+      "java": "UI_CLICK",
+      "value": "ui.click",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "ui.submit",
+      "rust": "UI_SUBMIT",
+      "typescript": "UI_SUBMIT",
+      "java": "UI_SUBMIT",
+      "value": "ui.submit",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "browser.web_vital",
+      "rust": "BROWSER_WEB_VITAL",
+      "typescript": "BROWSER_WEB_VITAL",
+      "java": "BROWSER_WEB_VITAL",
+      "value": "browser.web_vital",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "web_vital.name",
+      "rust": "WEB_VITAL_NAME",
+      "typescript": "WEB_VITAL_NAME",
+      "java": "WEB_VITAL_NAME",
+      "value": "web_vital.name",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "web_vital.value",
+      "rust": "WEB_VITAL_VALUE",
+      "typescript": "WEB_VITAL_VALUE",
+      "java": "WEB_VITAL_VALUE",
+      "value": "web_vital.value",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "web_vital.rating",
+      "rust": "WEB_VITAL_RATING",
+      "typescript": "WEB_VITAL_RATING",
+      "java": "WEB_VITAL_RATING",
+      "value": "web_vital.rating",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "web_vital.id",
+      "rust": "WEB_VITAL_ID",
+      "typescript": "WEB_VITAL_ID",
+      "java": "WEB_VITAL_ID",
+      "value": "web_vital.id",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "web_vital.delta",
+      "rust": "WEB_VITAL_DELTA",
+      "typescript": "WEB_VITAL_DELTA",
+      "java": "WEB_VITAL_DELTA",
+      "value": "web_vital.delta",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "web_vital.navigation_type",
+      "rust": "WEB_VITAL_NAVIGATION_TYPE",
+      "typescript": "WEB_VITAL_NAVIGATION_TYPE",
+      "java": "WEB_VITAL_NAVIGATION_TYPE",
+      "value": "web_vital.navigation_type",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "tokio.runtime.workers_count",
+      "rust": "TOKIO_RUNTIME_WORKERS_COUNT",
+      "typescript": "TOKIO_RUNTIME_WORKERS_COUNT",
+      "java": "TOKIO_RUNTIME_WORKERS_COUNT",
+      "value": "tokio.runtime.workers_count",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "tokio.runtime.alive_tasks",
+      "rust": "TOKIO_RUNTIME_ALIVE_TASKS",
+      "typescript": "TOKIO_RUNTIME_ALIVE_TASKS",
+      "java": "TOKIO_RUNTIME_ALIVE_TASKS",
+      "value": "tokio.runtime.alive_tasks",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "tokio.runtime.global_queue_depth",
+      "rust": "TOKIO_RUNTIME_GLOBAL_QUEUE_DEPTH",
+      "typescript": "TOKIO_RUNTIME_GLOBAL_QUEUE_DEPTH",
+      "java": "TOKIO_RUNTIME_GLOBAL_QUEUE_DEPTH",
+      "value": "tokio.runtime.global_queue_depth",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "tokio.runtime.blocking_pool_depth",
+      "rust": "TOKIO_RUNTIME_BLOCKING_POOL_DEPTH",
+      "typescript": "TOKIO_RUNTIME_BLOCKING_POOL_DEPTH",
+      "java": "TOKIO_RUNTIME_BLOCKING_POOL_DEPTH",
+      "value": "tokio.runtime.blocking_pool_depth",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "tokio.runtime.total_park_count",
+      "rust": "TOKIO_RUNTIME_TOTAL_PARK_COUNT",
+      "typescript": "TOKIO_RUNTIME_TOTAL_PARK_COUNT",
+      "java": "TOKIO_RUNTIME_TOTAL_PARK_COUNT",
+      "value": "tokio.runtime.total_park_count",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "tokio.runtime.total_busy_duration_ms",
+      "rust": "TOKIO_RUNTIME_TOTAL_BUSY_DURATION_MS",
+      "typescript": "TOKIO_RUNTIME_TOTAL_BUSY_DURATION_MS",
+      "java": "TOKIO_RUNTIME_TOTAL_BUSY_DURATION_MS",
+      "value": "tokio.runtime.total_busy_duration_ms",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "tokio.runtime.metrics",
+      "rust": "TOKIO_RUNTIME_METRIC_NAMES",
+      "typescript": "TOKIO_RUNTIME_METRIC_NAMES",
+      "java": "TOKIO_RUNTIME_METRIC_NAMES",
+      "value": null,
+      "values": [
+        "tokio.runtime.workers_count",
+        "tokio.runtime.alive_tasks",
+        "tokio.runtime.global_queue_depth",
+        "tokio.runtime.blocking_pool_depth",
+        "tokio.runtime.total_park_count",
+        "tokio.runtime.total_busy_duration_ms"
+      ],
+      "owner": "playground"
+    }
+  ]
+}

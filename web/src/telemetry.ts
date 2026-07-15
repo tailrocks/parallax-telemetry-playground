@@ -43,6 +43,7 @@ import {
   ERROR_TYPE,
   EVENT_NAME,
   SESSION_ID,
+  URL_PATH,
   WEB_VITAL_DELTA,
   WEB_VITAL_ID,
   WEB_VITAL_NAME,
@@ -69,8 +70,9 @@ export function initOtel() {
   sessionId = getSessionId();
   const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: "web",
-    [ATTR_SERVICE_VERSION]: import.meta.env.VITE_RELEASE ?? "dev",
-    [DEPLOYMENT_ENVIRONMENT_NAME]: import.meta.env.VITE_PARALLAX_ENV ?? DEFAULT_ENVIRONMENT,
+    [ATTR_SERVICE_VERSION]: import.meta.env["VITE_RELEASE"] ?? "dev",
+    [DEPLOYMENT_ENVIRONMENT_NAME]:
+      import.meta.env["VITE_PARALLAX_ENV"] ?? DEFAULT_ENVIRONMENT,
     [SESSION_ID]: sessionId,
   });
   const provider = new WebTracerProvider({
@@ -135,7 +137,7 @@ export function getSessionId(): string {
 export function trackScreen(pathname: string) {
   trackStep(APP_SCREEN_NAME, {
     [APP_SCREEN_NAME]: screenName(pathname),
-    "url.path": pathname,
+    [URL_PATH]: pathname,
   });
 }
 

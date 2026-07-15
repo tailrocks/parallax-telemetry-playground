@@ -1,0 +1,26 @@
+# The post-run JUnit document is the durable reconciliation source for test
+# attempts that cannot flush in-process OTLP (timeouts and forced exits).
+[profile.ci]
+retries = { backoff = "fixed", count = 1, delay = "1s" }
+flaky-result = "fail"
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"
+report-name = "playground-nextest-ci"
+store-success-output = false
+store-failure-output = true
+
+# Opt-in W4 payload: the two acceptance fixtures fail on attempt 1 and pass on
+# attempt 2. Ordinary CI keeps flaky-result=fail; this bounded evidence profile
+# succeeds only after nextest has captured the real retry chain in JUnit XML.
+[profile.w4-acceptance]
+retries = { backoff = "fixed", count = 1, delay = "100ms" }
+flaky-result = "pass"
+fail-fast = false
+
+[profile.w4-acceptance.junit]
+path = "junit.xml"
+report-name = "playground-nextest-w4-acceptance"
+store-success-output = true
+store-failure-output = true

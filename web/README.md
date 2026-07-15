@@ -30,7 +30,7 @@ hydration.
 bun install
 bun run build          # vite build (client + SSR + Nitro) + tsc --noEmit
 bun run dev            # dev server on :5173
-bun run start          # node .output/server/index.mjs (prod)
+bun run start          # Bun runs strict server.ts (prod)
 ```
 
 ## Env

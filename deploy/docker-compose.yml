@@ -6,20 +6,18 @@
 # Parallax or the lab first, then `docker compose up` here.
 #
 # Status: Rust services (checkout, pricing, inventory, recommendation,
-# notifications, orders) + Java (catalog GraphQL, payment gRPC, fulfillment
-# Kafka) + web (TanStack Start) all wired. Java uses the single Sentry+OTel
-# javaagent (deploy/Dockerfile.java); web is the Nitro server (deploy/
-# Dockerfile.web). Pin image tags at a real deploy.
+# notifications, orders, storefront GraphQL) + Java (catalog GraphQL, payment gRPC, fulfillment
+# Kafka) + web (TanStack Start) all wired. Java uses the upstream OTel agent
+# plus the Spring Sentry SDK (deploy/Dockerfile.java); web is the Nitro server
+# (deploy/Dockerfile.web). Pin image tags at a real deploy.
 
 name: telemetry-playground
 
 x-otlp: &otlp
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
   OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
-  # Force OTLP export on the Java tier: the sentry-opentelemetry agent otherwise
-  # routes spans to Sentry only and emits nothing over OTLP, so the fan-out
-  # backends never see the Java services. (Ignored by the Rust services, which
-  # build their exporters in code.)
+  # The Java tier uses the upstream OTel agent, so all three signals reach the
+  # Rotel fan-out. Rust services build their exporters in code.
   OTEL_TRACES_EXPORTER: "otlp"
   OTEL_METRICS_EXPORTER: "otlp"
   OTEL_LOGS_EXPORTER: "otlp"
@@ -83,6 +81,18 @@ services:
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
+  storefront:
+    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: storefront } }
+    environment:
+      <<: *otlp
+      STOREFRONT_ADDR: "0.0.0.0:8094"
+      CATALOG_GRAPHQL_URL: "http://catalog:8080/graphql"
+      PRICING_ENDPOINT: "http://pricing:50051"
+    ports: ["8094:8094"]
+    depends_on: [catalog, pricing]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [pg]
+
   postgres:
     image: postgres:17
     environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}", POSTGRES_DB: playground }
@@ -111,7 +121,7 @@ services:
     ports: ["8013:8013"]
     networks: [pg]
 
-  # --- Java (single Sentry+OTel javaagent) ---
+  # --- Java (upstream OTel javaagent + Sentry Spring SDK) ---
   catalog:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: catalog } }
     environment:
@@ -128,12 +138,18 @@ services:
       OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_KEY_VALUE_PAIR_ATTRIBUTES: "true"
       OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_MDC_ATTRIBUTES: "*"
       OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
+      # W5 probe: retain native exponential buckets from the JVM agent so each
+      # fan-out backend's rendering/conversion behavior can be compared.
+      OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: "base2_exponential_bucket_histogram"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       FLAGD_HOST: "flagd"
       FLAGD_CACHE: "disabled"
+      CATALOG_DATABASE_URL: "jdbc:postgresql://postgres:5432/playground"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}"
       SERVER_PORT: "8080"
     ports: ["8080:8080"] # GraphQL (browser → catalog)
-    depends_on: [flagd]
+    depends_on: [flagd, postgres]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
@@ -166,6 +182,7 @@ services:
       OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       KAFKA_BROKERS: "broker:9092"
+      PAYMENT_GRPC_ADDRESS: "payment:9090"
       NOTIFICATIONS_URL: "http://notifications:8091"
     # POST /publish drives the cross-language async branch: Java produces to the
     # `orders` topic → consumes it → calls Rust `notifications` (reverse hop).
@@ -192,7 +209,7 @@ services:
   loadgen:
     image: grafana/k6:latest
     profiles: [demo]
-    command: ["run", "/scripts/demo.js"]
+    command: ["run", "/scripts/demo.ts"]
     environment:
       CHECKOUT_URL: "http://checkout:8088"
       ORDERS_URL: "http://orders:8092"

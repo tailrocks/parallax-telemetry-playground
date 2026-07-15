@@ -85,7 +85,9 @@ async fn reserve(
     Query(p): Query<Reserve>,
 ) -> impl IntoResponse {
     let span = tracing::info_span!("reserve", otel.kind = semconv::SPAN_KIND_SERVER);
+    let parent = playground_telemetry::extract_context(&headers);
     playground_telemetry::set_parent_from_headers(&span, &headers);
+    playground_telemetry::stamp_business_baggage(&span, &parent);
     reserve_inner(state, p).instrument(span).await
 }
 
@@ -439,16 +441,23 @@ fn env_flag(value: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
+fn app(state: AppState) -> Router {
+    Router::new()
+        .route("/reserve", get(reserve))
+        .route("/healthz", get(|| async { "ok" }))
+        .with_state(state)
+        .layer(axum::middleware::from_fn(
+            playground_telemetry::http_server_observability,
+        ))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let telemetry = playground_telemetry::init("inventory")?;
     let state = AppState {
         db: init_db().await?,
     };
-    let app = Router::new()
-        .route("/reserve", get(reserve))
-        .route("/healthz", get(|| async { "ok" }))
-        .with_state(state);
+    let app = app(state);
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8089".into());
     tracing::info!(%addr, "inventory HTTP listening");
     axum::serve(tokio::net::TcpListener::bind(&addr).await?, app)
@@ -461,6 +470,11 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
 
     #[test]
     fn inventory_no_db_flag_accepts_explicit_truthy_values() {
@@ -476,5 +490,121 @@ mod tests {
         assert!(!env_flag(Some("")));
         assert!(!env_flag(Some("0")));
         assert!(!env_flag(Some("false")));
+    }
+
+    #[tokio::test]
+    async fn serves_health_and_memory_reservations_without_postgres() {
+        let state = AppState { db: None };
+        let health = app(state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .expect("health request"),
+            )
+            .await
+            .expect("health response");
+        assert_eq!(health.status(), StatusCode::OK);
+
+        let reserve = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri("/reserve?sku=WIDGET-1&quantity=2")
+                    .body(Body::empty())
+                    .expect("reserve request"),
+            )
+            .await
+            .expect("reserve response");
+        assert_eq!(reserve.status(), StatusCode::OK);
+        let body = to_bytes(reserve.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        assert!(
+            std::str::from_utf8(&body)
+                .expect("UTF-8 body")
+                .contains("WIDGET-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn serves_health_without_postgres_over_a_real_loopback_listener() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind inventory listener");
+        let address = listener.local_addr().expect("inventory listener address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app(AppState { db: None }))
+                .await
+                .expect("serve inventory");
+        });
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(3),
+            reqwest::get(format!("http://{address}/healthz")),
+        )
+        .await
+        .expect("inventory health timeout")
+        .expect("inventory health response");
+        assert_eq!(response.status(), StatusCode::OK);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn reserves_stock_against_an_opt_in_postgres_database() {
+        let Some(database_url) = std::env::var("INVENTORY_TEST_DATABASE_URL")
+            .ok()
+            .filter(|url| !url.trim().is_empty())
+        else {
+            eprintln!(
+                "skipping Postgres integration test: set INVENTORY_TEST_DATABASE_URL to a compose-provided database"
+            );
+            return;
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await
+            .expect("connect test Postgres");
+        bootstrap_stock(&pool).await.expect("bootstrap test stock");
+        const TEST_SKU: &str = "W3-INVENTORY-POSTGRES-TEST";
+        sqlx::query(UPSERT_STOCK_SQL)
+            .bind(TEST_SKU)
+            .bind(10_i64)
+            .execute(&pool)
+            .await
+            .expect("seed isolated test stock");
+
+        let state = AppState {
+            db: Some(DbState {
+                pool: pool.clone(),
+                pending: Arc::new(AtomicU64::new(0)),
+                timeouts: Arc::new(AtomicU64::new(0)),
+            }),
+        };
+        let response = app(state)
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/reserve?sku={TEST_SKU}&quantity=2"))
+                    .body(Body::empty())
+                    .expect("reserve request"),
+            )
+            .await
+            .expect("reserve response");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        sqlx::query("DELETE FROM stock WHERE sku = $1")
+            .bind(TEST_SKU)
+            .execute(&pool)
+            .await
+            .expect("remove isolated test stock");
+        pool.close().await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).expect("reservation JSON")["remaining"],
+            8
+        );
     }
 }

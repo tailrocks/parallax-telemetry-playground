@@ -1,20 +1,111 @@
-export const DEPLOYMENT_ENVIRONMENT_NAME = "deployment.environment.name";
-export const DEFAULT_ENVIRONMENT = "playground";
-export const SESSION_ID = "session.id";
-export const EVENT_NAME = "event.name";
-export const ERROR_TYPE = "error.type";
+// Generated from telemetry/semconv/contract.yaml.
+// Run `cargo xtask semconv generate`; do not edit by hand.
 
-export const APP_SCREEN_NAME = "app.screen.name";
-export const APP_WIDGET_NAME = "app.widget.name";
-export const TELEMETRY_PROPAGATION_DISABLED = "telemetry.propagation.disabled";
-
-export const UI_CLICK = "ui.click";
-export const UI_SUBMIT = "ui.submit";
-export const WEB_CHECKOUT_SUBMITTED = "web.checkout.submitted";
-export const BROWSER_WEB_VITAL = "browser.web_vital";
-export const WEB_VITAL_NAME = "web_vital.name";
-export const WEB_VITAL_VALUE = "web_vital.value";
-export const WEB_VITAL_RATING = "web_vital.rating";
-export const WEB_VITAL_ID = "web_vital.id";
-export const WEB_VITAL_DELTA = "web_vital.delta";
-export const WEB_VITAL_NAVIGATION_TYPE = "web_vital.navigation_type";
+export const SERVICE_NAME = "service.name" as const
+export const SERVICE_NAMESPACE = "service.namespace" as const
+export const SERVICE_INSTANCE_ID = "service.instance.id" as const
+export const SERVICE_VERSION = "service.version" as const
+export const VCS_REF_HEAD_REVISION = "vcs.ref.head.revision" as const
+export const DEPLOYMENT_ENVIRONMENT_NAME =
+  "deployment.environment.name" as const
+export const EVENT_NAME = "event.name" as const
+export const ERROR_TYPE = "error.type" as const
+export const PARALLAX_RUN_ID = "parallax.run.id" as const
+export const HTTP_REQUEST_METHOD = "http.request.method" as const
+export const HTTP_ROUTE = "http.route" as const
+export const HTTP_RESPONSE_STATUS_CODE = "http.response.status_code" as const
+export const URL_PATH = "url.path" as const
+export const HTTP_SERVER_REQUEST_DURATION =
+  "http.server.request.duration" as const
+export const MESSAGING_SYSTEM = "messaging.system" as const
+export const MESSAGING_DESTINATION_NAME = "messaging.destination.name" as const
+export const MESSAGING_OPERATION_NAME = "messaging.operation.name" as const
+export const MESSAGING_OPERATION_TYPE = "messaging.operation.type" as const
+export const MESSAGING_MESSAGE_ID = "messaging.message.id" as const
+export const PLAYGROUND_NAMESPACE = "playground" as const
+export const DEFAULT_ENVIRONMENT = "playground" as const
+export const SESSION_ID = "session.id" as const
+export const APP_SCREEN_NAME = "app.screen.name" as const
+export const APP_WIDGET_NAME = "app.widget.name" as const
+export const TELEMETRY_PROPAGATION_DISABLED =
+  "telemetry.propagation.disabled" as const
+export const OTEL_KIND = "otel.kind" as const
+export const SPAN_KIND_CLIENT = "client" as const
+export const SPAN_KIND_SERVER = "server" as const
+export const SPAN_KIND_INTERNAL = "internal" as const
+export const SPAN_KIND_PRODUCER = "producer" as const
+export const SPAN_KIND_CONSUMER = "consumer" as const
+export const PARALLAX_SESSION_ID = "parallax.session.id" as const
+export const PARALLAX_EXECUTION_LAYER = "parallax.execution.layer" as const
+export const PARALLAX_AGENT_ID = "parallax.agent.id" as const
+export const GEN_AI_OPERATION_NAME = "gen_ai.operation.name" as const
+export const TOOL_NAME = "tool.name" as const
+export const SHELL_COMMAND = "shell.command" as const
+export const USER_TIER = "user.tier" as const
+export const TENANT_ID = "tenant.id" as const
+export const GRAPHQL_OPERATION_TYPE = "graphql.operation.type" as const
+export const GRAPHQL_OPERATION_NAME = "graphql.operation.name" as const
+export const GRAPHQL_DOCUMENT = "graphql.document" as const
+export const GRAPHQL_FIELD_NAME = "graphql.field.name" as const
+export const GRAPHQL_FIELD_PATH = "graphql.field.path" as const
+export const TEST_CASE_NAME = "test.case.name" as const
+export const TEST_CASE_RESULT_STATUS = "test.case.result.status" as const
+export const TEST_RESULT_STATUS_PASS = "pass" as const
+export const TEST_RESULT_STATUS_FAIL = "fail" as const
+export const TEST_CASE_PARAMETERS = "test.case.parameters" as const
+export const TEST_CASE_FAILURE_KIND = "test.case.failure.kind" as const
+export const TEST_FAILURE_KIND_ASSERTION = "assertion_failure" as const
+export const TEST_FAILURE_KIND_HARNESS = "harness_error" as const
+export const TEST_FAILURE_EVENT_NAME = "test.failure" as const
+export const TEST_FAILURE_MESSAGE = "test.failure.message" as const
+export const TEST_FAILURE_STACKTRACE = "test.failure.stacktrace" as const
+export const TEST_ATTEMPT_ORDINAL = "test.attempt.ordinal" as const
+export const TEST_ATTEMPT_ID = "test.attempt.id" as const
+export const TEST_ATTEMPT_TOTAL = "test.attempt.total" as const
+export const TEST_CODE_REFERENCE = "test.code_reference" as const
+export const TEST_CONFIGURATION_OS = "test.configuration.os" as const
+export const TEST_CONFIGURATION_ENVIRONMENT =
+  "test.configuration.environment" as const
+export const TEST_CONFIGURATION_BROWSER = "test.configuration.browser" as const
+export const TEST_ARTIFACT_PATH = "test.artifact.path" as const
+export const TEST_SUITE_NAME = "test.suite.name" as const
+export const TEST_SUITE_RUN_STATUS = "test.suite.run.status" as const
+export const CICD_PIPELINE_RUN_ID = "cicd.pipeline.run.id" as const
+export const CICD_PIPELINE_TASK_TYPE = "cicd.pipeline.task.type" as const
+export const PARALLAX_TEST_ID = "parallax.test.id" as const
+export const CANARY_EMAIL = "canary.email" as const
+export const CANARY_TOKEN = "canary.token" as const
+export const CANARY_CARD = "canary.card" as const
+export const CANARY_JWT = "canary.jwt" as const
+export const WEB_CHECKOUT_SUBMITTED = "web.checkout.submitted" as const
+export const CATALOG_PRODUCTS_SERVED = "catalog.products.served" as const
+export const CATALOG_PRODUCT_QUERIES = "catalog.product.queries" as const
+export const PAYMENT_AUTHORIZED = "payment.authorized" as const
+export const UI_CLICK = "ui.click" as const
+export const UI_SUBMIT = "ui.submit" as const
+export const BROWSER_WEB_VITAL = "browser.web_vital" as const
+export const WEB_VITAL_NAME = "web_vital.name" as const
+export const WEB_VITAL_VALUE = "web_vital.value" as const
+export const WEB_VITAL_RATING = "web_vital.rating" as const
+export const WEB_VITAL_ID = "web_vital.id" as const
+export const WEB_VITAL_DELTA = "web_vital.delta" as const
+export const WEB_VITAL_NAVIGATION_TYPE = "web_vital.navigation_type" as const
+export const TOKIO_RUNTIME_WORKERS_COUNT =
+  "tokio.runtime.workers_count" as const
+export const TOKIO_RUNTIME_ALIVE_TASKS = "tokio.runtime.alive_tasks" as const
+export const TOKIO_RUNTIME_GLOBAL_QUEUE_DEPTH =
+  "tokio.runtime.global_queue_depth" as const
+export const TOKIO_RUNTIME_BLOCKING_POOL_DEPTH =
+  "tokio.runtime.blocking_pool_depth" as const
+export const TOKIO_RUNTIME_TOTAL_PARK_COUNT =
+  "tokio.runtime.total_park_count" as const
+export const TOKIO_RUNTIME_TOTAL_BUSY_DURATION_MS =
+  "tokio.runtime.total_busy_duration_ms" as const
+export const TOKIO_RUNTIME_METRIC_NAMES = [
+  "tokio.runtime.workers_count",
+  "tokio.runtime.alive_tasks",
+  "tokio.runtime.global_queue_depth",
+  "tokio.runtime.blocking_pool_depth",
+  "tokio.runtime.total_park_count",
+  "tokio.runtime.total_busy_duration_ms",
+] as const

@@ -9,6 +9,7 @@ members = [
     "services/recommendation",
     "services/notifications",
     "services/orders",
+    "services/storefront",
     "cli",
 ]
 
@@ -30,7 +31,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-metrics = "0.5"
 tonic = "0.14"
 tonic-prost = "0.14"
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["net"] }
 prost = "0.14"
 tonic-prost-build = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls", "http2"] }
@@ -41,7 +42,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-opentelemetry = { version = "0.33", features = ["metrics"] }
+tracing-opentelemetry = "0.33"
 opentelemetry = "0.32"
 opentelemetry-http = "0.32"
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
@@ -56,3 +57,9 @@ open-feature-flagd = { version = "0.2.1", default-features = false, features = [
 sentry = "0.48"
 sentry-tracing = "0.48"
 tower-http = { version = "0.6", features = ["cors"] }
+tower = { version = "0.5", features = ["util"] }
+futures = "0.3"
+juniper = "0.17.1"
+juniper_axum = { version = "0.3.0", features = ["subscriptions"] }
+juniper_graphql_ws = { version = "0.5.0", features = ["graphql-transport-ws", "graphql-ws"] }
+quick-xml = "0.38"
