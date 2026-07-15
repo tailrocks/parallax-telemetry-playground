@@ -24,7 +24,13 @@ export function testTraceparentPath(testId: string): string {
 }
 
 export function testTraceparentDirectory(): string {
-  return join(tmpdir(), "parallax-playwright-traceparents");
+  const runIdentity =
+    process.env.PARALLAX_RUN_ID ??
+    process.env.CI_RUN_ID ??
+    process.env.TRACEPARENT ??
+    "standalone";
+  const runKey = createHash("sha256").update(runIdentity).digest("hex");
+  return join(tmpdir(), "parallax-playwright-traceparents", runKey);
 }
 
 export async function traceparentForRunningTest(testId: string): Promise<string> {

@@ -39,3 +39,11 @@ test("reads the real reporter span context for an observable run", async () => {
     await rm(path, { force: true });
   }
 });
+
+test("isolates reporter handoffs between concurrent run identities", () => {
+  vi.stubEnv("PARALLAX_RUN_ID", "run-a");
+  const first = testTraceparentPath("chromium:journey");
+  vi.stubEnv("PARALLAX_RUN_ID", "run-b");
+  const second = testTraceparentPath("chromium:journey");
+  expect(first).not.toBe(second);
+});
