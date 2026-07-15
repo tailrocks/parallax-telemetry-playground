@@ -4,9 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNNER="$ROOT/scenarios/run.sh"
 
-find "$ROOT/scenarios" -maxdepth 1 -type f -name '*.sh' -print0 |
-  sort -z |
-  xargs -0 -r -n 1 bash -n
+while IFS= read -r script; do
+  bash -n "$script"
+done < <(find "$ROOT/scenarios" -maxdepth 1 -type f -name '*.sh' -print | sort)
 
 mapfile -t catalog_ids < <(
   "$RUNNER" | awk 'NR > 1 && NF { print $1 }' | sort
