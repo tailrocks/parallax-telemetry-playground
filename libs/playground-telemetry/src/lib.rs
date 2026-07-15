@@ -38,7 +38,7 @@ use axum::{
 };
 use opentelemetry::logs::{AnyValue, LogRecord, Logger, LoggerProvider as _, Severity};
 use opentelemetry::propagation::TextMapCompositePropagator;
-use opentelemetry::trace::{Span as _, SpanBuilder, TracerProvider as _};
+use opentelemetry::trace::{Span as _, SpanBuilder, Status, TracerProvider as _};
 use opentelemetry::{KeyValue, global};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::Resource;
@@ -175,14 +175,16 @@ pub async fn http_server_observability(request: Request, next: Next) -> Response
         http.route = %route,
         url.path = %path,
         http.response.status_code = tracing::field::Empty,
+        error.type = tracing::field::Empty,
     );
     set_parent_from_headers(&span, request.headers());
     let started = Instant::now();
     let response = next.run(request).instrument(span.clone()).await;
     let status = response.status().as_u16();
     span.record("http.response.status_code", i64::from(status));
-    if status >= 500 {
-        mark_span_error("http.server.error");
+    if let Some(error_type) = http_server_error_type(status) {
+        span.record(semconv::ERROR_TYPE, error_type);
+        span.set_status(Status::error(error_type));
     }
     global::meter("playground.http")
         .f64_histogram(semconv::HTTP_SERVER_REQUEST_DURATION)
@@ -197,6 +199,10 @@ pub async fn http_server_observability(request: Request, next: Next) -> Response
             ],
         );
     response
+}
+
+fn http_server_error_type(status: u16) -> Option<&'static str> {
+    (status >= 500).then_some("http.server.error")
 }
 
 /// Emit a typed OTel log event (EventName set) on the shared logs pipeline,
@@ -566,6 +572,13 @@ mod tests {
     };
     use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord, SdkLoggerProvider};
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn http_server_errors_follow_otel_server_status_rules() {
+        assert_eq!(http_server_error_type(499), None);
+        assert_eq!(http_server_error_type(500), Some("http.server.error"));
+        assert_eq!(http_server_error_type(599), Some("http.server.error"));
+    }
 
     #[derive(Debug, Clone, Default)]
     struct CaptureLogExporter {
