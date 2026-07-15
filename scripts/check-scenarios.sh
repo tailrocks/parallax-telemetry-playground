@@ -14,12 +14,23 @@ mapfile -t catalog_ids < <(
 mapfile -t dispatch_ids < <(
   sed -nE 's/^    ([a-z0-9-]+)\) echo .*/\1/p' "$RUNNER" | sort
 )
+mapfile -t readme_ids < <(
+  sed -nE 's/^\| ([a-z0-9-]+) \|.*/\1/p' "$ROOT/scenarios/README.md" | sort
+)
 
 if [[ "${catalog_ids[*]}" != "${dispatch_ids[*]}" ]]; then
   echo "scenario catalog and dispatcher IDs differ" >&2
   diff -u \
     <(printf '%s\n' "${catalog_ids[@]}") \
     <(printf '%s\n' "${dispatch_ids[@]}") >&2 || true
+  exit 1
+fi
+
+if [[ "${catalog_ids[*]}" != "${readme_ids[*]}" ]]; then
+  echo "scenario README and executable catalog IDs differ" >&2
+  diff -u \
+    <(printf '%s\n' "${catalog_ids[@]}") \
+    <(printf '%s\n' "${readme_ids[@]}") >&2 || true
   exit 1
 fi
 
