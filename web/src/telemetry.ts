@@ -43,6 +43,7 @@ import {
   ERROR_TYPE,
   EVENT_NAME,
   SESSION_ID,
+  URL_PATH,
   WEB_VITAL_DELTA,
   WEB_VITAL_ID,
   WEB_VITAL_NAME,
@@ -135,7 +136,7 @@ export function getSessionId(): string {
 export function trackScreen(pathname: string) {
   trackStep(APP_SCREEN_NAME, {
     [APP_SCREEN_NAME]: screenName(pathname),
-    "url.path": pathname,
+    [URL_PATH]: pathname,
   });
 }
 
