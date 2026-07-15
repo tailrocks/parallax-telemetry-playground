@@ -10,6 +10,7 @@
 mod test_report;
 
 use std::path::Path;
+use std::process::Command as ProcessCommand;
 
 use tokio::process::Command;
 use tracing::Instrument;
@@ -113,31 +114,16 @@ async fn daemon_session(session: String, run_id: String, orphan: bool) -> anyhow
         orphan
     );
     async move {
-        let mut child = Command::new(std::env::current_exe()?);
-        child.arg("enter").arg("--session").arg(&session);
-        child.env("PARALLAX_RUN_ID", &run_id);
-        child.env(
-            "OTEL_RESOURCE_ATTRIBUTES",
-            resource_attrs_with_run_id(&run_id),
+        let carrier = playground_telemetry::current_context_env();
+        let child = execution_child_command(
+            &std::env::current_exe()?,
+            &session,
+            &run_id,
+            orphan,
+            &carrier,
+            std::env::var("OTEL_RESOURCE_ATTRIBUTES").ok().as_deref(),
         );
-        if orphan {
-            child.arg("--orphan");
-            child.env_remove("TRACEPARENT");
-            child.env_remove("TRACESTATE");
-            child.env_remove("BAGGAGE");
-        } else {
-            for (key, value) in playground_telemetry::current_context_env() {
-                child.env(key, value);
-            }
-            child.env(
-                "BAGGAGE",
-                format!(
-                    "{}={session},{}={run_id}",
-                    semconv::PARALLAX_SESSION_ID,
-                    semconv::PARALLAX_RUN_ID
-                ),
-            );
-        }
+        let mut child = Command::from(child);
 
         tracing::info!(%session, %run_id, orphan, "spawning execution child");
         let status = child.status().await?;
@@ -150,6 +136,42 @@ async fn daemon_session(session: String, run_id: String, orphan: bool) -> anyhow
     }
     .instrument(span)
     .await
+}
+
+fn execution_child_command(
+    executable: &Path,
+    session: &str,
+    run_id: &str,
+    orphan: bool,
+    carrier: &[(String, String)],
+    resource_attributes: Option<&str>,
+) -> ProcessCommand {
+    let mut child = ProcessCommand::new(executable);
+    child.arg("enter").arg("--session").arg(session);
+    child.env("PARALLAX_RUN_ID", run_id);
+    child.env(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        resource_attrs_with_run_id_from(resource_attributes, run_id),
+    );
+    if orphan {
+        child.arg("--orphan");
+        child.env_remove("TRACEPARENT");
+        child.env_remove("TRACESTATE");
+        child.env_remove("BAGGAGE");
+    } else {
+        for (key, value) in carrier {
+            child.env(key, value);
+        }
+        child.env(
+            "BAGGAGE",
+            format!(
+                "{}={session},{}={run_id}",
+                semconv::PARALLAX_SESSION_ID,
+                semconv::PARALLAX_RUN_ID
+            ),
+        );
+    }
+    child
 }
 
 async fn enter(args: Vec<String>) -> anyhow::Result<i32> {
@@ -343,13 +365,6 @@ fn run_id(session: &str) -> String {
     std::env::var("PARALLAX_RUN_ID").unwrap_or_else(|_| session.to_string())
 }
 
-fn resource_attrs_with_run_id(run_id: &str) -> String {
-    resource_attrs_with_run_id_from(
-        std::env::var("OTEL_RESOURCE_ATTRIBUTES").ok().as_deref(),
-        run_id,
-    )
-}
-
 fn resource_attrs_with_run_id_from(existing: Option<&str>, run_id: &str) -> String {
     let existing = existing.unwrap_or_default();
     if existing
@@ -368,7 +383,11 @@ fn resource_attrs_with_run_id_from(existing: Option<&str>, run_id: &str) -> Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{CronOutcome, cron_once, resource_attrs_with_run_id_from};
+    use std::collections::HashMap;
+    use std::ffi::OsString;
+    use std::path::Path;
+
+    use super::{CronOutcome, cron_once, execution_child_command, resource_attrs_with_run_id_from};
 
     #[tokio::test]
     async fn cron_outcomes_preserve_process_exit_contract() {
@@ -400,5 +419,57 @@ mod tests {
             resource_attrs_with_run_id_from(Some("parallax.run.id=existing"), "run-a"),
             "parallax.run.id=existing"
         );
+    }
+
+    #[test]
+    fn execution_child_propagates_or_removes_the_process_carrier() {
+        let carrier = vec![
+            ("TRACEPARENT".to_owned(), "00-abc-def-01".to_owned()),
+            ("TRACESTATE".to_owned(), "vendor=value".to_owned()),
+        ];
+        let linked = execution_child_command(
+            Path::new("playground"),
+            "session-a",
+            "run-a",
+            false,
+            &carrier,
+            Some("service.name=cli"),
+        );
+        let linked_env = linked
+            .get_envs()
+            .map(|(key, value)| (key.to_owned(), value.map(ToOwned::to_owned)))
+            .collect::<HashMap<OsString, Option<OsString>>>();
+        assert_eq!(
+            linked_env.get(&OsString::from("TRACEPARENT")),
+            Some(&Some(OsString::from("00-abc-def-01")))
+        );
+        assert_eq!(
+            linked_env.get(&OsString::from("OTEL_RESOURCE_ATTRIBUTES")),
+            Some(&Some(OsString::from(
+                "service.name=cli,parallax.run.id=run-a"
+            )))
+        );
+        assert_eq!(
+            linked_env.get(&OsString::from("BAGGAGE")),
+            Some(&Some(OsString::from(
+                "parallax.session.id=session-a,parallax.run.id=run-a"
+            )))
+        );
+
+        let orphan = execution_child_command(
+            Path::new("playground"),
+            "session-a",
+            "run-a",
+            true,
+            &carrier,
+            None,
+        );
+        let orphan_env = orphan
+            .get_envs()
+            .map(|(key, value)| (key.to_owned(), value.map(ToOwned::to_owned)))
+            .collect::<HashMap<OsString, Option<OsString>>>();
+        assert_eq!(orphan_env.get(&OsString::from("TRACEPARENT")), Some(&None));
+        assert_eq!(orphan_env.get(&OsString::from("TRACESTATE")), Some(&None));
+        assert_eq!(orphan_env.get(&OsString::from("BAGGAGE")), Some(&None));
     }
 }
