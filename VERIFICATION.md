@@ -11,6 +11,19 @@ Gradle cache outside the container's native library mount; the scenarios below
 still need a live multi-runtime environment (Sentry self-hosted and a collector
 with a short flush) that this sandbox cannot provision.
 
+Every local stack test session has one fail-closed run-parent entrypoint. It
+refuses to run without the identity and W3C carrier supplied by Parallax:
+
+```bash
+parallax run start -- scripts/observable-test-session.sh rust
+parallax run start -- scripts/observable-test-session.sh java
+parallax run start -- scripts/observable-test-session.sh web
+```
+
+The Rust mode runs nextest and converts its durable JUnit in the same session;
+Java preserves the carrier across all three Gradle suites; web runs Bun Vitest
+and Playwright beneath the same run parent.
+
 ## Verified here (build/run/execute)
 - Rust workspace builds (fmt + clippy clean); web builds (`bun run build`: Vite
   client + SSR + Nitro server) and type-checks (`tsc --noEmit`); routes `/` and
