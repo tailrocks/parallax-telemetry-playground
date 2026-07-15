@@ -4,10 +4,13 @@ import type {
   TestCase,
   TestResult,
 } from "@playwright/test/reporter";
+import { mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import {
   ROOT_CONTEXT,
   SpanStatusCode,
   type Context,
+  type Span,
 } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
@@ -25,7 +28,10 @@ import {
   TEST_SUITE_NAME,
   TEST_SUITE_RUN_STATUS,
 } from "../src/semconv";
-import { traceparentForTest } from "./test-trace-context";
+import {
+  testTraceparentDirectory,
+  testTraceparentPath,
+} from "./test-trace-context";
 
 const TEST_TRACER = "playground.web.test";
 
@@ -36,6 +42,7 @@ const TEST_TRACER = "playground.web.test";
  * exports, normally under `parallax run start -- bun run e2e`.
  */
 export default class TelemetryReporter implements Reporter {
+  private readonly spans = new Map<string, Span>();
   private readonly endpoint = process.env.PLAYGROUND_TEST_OTLP_ENDPOINT;
   private readonly provider = this.endpoint
     ? new WebTracerProvider({
@@ -50,11 +57,15 @@ export default class TelemetryReporter implements Reporter {
         ],
       })
     : undefined;
-  onTestEnd(test: TestCase, result: TestResult): void {
+  onBegin(): void {
+    if (this.provider) {
+      rmSync(testTraceparentDirectory(), { recursive: true, force: true });
+    }
+  }
+
+  onTestBegin(test: TestCase, result: TestResult): void {
     if (!this.provider) return;
 
-    const failed = result.status === "failed" || result.status === "timedOut" || result.status === "interrupted";
-    const status = result.status === "skipped" ? "skip" : failed ? "fail" : "pass";
     const titlePath = test.titlePath();
     const span = this.provider.getTracer(TEST_TRACER).startSpan(
       "test.case",
@@ -62,22 +73,41 @@ export default class TelemetryReporter implements Reporter {
         startTime: result.startTime,
         attributes: {
           [TEST_CASE_NAME]: titlePath.join(" › "),
-          [TEST_CASE_RESULT_STATUS]: status,
           [TEST_SUITE_NAME]: titlePath.slice(0, -1).join(" › "),
-          [TEST_SUITE_RUN_STATUS]: status,
           [PARALLAX_TEST_ID]: test.id,
           [CICD_PIPELINE_RUN_ID]: process.env.CI_RUN_ID ?? "",
           [CICD_PIPELINE_TASK_TYPE]: "playwright",
           "test.attempt.ordinal": result.retry + 1,
-          "test.case.duration_ms": result.duration,
           "test.case.parameters": parametersForTitle(test.title),
           "test.configuration.browser": process.env.PLAYWRIGHT_BROWSER ?? "chromium",
           "test.configuration.environment": process.env.PLAYGROUND_ENV ?? "playground",
           "test.configuration.os": process.platform,
         },
       },
-      parentContextFromTraceparent(traceparentForTest(test.id)),
+      runParentContext(),
     );
+    this.spans.set(spanKey(test, result), span);
+    const context = span.spanContext();
+    const traceFlags = context.traceFlags.toString(16).padStart(2, "0");
+    const path = testTraceparentPath(test.id);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `00-${context.traceId}-${context.spanId}-${traceFlags}\n`, {
+      mode: 0o600,
+    });
+  }
+
+  onTestEnd(test: TestCase, result: TestResult): void {
+    if (!this.provider) return;
+    const key = spanKey(test, result);
+    const span = this.spans.get(key);
+    if (!span) throw new Error(`missing Playwright telemetry span for ${key}`);
+    this.spans.delete(key);
+
+    const failed = result.status === "failed" || result.status === "timedOut" || result.status === "interrupted";
+    const status = result.status === "skipped" ? "skip" : failed ? "fail" : "pass";
+    span.setAttribute(TEST_CASE_RESULT_STATUS, status);
+    span.setAttribute(TEST_SUITE_RUN_STATUS, status);
+    span.setAttribute("test.case.duration_ms", result.duration);
     if (failed) {
       const error = result.error;
       const message = error?.message ?? `Playwright test ${result.status}`;
@@ -101,12 +131,21 @@ export default class TelemetryReporter implements Reporter {
       span.setAttribute(TEST_ARTIFACT_PATH, traceArchive.path);
     }
     span.end(new Date(result.startTime.getTime() + result.duration));
+    try {
+      unlinkSync(testTraceparentPath(test.id));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   }
 
   async onEnd(_result: FullResult): Promise<void> {
     await this.provider?.forceFlush();
     await this.provider?.shutdown();
   }
+}
+
+function spanKey(test: TestCase, result: TestResult): string {
+  return `${test.id}:${result.retry}`;
 }
 
 function parametersForTitle(title: string): string {
@@ -120,4 +159,9 @@ function parentContextFromTraceparent(traceparent: string): Context {
     { traceparent },
     { get: (carrier, key) => carrier[key] },
   );
+}
+
+function runParentContext(): Context {
+  const traceparent = process.env.TRACEPARENT;
+  return traceparent ? parentContextFromTraceparent(traceparent) : ROOT_CONTEXT;
 }

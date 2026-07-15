@@ -1,9 +1,9 @@
 import { test as base } from "@playwright/test";
-import { traceparentForTest } from "./test-trace-context";
+import { traceparentForRunningTest } from "./test-trace-context";
 
 export const test = base.extend({
   page: async ({ page }, use, testInfo) => {
-    const traceparent = traceparentForTest(testInfo.testId);
+    const traceparent = await traceparentForRunningTest(testInfo.testId);
     await page.setExtraHTTPHeaders({ traceparent });
     await page.addInitScript((parent) => {
       const install = () => {
