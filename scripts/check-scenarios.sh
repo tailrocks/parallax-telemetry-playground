@@ -3,49 +3,42 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNNER="$ROOT/scenarios/run.sh"
+TEMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEMP_DIR"' EXIT
 
 while IFS= read -r script; do
   bash -n "$script"
 done < <(find "$ROOT/scenarios" -maxdepth 1 -type f -name '*.sh' -print | sort)
 
-mapfile -t catalog_ids < <(
-  "$RUNNER" | awk 'NR > 1 && NF { print $1 }' | sort
-)
-mapfile -t dispatch_ids < <(
-  sed -nE 's/^    ([a-z0-9-]+)\) echo .*/\1/p' "$RUNNER" | sort
-)
-mapfile -t readme_ids < <(
-  sed -nE 's/^\| ([a-z0-9-]+) \|.*/\1/p' "$ROOT/scenarios/README.md" | sort
-)
+"$RUNNER" |
+  awk 'NR > 1 && NF { print $1, $2 }' |
+  LC_ALL=C sort >"$TEMP_DIR/catalog"
+sed -nE 's/^    ([a-z0-9-]+)\) echo "([^|]+)\|.*/\1 \2/p' "$RUNNER" |
+  LC_ALL=C sort >"$TEMP_DIR/dispatch"
+sed -nE 's/^\| ([a-z0-9-]+) \| `([^ `]+).*/\1 \2/p' \
+  "$ROOT/scenarios/README.md" |
+  LC_ALL=C sort >"$TEMP_DIR/readme"
 
-if [[ "${catalog_ids[*]}" != "${dispatch_ids[*]}" ]]; then
-  echo "scenario catalog and dispatcher IDs differ" >&2
-  diff -u \
-    <(printf '%s\n' "${catalog_ids[@]}") \
-    <(printf '%s\n' "${dispatch_ids[@]}") >&2 || true
+if ! cmp -s "$TEMP_DIR/catalog" "$TEMP_DIR/dispatch"; then
+  echo "scenario catalog and dispatcher mappings differ" >&2
+  diff -u "$TEMP_DIR/catalog" "$TEMP_DIR/dispatch" >&2 || true
   exit 1
 fi
 
-if [[ "${catalog_ids[*]}" != "${readme_ids[*]}" ]]; then
-  echo "scenario README and executable catalog IDs differ" >&2
-  diff -u \
-    <(printf '%s\n' "${catalog_ids[@]}") \
-    <(printf '%s\n' "${readme_ids[@]}") >&2 || true
+if ! cmp -s "$TEMP_DIR/catalog" "$TEMP_DIR/readme"; then
+  echo "scenario README and executable catalog mappings differ" >&2
+  diff -u "$TEMP_DIR/catalog" "$TEMP_DIR/readme" >&2 || true
   exit 1
 fi
 
-for id in "${dispatch_ids[@]}"; do
-  mapping="$(sed -nE "s/^    ${id//-/\\-}\\) echo \\\"([^|]+)\\|.*/\\1/p" "$RUNNER")"
-  if [[ -z "$mapping" ]]; then
-    echo "scenario $id has no script mapping" >&2
-    exit 1
-  fi
+while read -r id mapping; do
   path="$ROOT/scenarios/$mapping"
   if [[ "$id" == "a7" ]]; then
     [[ -f "$path" ]] || { echo "scenario $id is missing $mapping" >&2; exit 1; }
   else
     [[ -x "$path" ]] || { echo "scenario $id is not executable: $mapping" >&2; exit 1; }
   fi
-done
+done <"$TEMP_DIR/dispatch"
 
-printf 'scenario contract is complete: %s dispatches\n' "${#dispatch_ids[@]}"
+count="$(wc -l <"$TEMP_DIR/dispatch" | tr -d ' ')"
+printf 'scenario contract is complete: %s dispatches\n' "$count"
