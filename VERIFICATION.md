@@ -5,12 +5,11 @@ traffic generator see `./demo.sh`. This file remains the full cross-backend
 verification runbook.
 
 What's verified in CI/sandbox vs what needs a real host. The **code/config for
-every scenario is implemented**; Rust, web build/Vitest, and the three Java
-test suites run locally. Playwright discovery also runs locally, but browser
-execution needs a browser-capable host. Java uses a temporary Gradle cache
-outside the container's native library mount; the scenarios below still need a
-live multi-runtime environment (Sentry self-hosted, a browser, a collector with
-a short flush) that a sandbox can't provision.
+every scenario is implemented**; Rust, web build/Vitest, the three Java test
+suites, and Playwright browser journeys run locally. Java uses a temporary
+Gradle cache outside the container's native library mount; the scenarios below
+still need a live multi-runtime environment (Sentry self-hosted and a collector
+with a short flush) that this sandbox cannot provision.
 
 ## Verified here (build/run/execute)
 - Rust workspace builds (fmt + clippy clean); web builds (`bun run build`: Vite
@@ -18,8 +17,15 @@ a short flush) that a sandbox can't provision.
   `/v1/traces` register. Catalog, payment, and fulfillment clean Gradle suites
   pass on this Linux arm64 host with `GRADLE_USER_HOME=/tmp/parallax-gradle`
   and `-Dorg.gradle.native=false`; this avoids the home-mounted native cache
-  that cannot load Gradle/Jansi libraries. The live SSR/browser run requires a
-  browser-capable host.
+  that cannot load Gradle/Jansi libraries.
+- Chromium browser execution is locally proven on 2026-07-15. The arm64
+  sandbox lacks system browser libraries, so the test command uses a
+  user-owned extracted runtime and Fontconfig configuration outside the
+  repository: the default Playwright suite passes five journeys with two W4
+  retry fixtures skipped, and the W4 opt-in run intentionally records one
+  assertion failure and one harness timeout before both pass on retry. This
+  proves the browser UI contracts and failure taxonomy; collector-backed trace
+  inspection remains a live-stack gate.
 - The complete Rust nextest `ci` profile passes 57 tests across 11 binaries;
   its generated JUnit XML is accepted by `playground test-report` as 57 passed
   cases with no implicit localhost exporter.
