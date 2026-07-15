@@ -67,14 +67,10 @@ fn test_report_command(args: &[String]) -> anyhow::Result<i32> {
     };
     let summary = test_report::emit(Path::new(path))?;
     println!(
-        "reported {} test cases ({} passed, {} failed, {} errors)",
+        "reported {} test attempts ({} passed, {} failed, {} errors)",
         summary.total, summary.passed, summary.failed, summary.errors
     );
-    Ok(if summary.failed + summary.errors == 0 {
-        0
-    } else {
-        1
-    })
+    Ok(if summary.final_failures == 0 { 0 } else { 1 })
 }
 
 #[tracing::instrument(fields(otel.kind = semconv::SPAN_KIND_CLIENT))]
@@ -471,5 +467,30 @@ mod tests {
         assert_eq!(orphan_env.get(&OsString::from("TRACEPARENT")), Some(&None));
         assert_eq!(orphan_env.get(&OsString::from("TRACESTATE")), Some(&None));
         assert_eq!(orphan_env.get(&OsString::from("BAGGAGE")), Some(&None));
+    }
+
+    fn w4_acceptance_attempt() -> u32 {
+        if std::env::var("PLAYGROUND_TEST_FLAKY_FIXTURE").as_deref() != Ok("1") {
+            return 2;
+        }
+        std::env::var("NEXTEST_ATTEMPT")
+            .expect("W4 acceptance fixtures require cargo-nextest")
+            .parse()
+            .expect("NEXTEST_ATTEMPT must be a positive integer")
+    }
+
+    #[test]
+    fn w4_assertion_failure_passes_on_retry() {
+        assert!(
+            w4_acceptance_attempt() > 1,
+            "intentional first-attempt assertion failure"
+        );
+    }
+
+    #[test]
+    fn w4_harness_error_passes_on_retry() {
+        if w4_acceptance_attempt() == 1 {
+            std::process::abort();
+        }
     }
 }

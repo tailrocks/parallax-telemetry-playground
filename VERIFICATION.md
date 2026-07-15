@@ -153,6 +153,20 @@ Verify: set `PLAYGROUND_TEST_TELEMETRY=1`, `TRACEPARENT`, and
 `OTEL_EXPORTER_OTLP_ENDPOINT` for a focused notifications nextest run. Inspect
 the test-run parent plus the HTTP server/client work below it in the collector.
 
+Rust also has a bounded acceptance profile for the retry/failure taxonomy. It
+records a real assertion panic and a SIGABRT harness failure on attempt 1, then
+passes both tests in fresh processes on attempt 2. The JUnit converter expands
+nextest's `flakyFailure` elements into four OTLP test-attempt spans instead of
+collapsing them into two final passes:
+
+```bash
+PLAYGROUND_TEST_FLAKY_FIXTURE=1 mise exec -- \
+  cargo nextest run --locked -p playground-cli --profile w4-acceptance \
+  -E 'test(/w4_.*_passes_on_retry/)' --no-tests=fail
+mise exec -- cargo run --locked -p playground-cli -- \
+  test-report target/nextest/w4-acceptance/junit.xml
+```
+
 ### W3 — inventory Postgres reservation
 
 Code: inventory's opt-in integration test uses the production SQLx pool and

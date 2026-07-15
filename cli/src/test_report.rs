@@ -31,9 +31,10 @@ pub(super) struct Summary {
     pub(super) passed: usize,
     pub(super) failed: usize,
     pub(super) errors: usize,
+    pub(super) final_failures: usize,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Case {
     suite: String,
     name: String,
@@ -41,6 +42,8 @@ struct Case {
     duration_ms: Option<u64>,
     outcome: Outcome,
     diagnostic: Option<Diagnostic>,
+    attempt_ordinal: i64,
+    total_attempts: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,7 +63,7 @@ impl Outcome {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Diagnostic {
     kind: String,
     message: String,
@@ -73,6 +76,8 @@ struct ActiveCase {
     diagnostic_message: String,
     diagnostic_stack: String,
     reading_diagnostic: bool,
+    reading_flaky: bool,
+    prior_attempts: Vec<Case>,
 }
 
 pub(super) fn emit(path: &Path) -> anyhow::Result<Summary> {
@@ -119,24 +124,14 @@ fn emit_case(case: Case) {
             TEST_CONFIGURATION_ENVIRONMENT,
             std::env::var("PARALLAX_ENV").unwrap_or_else(|_| "playground".into()),
         ),
-        KeyValue::new(
-            TEST_ATTEMPT,
-            attempt_ordinal(std::env::var("NEXTEST_ATTEMPT").ok().as_deref()),
-        ),
+        KeyValue::new(TEST_ATTEMPT, case.attempt_ordinal),
+        KeyValue::new(TEST_TOTAL_ATTEMPTS, case.total_attempts),
     ];
     if let Some(attempt_id) = std::env::var("NEXTEST_ATTEMPT_ID")
         .ok()
         .filter(|value| !value.trim().is_empty())
     {
         attributes.push(KeyValue::new(TEST_ATTEMPT_ID, attempt_id));
-    }
-    if let Some(total_attempts) = std::env::var("NEXTEST_TOTAL_ATTEMPTS")
-        .ok()
-        .as_deref()
-        .and_then(|value| value.parse::<i64>().ok())
-        .filter(|value| *value > 0)
-    {
-        attributes.push(KeyValue::new(TEST_TOTAL_ATTEMPTS, total_attempts));
     }
     if let Some(duration_ms) = case.duration_ms {
         attributes.push(KeyValue::new("test.case.duration_ms", duration_ms as i64));
@@ -189,13 +184,6 @@ fn report_parent_context() -> opentelemetry::Context {
     } else {
         playground_telemetry::current_context()
     }
-}
-
-fn attempt_ordinal(value: Option<&str>) -> i64 {
-    value
-        .and_then(|value| value.parse::<i64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(1)
 }
 
 fn test_parameters(name: &str) -> Option<String> {
@@ -253,11 +241,15 @@ fn parse(document: &str) -> anyhow::Result<Vec<Case>> {
                         duration_ms: seconds_to_ms(attribute(&event, b"time")?.as_deref()),
                         outcome: Outcome::Pass,
                         diagnostic: None,
+                        attempt_ordinal: 1,
+                        total_attempts: 1,
                     },
                     diagnostic_kind: None,
                     diagnostic_message: String::new(),
                     diagnostic_stack: String::new(),
                     reading_diagnostic: false,
+                    reading_flaky: false,
+                    prior_attempts: Vec::new(),
                 });
             }
             Event::Empty(event) if event.name().as_ref() == b"testcase" => {
@@ -268,21 +260,31 @@ fn parse(document: &str) -> anyhow::Result<Vec<Case>> {
                     duration_ms: seconds_to_ms(attribute(&event, b"time")?.as_deref()),
                     outcome: Outcome::Pass,
                     diagnostic: None,
+                    attempt_ordinal: 1,
+                    total_attempts: 1,
                 });
             }
             Event::Start(event)
-                if event.name().as_ref() == b"failure" || event.name().as_ref() == b"error" =>
+                if event.name().as_ref() == b"failure"
+                    || event.name().as_ref() == b"error"
+                    || event.name().as_ref() == b"flakyFailure" =>
             {
                 if let Some(active) = active_case.as_mut() {
                     set_diagnostic(active, &event)?;
                     active.reading_diagnostic = true;
+                    active.reading_flaky = event.name().as_ref() == b"flakyFailure";
                 }
             }
             Event::Empty(event)
-                if event.name().as_ref() == b"failure" || event.name().as_ref() == b"error" =>
+                if event.name().as_ref() == b"failure"
+                    || event.name().as_ref() == b"error"
+                    || event.name().as_ref() == b"flakyFailure" =>
             {
                 if let Some(active) = active_case.as_mut() {
                     set_diagnostic(active, &event)?;
+                    if event.name().as_ref() == b"flakyFailure" {
+                        finish_flaky_attempt(active);
+                    }
                 }
             }
             Event::Text(text) => {
@@ -293,7 +295,9 @@ fn parse(document: &str) -> anyhow::Result<Vec<Case>> {
                 }
             }
             Event::End(event)
-                if event.name().as_ref() == b"failure" || event.name().as_ref() == b"error" =>
+                if event.name().as_ref() == b"failure"
+                    || event.name().as_ref() == b"error"
+                    || event.name().as_ref() == b"flakyFailure" =>
             {
                 if let Some(active) = active_case.as_mut()
                     && active.diagnostic_message.is_empty()
@@ -302,6 +306,9 @@ fn parse(document: &str) -> anyhow::Result<Vec<Case>> {
                 }
                 if let Some(active) = active_case.as_mut() {
                     active.reading_diagnostic = false;
+                    if active.reading_flaky {
+                        finish_flaky_attempt(active);
+                    }
                 }
             }
             Event::End(event) if event.name().as_ref() == b"testcase" => {
@@ -313,6 +320,13 @@ fn parse(document: &str) -> anyhow::Result<Vec<Case>> {
                             stack: active.diagnostic_stack,
                         });
                     }
+                    let total_attempts = active.prior_attempts.len() as i64 + 1;
+                    for attempt in &mut active.prior_attempts {
+                        attempt.total_attempts = total_attempts;
+                    }
+                    active.case.attempt_ordinal = total_attempts;
+                    active.case.total_attempts = total_attempts;
+                    cases.extend(active.prior_attempts);
                     cases.push(active.case);
                 }
             }
@@ -324,17 +338,34 @@ fn parse(document: &str) -> anyhow::Result<Vec<Case>> {
 }
 
 fn set_diagnostic(active: &mut ActiveCase, event: &BytesStart<'_>) -> anyhow::Result<()> {
-    active.case.outcome = if event.name().as_ref() == b"failure" {
-        Outcome::Fail
-    } else {
+    let kind = attribute(event, b"type")?
+        .unwrap_or_else(|| String::from_utf8_lossy(event.name().as_ref()).into_owned());
+    active.case.outcome = if event.name().as_ref() == b"error"
+        || kind.contains("abort")
+        || kind.contains("timeout")
+        || kind.contains("error")
+    {
         Outcome::Error
+    } else {
+        Outcome::Fail
     };
-    active.diagnostic_kind = Some(
-        attribute(event, b"type")?
-            .unwrap_or_else(|| String::from_utf8_lossy(event.name().as_ref()).into_owned()),
-    );
+    active.diagnostic_kind = Some(kind);
     active.diagnostic_message = attribute(event, b"message")?.unwrap_or_default();
     Ok(())
+}
+
+fn finish_flaky_attempt(active: &mut ActiveCase) {
+    let diagnostic = active.diagnostic_kind.take().map(|kind| Diagnostic {
+        kind,
+        message: std::mem::take(&mut active.diagnostic_message),
+        stack: std::mem::take(&mut active.diagnostic_stack),
+    });
+    let mut attempt = active.case.clone();
+    attempt.diagnostic = diagnostic;
+    attempt.attempt_ordinal = active.prior_attempts.len() as i64 + 1;
+    active.prior_attempts.push(attempt);
+    active.case.outcome = Outcome::Pass;
+    active.reading_flaky = false;
 }
 
 fn attribute(event: &BytesStart<'_>, wanted: &[u8]) -> anyhow::Result<Option<String>> {
@@ -365,6 +396,9 @@ fn summarize(cases: &[Case]) -> Summary {
             Outcome::Fail => summary.failed += 1,
             Outcome::Error => summary.errors += 1,
         }
+        if case.attempt_ordinal == case.total_attempts && case.outcome != Outcome::Pass {
+            summary.final_failures += 1;
+        }
     }
     summary
 }
@@ -372,8 +406,8 @@ fn summarize(cases: &[Case]) -> Summary {
 #[cfg(test)]
 mod tests {
     use super::{
-        Case, Outcome, attempt_ordinal, code_reference, parse, report_parent_context,
-        seconds_to_ms, summarize, test_parameters,
+        Case, Outcome, code_reference, parse, report_parent_context, seconds_to_ms, summarize,
+        test_parameters,
     };
     use opentelemetry::trace::{
         SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState,
@@ -431,6 +465,8 @@ mod tests {
             duration_ms: None,
             outcome: Outcome::Pass,
             diagnostic: None,
+            attempt_ordinal: 1,
+            total_attempts: 1,
         };
         assert_eq!(
             code_reference(
@@ -444,11 +480,22 @@ mod tests {
     }
 
     #[test]
-    fn retry_ordinal_defaults_and_rejects_invalid_values() {
-        assert_eq!(attempt_ordinal(None), 1);
-        assert_eq!(attempt_ordinal(Some("0")), 1);
-        assert_eq!(attempt_ordinal(Some("nope")), 1);
-        assert_eq!(attempt_ordinal(Some("2")), 2);
+    fn expands_nextest_flaky_failures_into_attempt_chains() {
+        let cases = parse(
+            r#"<testsuite name="cli"><testcase name="abort"><flakyFailure type="test abort" message="SIGABRT">aborted</flakyFailure></testcase><testcase name="assert"><flakyFailure type="test failure" message="panicked">assertion stack</flakyFailure></testcase></testsuite>"#,
+        )
+        .expect("valid nextest JUnit parses");
+        assert_eq!(cases.len(), 4);
+        assert_eq!(cases[0].outcome, Outcome::Error);
+        assert_eq!(cases[0].attempt_ordinal, 1);
+        assert_eq!(cases[0].total_attempts, 2);
+        assert_eq!(cases[1].outcome, Outcome::Pass);
+        assert_eq!(cases[1].attempt_ordinal, 2);
+        assert_eq!(cases[2].outcome, Outcome::Fail);
+        assert_eq!(cases[3].outcome, Outcome::Pass);
+        assert_eq!(summarize(&cases).passed, 2);
+        assert_eq!(summarize(&cases).failed, 1);
+        assert_eq!(summarize(&cases).errors, 1);
     }
 
     #[test]
