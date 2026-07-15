@@ -25,6 +25,8 @@ Java preserves the carrier across all three Gradle suites; web runs Bun Vitest
 and Playwright beneath the same run parent.
 
 ## Verified here (build/run/execute)
+- `scripts/check-scenarios.sh` proves all 45 catalog IDs have dispatcher
+  mappings to present executable drivers and syntax-checks every shell driver.
 - Rust workspace builds (fmt + clippy clean); web builds (`bun run build`: Vite
   client + SSR + Nitro server) and type-checks (`tsc --noEmit`); routes `/` and
   `/v1/traces` register. Catalog, payment, and fulfillment clean Gradle suites
