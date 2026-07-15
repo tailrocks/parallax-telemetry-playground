@@ -24,6 +24,28 @@ The Rust mode runs nextest and converts its durable JUnit in the same session;
 Java preserves the carrier across all three Gradle suites; web runs Bun Vitest
 and Playwright beneath the same run parent.
 
+Append `--acceptance` to include each stack's bounded pass-after-fail fixtures.
+After the wrapper prints its finished run ID, verify the indexed payload through
+Parallax's GraphQL API:
+
+```bash
+parallax run start -- scripts/observable-test-session.sh rust --acceptance
+mise exec -- cargo run --locked -p playground-cli -- test-verify <run-id> rust
+
+parallax run start -- scripts/observable-test-session.sh java --acceptance
+mise exec -- cargo run --locked -p playground-cli -- test-verify <run-id> java
+
+parallax run start -- scripts/observable-test-session.sh web --acceptance
+mise exec -- cargo run --locked -p playground-cli -- test-verify <run-id> web
+```
+
+Pass a third `http://host:port` argument to `test-verify` for a non-default
+Parallax API. The verifier polls boundedly for indexing and then checks the
+real span graph and payload: exported run parent, run identity, explicit and
+code-reference test identity, parameter/configuration separation, retries,
+failed-versus-broken taxonomy, revision/version resources, ERROR status, and
+at least one application descendant below a test span.
+
 ## Verified here (build/run/execute)
 - `scripts/check-scenarios.sh` proves all 45 catalog IDs have dispatcher
   mappings and README rows, resolves them to present executable drivers, and

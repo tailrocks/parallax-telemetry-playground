@@ -64,6 +64,21 @@ The shared test payload uses `test.case.name`, `test.case.result.status`,
 identity is available. Regenerate them only from Parallax with
 `cargo xtask semconv --playground-root ../parallax-telemetry-playground generate`.
 
+The acceptance run is executable and machine-checked against Parallax rather
+than accepted from screenshots:
+
+```bash
+parallax run start -- scripts/observable-test-session.sh web --acceptance
+mise exec -- cargo run --locked -p playground-cli -- \
+  test-verify <run-id-printed-above> web
+```
+
+Use `rust`, `java`, or `web` consistently in both commands. The verifier polls
+the GraphQL API for the finished run and fails unless it finds the exported
+run-session parent, complete identity/configuration/retry/failure payload,
+assertion and harness failures, version/revision resources, and application
+spans descended from a test span.
+
 **Verified locally (2026-06-23):**
 - Rust workspace compiles (`cargo build`, fmt + clippy clean).
 - **Integrated end-to-end**: the four Rust services emit OTLP → the fan-out lab's

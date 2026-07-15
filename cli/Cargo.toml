@@ -13,6 +13,7 @@ playground-telemetry = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }
 quick-xml = { workspace = true }
 opentelemetry = { workspace = true }

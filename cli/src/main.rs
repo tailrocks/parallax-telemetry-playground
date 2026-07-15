@@ -8,6 +8,7 @@
 //! Flushes telemetry on exit (short-lived discipline).
 
 mod test_report;
+mod test_verify;
 
 use std::path::Path;
 use std::process::Command as ProcessCommand;
@@ -31,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     // well as a live OTLP producer. Avoid the SDK's implicit localhost exporter
     // when no collector was requested; `parallax run start` supplies the
     // endpoint for the observable path.
-    let telemetry = if mode == "test-report"
+    let telemetry = if matches!(mode.as_str(), "test-report" | "test-verify")
         && std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
             .ok()
             .is_none_or(|endpoint| endpoint.trim().is_empty())
@@ -42,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let result = match mode.as_str() {
         "test-report" => test_report_command(&rest),
+        "test-verify" => test_verify_command(&rest).await,
         "cron" => cron(rest).await,
         "daemon" => daemon(rest).await,
         "enter" => enter(rest).await,
@@ -59,6 +61,24 @@ async fn main() -> anyhow::Result<()> {
         telemetry.shutdown(); // flush before exit
     }
     std::process::exit(code);
+}
+
+async fn test_verify_command(args: &[String]) -> anyhow::Result<i32> {
+    let [run_id, stack, rest @ ..] = args else {
+        return Err(anyhow::anyhow!(
+            "usage: playground test-verify <run-id> <rust|java|web> [parallax-api-url]"
+        ));
+    };
+    let api_url = rest
+        .first()
+        .map(String::as_str)
+        .unwrap_or("http://127.0.0.1:4000");
+    let summary = test_verify::verify(api_url, run_id, stack).await?;
+    println!(
+        "verified {stack} observable run {run_id}: {} traces, {} test attempts, {} app descendants",
+        summary.traces, summary.test_attempts, summary.app_descendants
+    );
+    Ok(0)
 }
 
 fn test_report_command(args: &[String]) -> anyhow::Result<i32> {
