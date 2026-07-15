@@ -3,5 +3,7 @@ dist
 .output
 .nitro
 .tanstack
+playwright-report
+test-results
 src/routeTree.gen.ts
 *.local
