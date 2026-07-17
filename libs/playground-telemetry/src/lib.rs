@@ -123,6 +123,9 @@ pub fn init_test_telemetry(service: &'static str) -> anyhow::Result<Option<TestT
         use opentelemetry_otlp::WithExportConfig as _;
         opentelemetry_otlp::SpanExporter::builder()
             .with_http()
+            // The wrapper env sets OTEL_EXPORTER_OTLP_PROTOCOL=grpc for the
+            // service under test; this exporter is HTTP by construction.
+            .with_protocol(opentelemetry_otlp::Protocol::HttpBinary)
             .with_endpoint(endpoint)
             .build()?
     };
