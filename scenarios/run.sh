@@ -67,6 +67,7 @@ m-shapes        corner-cases.sh m-shapes       corner-case corpus (plan 161)    
 m-labels        corner-cases.sh m-labels       corner-case corpus (plan 168)             Metrics: gauge + sum with region label eu/us/ap at fixed 6/3/1 proportions (group-by assertions)
 f-attrs         corner-cases.sh f-attrs        corner-case corpus (plan 164)             Traces/Logs: 100 spans + 100 logs with http.request.method 70/20/10 GET/POST/DELETE (facet count assertions)
 e-burst         corner-cases.sh e-burst        corner-case corpus (plan 161)             Issues: one recurring error type plus five distinct error.type values
+eco-external    corner-cases.sh eco-external   corner-case corpus (plan 166)             Ecosystem: checkout CLIENT span to api.stripe.test with no instrumented SERVER side
 e-multi-lang    corner-cases.sh e-multi-lang   corner-case corpus (plan 161)             Issues: same failure with Rust/Java/browser fingerprints
 p-grpc-err      corner-cases.sh p-grpc-err     corner-case corpus (plan 161)             Traces: gRPC OK/INVALID_ARGUMENT/DEADLINE_EXCEEDED variants
 p-grpc-stream   corner-cases.sh p-grpc-stream  corner-case corpus (plan 161)             Traces: streaming RPC with per-message events
@@ -148,6 +149,7 @@ scenario() {
     p-grpc-err) echo "corner-cases.sh p-grpc-err|Traces: gRPC OK/INVALID_ARGUMENT/DEADLINE_EXCEEDED variants" ;;
     p-grpc-stream) echo "corner-cases.sh p-grpc-stream|Traces: streaming RPC with per-message events" ;;
     p-graphql-err) echo "corner-cases.sh p-graphql-err|Traces: GraphQL field error with partial data + request-level error" ;;
+    eco-external) echo "corner-cases.sh eco-external|Ecosystem: checkout CLIENT span to api.stripe.test with no instrumented SERVER side" ;;
     p-kafka-lag) echo "corner-cases.sh p-kafka-lag|Traces: consumer lag + dead-letter over the Kafka leg" ;;
     j-happy) echo "corner-cases.sh j-happy|CLI Apps journey: home→cart→checkout, all actions succeed" ;;
     j-error) echo "corner-cases.sh j-error|CLI Apps journey: checkout.submit fails on the checkout screen with widget context" ;;

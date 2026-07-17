@@ -11,7 +11,7 @@ export OTEL_EXPORTER_OTLP_PROTOCOL="${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}"
 export PARALLAX_ENV="${PARALLAX_ENV:-playground}"
 export RUST_LOG="${RUST_LOG:-info}"
 
-SHAPES_IDS=(t-deep t-wide t-multiroot t-orphan t-skew t-zero t-links t-longnames t-events l-burst l-bodies l-patterns m-shapes m-labels f-attrs e-burst e-multi-lang)
+SHAPES_IDS=(t-deep t-wide t-multiroot t-orphan t-skew t-zero t-links t-longnames t-events l-burst l-bodies l-patterns m-shapes m-labels f-attrs eco-external e-burst e-multi-lang)
 JOURNEY_IDS=(j-happy j-error j-outside j-reattach j-parallel)
 PROTOCOL_IDS=(p-grpc-err p-grpc-stream p-graphql-err p-kafka-lag)
 ALL_IDS=("${SHAPES_IDS[@]}" "${PROTOCOL_IDS[@]}" "${JOURNEY_IDS[@]}" eco-full)
@@ -27,7 +27,9 @@ run_id() {
   local id="$1"
   echo "── corner case: $id"
   case "$id" in
-    t-*|l-*|m-*|f-*|e-*)
+    # NOTE: no bare `e-*` glob here — it would also match eco-full and route
+    # it to `shapes eco-full`, which does not exist.
+    t-*|l-*|m-*|f-*|e-burst|e-multi-lang|eco-external)
       require_binary
       "$BIN" shapes "$id"
       ;;

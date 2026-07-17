@@ -14,9 +14,15 @@ done < <(find "$ROOT/scenarios" -maxdepth 1 -type f -name '*.sh' -print | sort)
   awk 'NR > 1 && NF { print $1, $2 }' |
   LC_ALL=C sort >"$TEMP_DIR/catalog"
 sed -nE 's/^    ([a-z0-9-]+)\) echo "([^|]+)\|.*/\1 \2/p' "$RUNNER" |
+  awk '{ print $1, $2 }' |
   LC_ALL=C sort >"$TEMP_DIR/dispatch"
-sed -nE 's/^\| ([a-z0-9-]+) \| `([^ `]+).*/\1 \2/p' \
-  "$ROOT/scenarios/README.md" |
+{
+  sed -nE 's/^\| ([a-z0-9-]+) \| `([^ `]+).*/\1 \2/p' \
+    "$ROOT/scenarios/README.md"
+  sed -nE 's/^\| `([a-z0-9-]+)` \|.*/\1 corner-cases.sh/p' \
+    "$ROOT/docs/corner-case-matrix.md"
+} |
+  LC_ALL=C sort -u |
   LC_ALL=C sort >"$TEMP_DIR/readme"
 
 if ! cmp -s "$TEMP_DIR/catalog" "$TEMP_DIR/dispatch"; then

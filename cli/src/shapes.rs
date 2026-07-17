@@ -668,6 +668,36 @@ pub(crate) fn f_attrs_logs() -> ExportLogsServiceRequest {
     logs_request(records)
 }
 
+/// eco-external (plan 166): an instrumented checkout SERVER root calls one
+/// uninstrumented external HTTP host. The CLIENT span deliberately has no
+/// matching SERVER child, making external-node derivation exact and the
+/// internal-edge exclusion negative case testable.
+pub(crate) fn eco_external() -> Vec<SpanSpec> {
+    let trace = id16(8_000);
+    let base = now_nanos();
+    let mut root = SpanSpec::basic(&trace, 8_000, None, "checkout.request", base);
+    root.kind = 2; // SERVER
+    root.end = base + 40_000_000;
+    root.service = Some("checkout".to_string());
+
+    let mut client = SpanSpec::basic(
+        &trace,
+        8_001,
+        Some(root.id.clone()),
+        "GET api.stripe.test",
+        base + 5_000_000,
+    );
+    client.kind = 3; // CLIENT
+    client.end = base + 30_000_000;
+    client.service = Some("checkout".to_string());
+    client.attrs = vec![
+        kv(semconv::SERVER_ADDRESS, "api.stripe.test"),
+        kv(semconv::HTTP_REQUEST_METHOD, "GET"),
+        kv("shape.case", "eco-external"),
+    ];
+    vec![root, client]
+}
+
 /// m-labels (plan 168): one gauge and one monotonic sum emitted with a
 /// 3-value `region` label (eu/us/ap) at fixed per-region values, so group-by
 /// breakdown output is exactly assertable.
@@ -832,7 +862,7 @@ async fn post(path: &str, body: Vec<u8>) -> anyhow::Result<()> {
 pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
     let Some(id) = args.first().map(String::as_str) else {
         anyhow::bail!(
-            "usage: playground shapes <t-deep|t-wide|t-multiroot|t-orphan|t-skew|t-zero|t-links|t-longnames|t-events|l-burst|l-bodies|l-patterns|m-shapes|m-labels|f-attrs|e-burst|e-multi-lang>"
+            "usage: playground shapes <t-deep|t-wide|t-multiroot|t-orphan|t-skew|t-zero|t-links|t-longnames|t-events|eco-external|l-burst|l-bodies|l-patterns|m-shapes|m-labels|f-attrs|e-burst|e-multi-lang>"
         );
     };
     println!("shapes: emitting {id} as {SERVICE}");
@@ -865,6 +895,7 @@ pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
             post_traces(f_attrs_spans()).await?;
             post("v1/logs", f_attrs_logs().encode_to_vec()).await?;
         }
+        "eco-external" => post_traces(eco_external()).await?,
         "m-labels" => post("v1/metrics", m_labels().encode_to_vec()).await?,
         "e-burst" => post_traces(e_burst()).await?,
         "e-multi-lang" => post("v1/logs", e_multi_lang().encode_to_vec()).await?,
@@ -978,6 +1009,42 @@ mod tests {
         let logs = f_attrs_logs();
         let records = &logs.resource_logs[0].scope_logs[0].log_records;
         assert_eq!(records.len(), 100);
+    }
+
+    #[test]
+    fn eco_external_has_one_unmatched_client_dependency() {
+        let spans = eco_external();
+        assert_eq!(spans.len(), 2);
+        let root = &spans[0];
+        let client = &spans[1];
+        assert_eq!(root.kind, 2);
+        assert_eq!(client.kind, 3);
+        assert_eq!(client.parent.as_deref(), Some(root.id.as_slice()));
+        assert_eq!(root.service.as_deref(), Some("checkout"));
+        assert_eq!(client.service.as_deref(), Some("checkout"));
+        assert!(client.attrs.iter().any(|attribute| {
+            attribute.key == semconv::SERVER_ADDRESS
+                && attribute.value.as_ref().is_some_and(|value| {
+                    value.value == Some(AnyValueEnum::StringValue("api.stripe.test".to_string()))
+                })
+        }));
+        assert!(
+            spans.iter().skip(1).all(|span| span.kind != 2),
+            "external client must have no matching SERVER child"
+        );
+        let request = traces_request(spans);
+        assert_eq!(request.resource_spans.len(), 1);
+        assert!(
+            request.resource_spans[0]
+                .resource
+                .as_ref()
+                .is_some_and(|resource| resource.attributes.iter().any(|attribute| {
+                    attribute.key == semconv::SERVICE_NAME
+                        && attribute.value.as_ref().is_some_and(|value| {
+                            value.value == Some(AnyValueEnum::StringValue("checkout".to_string()))
+                        })
+                }))
+        );
     }
 
     #[test]
