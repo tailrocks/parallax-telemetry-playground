@@ -603,7 +603,13 @@ fn grpc_code_number(code: Code) -> i64 {
 
 /// A7: consume the pricing server-stream (a long-lived streaming CLIENT span).
 async fn quote_stream(headers: HeaderMap, Query(p): Query<CheckoutParams>) -> Json<Value> {
-    let span = tracing::info_span!("quote_stream", otel.kind = semconv::SPAN_KIND_SERVER);
+    let span = tracing::info_span!(
+        "quote_stream",
+        otel.kind = semconv::SPAN_KIND_SERVER,
+        "rpc.system" = "grpc",
+        "rpc.service" = "playground.Pricing",
+        "rpc.method" = "QuoteStream",
+    );
     playground_telemetry::set_parent_from_headers(&span, &headers);
     quote_stream_inner(p).instrument(span).await
 }

@@ -72,7 +72,13 @@ impl Pricing for PricingSvc {
         &self,
         request: Request<QuoteRequest>,
     ) -> Result<Response<Self::QuoteStreamStream>, Status> {
-        let span = tracing::info_span!("quote_stream", otel.kind = semconv::SPAN_KIND_SERVER);
+        let span = tracing::info_span!(
+            "quote_stream",
+            otel.kind = semconv::SPAN_KIND_SERVER,
+            "rpc.system" = "grpc",
+            "rpc.service" = "playground.Pricing",
+            "rpc.method" = "QuoteStream",
+        );
         let parent = playground_telemetry::extract_grpc_context(request.metadata());
         playground_telemetry::set_parent_from_grpc_metadata(&span, request.metadata());
         playground_telemetry::stamp_business_baggage(&span, &parent);
