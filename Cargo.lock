@@ -2157,6 +2157,7 @@ dependencies = [
  "bytes",
  "http 1.4.2",
  "opentelemetry",
+ "reqwest",
 ]
 
 [[package]]
@@ -2167,9 +2168,11 @@ checksum = "9966929966d17620d7c316c643ba62631826e10021409357772d5eea84f62c35"
 dependencies = [
  "http 1.4.2",
  "opentelemetry",
+ "opentelemetry-http",
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost",
+ "reqwest",
  "thiserror",
  "tokio",
  "tonic",

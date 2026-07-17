@@ -61,9 +61,9 @@ static EVENT_LOGGER: OnceLock<SdkLogger> = OnceLock::new();
 
 /// Opt-in telemetry for one nextest test process.
 ///
-/// Set `PLAYGROUND_TEST_TELEMETRY=1` when invoking nextest. The helper uses a
-/// simple exporter and an explicit shutdown because a failing libtest process
-/// may exit before batch processors can flush. Keep the returned value alive
+/// Set `PLAYGROUND_TEST_TELEMETRY=1` when invoking nextest. The helper uses
+/// the batch processor's own background thread (safe under any tokio test
+/// runtime) with an explicit shutdown flush. Keep the returned value alive
 /// for the test and use [`TestTelemetry::enter`] around the test body.
 pub struct TestTelemetry {
     tracer_provider: SdkTracerProvider,
@@ -110,16 +110,29 @@ pub fn init_test_telemetry(service: &'static str) -> anyhow::Result<Option<TestT
         Box::new(TraceContextPropagator::new()),
         Box::new(BaggagePropagator::new()),
     ]));
-    let exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_tonic()
-        .build()?;
+    // OTLP over HTTP with the blocking reqwest client, exported by the batch
+    // processor's dedicated background thread. The previous tonic + simple
+    // exporter combination deadlocked inside a current-thread #[tokio::test]
+    // runtime (inline export blocked the only thread its channel needed),
+    // and a blocking client cannot export inline on an async thread either —
+    // the batch thread is the only safe home. `shutdown` flushes it.
+    let endpoint = std::env::var("PLAYGROUND_TEST_OTLP_ENDPOINT")
+        .or_else(|_| std::env::var("PARALLAX_OTLP_HTTP_TRACES_ENDPOINT"))
+        .unwrap_or_else(|_| "http://127.0.0.1:4318/v1/traces".to_string());
+    let exporter = {
+        use opentelemetry_otlp::WithExportConfig as _;
+        opentelemetry_otlp::SpanExporter::builder()
+            .with_http()
+            .with_endpoint(endpoint)
+            .build()?
+    };
     let provider = SdkTracerProvider::builder()
         .with_resource(
             Resource::builder()
                 .with_attributes(resource_attributes(service))
                 .build(),
         )
-        .with_simple_exporter(exporter)
+        .with_batch_exporter(exporter)
         .build();
     global::set_tracer_provider(provider.clone());
     let subscriber = tracing_subscriber::registry()
