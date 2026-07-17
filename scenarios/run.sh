@@ -62,6 +62,7 @@ t-longnames     corner-cases.sh t-longnames    corner-case corpus (plan 161)    
 t-events        corner-cases.sh t-events       corner-case corpus (plan 161)             Trace detail: 51 span events incl. Rust/Java/browser stacktraces
 l-burst         corner-cases.sh l-burst        corner-case corpus (plan 161)             Logs: 5k logs in seconds (live tail caps, histogram)
 l-bodies        corner-cases.sh l-bodies       corner-case corpus (plan 161)             Logs: JSON body, 32 KiB body, ANSI escapes, blank body, identical timestamps
+l-patterns      corner-cases.sh l-patterns     corner-case corpus (plan 165)             Logs: 20k lines from 12 templates with parameter churn + one late spiking template (Drain clustering)
 m-shapes        corner-cases.sh m-shapes       corner-case corpus (plan 161)             Metrics: counter reset mid-window, gauge gap, exemplar-bearing histogram
 m-labels        corner-cases.sh m-labels       corner-case corpus (plan 168)             Metrics: gauge + sum with region label eu/us/ap at fixed 6/3/1 proportions (group-by assertions)
 f-attrs         corner-cases.sh f-attrs        corner-case corpus (plan 164)             Traces/Logs: 100 spans + 100 logs with http.request.method 70/20/10 GET/POST/DELETE (facet count assertions)
@@ -138,6 +139,7 @@ scenario() {
     t-events) echo "corner-cases.sh t-events|Trace detail: 51 span events incl. Rust/Java/browser stacktraces" ;;
     l-burst) echo "corner-cases.sh l-burst|Logs: 5k logs in seconds (live tail caps, histogram)" ;;
     l-bodies) echo "corner-cases.sh l-bodies|Logs: JSON body, 32 KiB body, ANSI escapes, blank body, identical timestamps" ;;
+    l-patterns) echo "corner-cases.sh l-patterns|Logs: 20k lines from 12 templates with parameter churn + one late spiking template (Drain clustering)" ;;
     m-shapes) echo "corner-cases.sh m-shapes|Metrics: counter reset mid-window, gauge gap, exemplar-bearing histogram" ;;
     m-labels) echo "corner-cases.sh m-labels|Metrics: gauge + sum with region label eu/us/ap at fixed 6/3/1 proportions (group-by assertions)" ;;
     f-attrs) echo "corner-cases.sh f-attrs|Traces/Logs: 100 spans + 100 logs with http.request.method 70/20/10 GET/POST/DELETE (facet count assertions)" ;;

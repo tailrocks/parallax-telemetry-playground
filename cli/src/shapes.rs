@@ -539,6 +539,83 @@ pub(crate) fn m_shapes(anchor: &[SpanSpec]) -> ExportMetricsServiceRequest {
     }
 }
 
+/// l-patterns (plan 165): ≥20k log lines drawn from 12 stable templates with
+/// per-line parameter churn (ids, ips, durations) plus one "spiking"
+/// template concentrated late in the window, so Drain clustering quality and
+/// the spike ranking are exactly assertable: 11 steady templates × 1,200
+/// lines + 6,800 spike lines = 20,000.
+pub(crate) const L_PATTERNS_STEADY_TEMPLATES: usize = 11;
+pub(crate) const L_PATTERNS_STEADY_LINES: u64 = 1_200;
+pub(crate) const L_PATTERNS_SPIKE_LINES: u64 = 6_800;
+
+fn l_patterns_line(template: usize, index: u64) -> (String, i32) {
+    let uid = 10_000 + (index % 977);
+    let ip = format!("10.{}.{}.{}", index % 8, (index / 8) % 250, index % 250);
+    let ms = 3 + (index % 512);
+    let order = format!("o-{}", 42_000 + index % 5_003);
+    let sku = format!("SKU-{}", index % 61);
+    match template {
+        0 => (format!("user {uid} logged in from {ip}"), 9),
+        1 => (format!("GET /api/orders/{order} completed in {ms}ms"), 9),
+        2 => (format!("cache miss for key products:{sku}"), 5),
+        3 => (format!("published event order.updated id={order}"), 9),
+        4 => (format!("db query took {ms}ms rows={}", index % 40), 5),
+        5 => (
+            format!(
+                "retrying payment for order {order} attempt {}",
+                1 + index % 3
+            ),
+            13,
+        ),
+        6 => (format!("session {uid} expired, refreshing token"), 9),
+        7 => (format!("inventory reserve {sku} qty={}", 1 + index % 9), 9),
+        8 => (format!("rate limit near threshold for {ip}"), 13),
+        9 => (format!("email queued to user-{uid}@example.com"), 9),
+        10 => (
+            format!("feature flag checkout_v2 evaluated for user {uid}"),
+            5,
+        ),
+        _ => (
+            format!("connection reset by peer {ip} while streaming order {order}"),
+            17,
+        ),
+    }
+}
+
+pub(crate) fn l_patterns() -> Vec<LogRecord> {
+    let base = now_nanos().saturating_sub(300_000_000_000); // 5-minute window
+    let mut records = Vec::new();
+    for template in 0..L_PATTERNS_STEADY_TEMPLATES {
+        for index in 0..L_PATTERNS_STEADY_LINES {
+            let (body, severity) = l_patterns_line(template, index);
+            records.push(log_record(
+                // Steady templates spread evenly across the whole window.
+                base + index * 250_000_000 + template as u64 * 1_000,
+                severity,
+                &body,
+                vec![
+                    kv("shape.case", "l-patterns"),
+                    kv("shape.template", &format!("steady-{template}")),
+                ],
+            ));
+        }
+    }
+    for index in 0..L_PATTERNS_SPIKE_LINES {
+        let (body, severity) = l_patterns_line(usize::MAX, index);
+        records.push(log_record(
+            // Spike template concentrated in the last fifth of the window.
+            base + 240_000_000_000 + index * 8_000_000,
+            severity,
+            &body,
+            vec![
+                kv("shape.case", "l-patterns"),
+                kv("shape.template", "spike"),
+            ],
+        ));
+    }
+    records
+}
+
 /// f-attrs (plan 164): spans and logs carrying a documented attribute set
 /// with known value distributions — `http.request.method` split exactly
 /// 70/20/10 GET/POST/DELETE across 100 spans and 100 logs — so facet counts
@@ -755,7 +832,7 @@ async fn post(path: &str, body: Vec<u8>) -> anyhow::Result<()> {
 pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
     let Some(id) = args.first().map(String::as_str) else {
         anyhow::bail!(
-            "usage: playground shapes <t-deep|t-wide|t-multiroot|t-orphan|t-skew|t-zero|t-links|t-longnames|t-events|l-burst|l-bodies|m-shapes|m-labels|f-attrs|e-burst|e-multi-lang>"
+            "usage: playground shapes <t-deep|t-wide|t-multiroot|t-orphan|t-skew|t-zero|t-links|t-longnames|t-events|l-burst|l-bodies|l-patterns|m-shapes|m-labels|f-attrs|e-burst|e-multi-lang>"
         );
     };
     println!("shapes: emitting {id} as {SERVICE}");
@@ -776,6 +853,13 @@ pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
             let metrics = m_shapes(&anchor);
             post_traces(anchor).await?;
             post("v1/metrics", metrics.encode_to_vec()).await?;
+        }
+        "l-patterns" => {
+            // 20k records in 4 posts keeps each request comfortably sized.
+            let records = l_patterns();
+            for chunk in records.chunks(5_000) {
+                post("v1/logs", logs_request(chunk.to_vec()).encode_to_vec()).await?;
+            }
         }
         "f-attrs" => {
             post_traces(f_attrs_spans()).await?;
@@ -819,6 +903,56 @@ mod tests {
 
     fn roots(spans: &[SpanSpec]) -> usize {
         spans.iter().filter(|span| span.parent.is_none()).count()
+    }
+
+    #[test]
+    fn l_patterns_is_twenty_thousand_lines_with_a_late_spike() {
+        let records = l_patterns();
+        assert_eq!(records.len(), 20_000);
+        let template_of = |record: &LogRecord| {
+            record
+                .attributes
+                .iter()
+                .find(|attr| attr.key == "shape.template")
+                .and_then(|attr| attr.value.as_ref())
+                .and_then(|value| match &value.value {
+                    Some(AnyValueEnum::StringValue(text)) => Some(text.clone()),
+                    _ => None,
+                })
+                .expect("template attr")
+        };
+        let spike: Vec<&LogRecord> = records
+            .iter()
+            .filter(|record| template_of(record) == "spike")
+            .collect();
+        assert_eq!(spike.len() as u64, L_PATTERNS_SPIKE_LINES);
+        let templates: std::collections::BTreeSet<String> =
+            records.iter().map(template_of).collect();
+        assert_eq!(templates.len(), L_PATTERNS_STEADY_TEMPLATES + 1);
+        // Spike lives strictly in the last fifth of the window.
+        let min_steady = records
+            .iter()
+            .filter(|record| template_of(record) != "spike")
+            .map(|record| record.time_unix_nano)
+            .min()
+            .expect("steady records");
+        let min_spike = spike
+            .iter()
+            .map(|record| record.time_unix_nano)
+            .min()
+            .expect("spike records");
+        assert!(min_spike >= min_steady + 240_000_000_000);
+        // Parameter churn: same template, different rendered bodies.
+        let first_bodies: std::collections::BTreeSet<String> = records
+            .iter()
+            .filter(|record| template_of(record) == "steady-0")
+            .take(50)
+            .filter_map(|record| match &record.body.as_ref()?.value {
+                Some(AnyValueEnum::StringValue(text)) => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(first_bodies.len() > 40);
     }
 
     #[test]
