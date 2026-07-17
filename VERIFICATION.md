@@ -264,3 +264,18 @@ Run Java `payment` + the Rust services together against Rotel; with a short
 collector flush, one OpenObserve trace search shows `checkout` (Rust) **and**
 `payment` (Java) sharing one trace (add a tonic client interceptor in checkout to
 inject `traceparent` into gRPC metadata for full stitching).
+
+## Parallax live acceptance (plan 159, 2026-07-17)
+
+The Parallax-backend arm of the acceptance sweep ran green on the operator's
+Docker host: the full corner-case corpus (24 scenario ids), all four CLI
+modes, the journey scenarios, real browser sessions on `:5173`, and one
+wrapper-registered observable test session (83/83 Rust tests). The 27
+machine assertions in the Parallax repo's
+`docs/research/validation/2026-07-unified-cli-observability/assert.sh`
+exit 0 against the live GraphQL surface, and thirteen UI captures with a
+clean browser console close the coverage matrix. Playground fixes that fell
+out of the run: the test-telemetry exporter deadlock + wrapper-protocol
+clash, the Boot-4 Sentry starter for the Java services, invocation-id
+stamping on drive/cron log lines, and `PLAYGROUND_DAEMON_HOLD_SECONDS` +
+`app.mode` on background cycles for live daemon observation.
