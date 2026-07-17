@@ -217,6 +217,18 @@ async fn daemon_session(
 
         tracing::info!(%session, %invocation_id, orphan, "spawning execution child");
         let status = child.status().await?;
+        // Acceptance runs observe the daemon while alive (`--hold-seconds`):
+        // emit a queue-health cycle every 5 s so activity stays visible.
+        if let Some(hold) = std::env::var("PLAYGROUND_DAEMON_HOLD_SECONDS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(hold);
+            while std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                background_cycle(semconv::BACKGROUND_CYCLE_QUEUE_HEALTH, false).await;
+            }
+        }
         let code = status.code().unwrap_or(1);
         if !status.success() {
             playground_telemetry::mark_span_error("child_exit");
