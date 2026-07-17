@@ -23,6 +23,7 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.kafka.common.header.internals.RecordHeaders;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -104,6 +105,11 @@ class OrderProducerTest {
             assertEquals("published order-embedded", new OrderProducer(kafka).publish("order-embedded"));
             var record = KafkaTestUtils.getSingleRecord(consumer, "orders");
             assertEquals("order-embedded", record.value());
+            // The detached-job identity survives the broker round-trip.
+            var jobHeader = record.headers().lastHeader(OrderProducer.JOB_ID_HEADER);
+            org.junit.jupiter.api.Assertions.assertNotNull(jobHeader, "job id header missing");
+            String jobId = new String(jobHeader.value(), StandardCharsets.US_ASCII);
+            org.junit.jupiter.api.Assertions.assertFalse(jobId.isEmpty());
             consume_record_through_payment_and_notification(record);
         } finally {
             consumer.close();

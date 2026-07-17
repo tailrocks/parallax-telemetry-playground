@@ -10,7 +10,46 @@ export const DEPLOYMENT_ENVIRONMENT_NAME =
   "deployment.environment.name" as const
 export const EVENT_NAME = "event.name" as const
 export const ERROR_TYPE = "error.type" as const
-export const PARALLAX_RUN_ID = "parallax.run.id" as const
+export const CLI_INVOCATION_ID = "cli.invocation.id" as const
+export const CLI_COMMAND_NAME = "cli.command.name" as const
+export const APP_MODE = "app.mode" as const
+export const APP_MODE_ONE_SHOT = "one_shot" as const
+export const APP_MODE_INTERACTIVE = "interactive" as const
+export const APP_MODE_DAEMON = "daemon" as const
+export const APP_MODE_CAPSULE = "capsule" as const
+export const SESSION_PREVIOUS_ID = "session.previous_id" as const
+export const SESSION_START_EVENT_NAME = "session.start" as const
+export const SESSION_END_EVENT_NAME = "session.end" as const
+export const UI_SCREEN_ENTERED_EVENT_NAME = "ui.screen.entered" as const
+export const UI_SCREEN_EXITED_EVENT_NAME = "ui.screen.exited" as const
+export const UI_WIDGET_FOCUSED_EVENT_NAME = "ui.widget.focused" as const
+export const UI_WIDGET_UNFOCUSED_EVENT_NAME = "ui.widget.unfocused" as const
+export const APP_SCREEN_ID = "app.screen.id" as const
+export const UI_ACTION_NAME = "ui.action.name" as const
+export const UI_SCREEN_VISIT_ID = "ui.screen.visit.id" as const
+export const UI_NAVIGATION_SEQUENCE = "ui.navigation.sequence" as const
+export const UI_TRANSITION_REASON = "ui.transition.reason" as const
+export const BACKGROUND_CYCLE_SPAN_NAME = "background.cycle" as const
+export const BACKGROUND_CYCLE_NAME = "background.cycle.name" as const
+export const JOB_ID = "job.id" as const
+export const JOB_TYPE = "job.type" as const
+export const OUTCOME = "outcome" as const
+export const OUTCOME_SUCCESS = "success" as const
+export const OUTCOME_FAILURE = "failure" as const
+export const OUTCOME_ERROR = "error" as const
+export const OUTCOME_TIMEOUT = "timeout" as const
+export const OUTCOME_SKIP = "skip" as const
+export const OUTCOME_CANCELLATION = "cancellation" as const
+export const GEN_AI_AGENT_NAME = "gen_ai.agent.name" as const
+export const GEN_AI_CONVERSATION_ID = "gen_ai.conversation.id" as const
+export const GEN_AI_PROVIDER_NAME = "gen_ai.provider.name" as const
+export const GEN_AI_USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens" as const
+export const GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens" as const
+export const PROCESS_EXIT_CODE = "process.exit.code" as const
+export const CLI_COMMAND_SPAN_NAME = "cli.command" as const
+export const APP_STARTUP_SPAN_NAME = "app.startup" as const
+export const APP_SHUTDOWN_SPAN_NAME = "app.shutdown" as const
+export const UI_ACTION_SPAN_NAME = "ui.action" as const
 export const HTTP_REQUEST_METHOD = "http.request.method" as const
 export const HTTP_ROUTE = "http.route" as const
 export const HTTP_RESPONSE_STATUS_CODE = "http.response.status_code" as const
@@ -25,6 +64,26 @@ export const MESSAGING_MESSAGE_ID = "messaging.message.id" as const
 export const PLAYGROUND_NAMESPACE = "playground" as const
 export const DEFAULT_ENVIRONMENT = "playground" as const
 export const SESSION_ID = "session.id" as const
+export const JOB_TYPE_ORDER_DISPATCH = "order_dispatch" as const
+export const JOB_TYPE_FULFILLMENT_SHIPMENT = "fulfillment_shipment" as const
+export const BACKGROUND_CYCLE_QUEUE_HEALTH = "queue_health" as const
+export const BACKGROUND_CYCLE_PRICE_REFRESH = "price_refresh" as const
+export const APP_SCREEN_HOME = "home" as const
+export const APP_SCREEN_CART = "cart" as const
+export const APP_SCREEN_CHECKOUT = "checkout" as const
+export const UI_ACTION_CART_ADD = "cart.add" as const
+export const UI_ACTION_CHECKOUT_SUBMIT = "checkout.submit" as const
+export const UI_ACTION_SCREEN_BACK = "screen.back" as const
+export const GEN_AI_AGENT_NAMES = [
+  "claude",
+  "codex",
+  "amp",
+] as const
+export const GEN_AI_PROVIDER_NAMES = [
+  "anthropic",
+  "openai",
+  "sourcegraph",
+] as const
 export const APP_SCREEN_NAME = "app.screen.name" as const
 export const APP_WIDGET_NAME = "app.widget.name" as const
 export const TELEMETRY_PROPAGATION_DISABLED =
@@ -35,9 +94,6 @@ export const SPAN_KIND_SERVER = "server" as const
 export const SPAN_KIND_INTERNAL = "internal" as const
 export const SPAN_KIND_PRODUCER = "producer" as const
 export const SPAN_KIND_CONSUMER = "consumer" as const
-export const PARALLAX_SESSION_ID = "parallax.session.id" as const
-export const PARALLAX_EXECUTION_LAYER = "parallax.execution.layer" as const
-export const PARALLAX_AGENT_ID = "parallax.agent.id" as const
 export const GEN_AI_OPERATION_NAME = "gen_ai.operation.name" as const
 export const TOOL_NAME = "tool.name" as const
 export const SHELL_COMMAND = "shell.command" as const

@@ -14,7 +14,7 @@ pub(crate) struct Summary {
     pub(crate) app_descendants: usize,
 }
 
-pub(crate) async fn verify(api_url: &str, run_id: &str, stack: &str) -> Result<Summary> {
+pub(crate) async fn verify(api_url: &str, invocation_id: &str, stack: &str) -> Result<Summary> {
     ensure!(
         matches!(stack, "rust" | "java" | "web"),
         "unknown stack `{stack}`"
@@ -23,13 +23,13 @@ pub(crate) async fn verify(api_url: &str, run_id: &str, stack: &str) -> Result<S
     let client = reqwest::Client::new();
     let mut last_error = None;
     for attempt in 1..=POLL_ATTEMPTS {
-        match fetch_and_analyze(&client, &endpoint, run_id, stack).await {
+        match fetch_and_analyze(&client, &endpoint, invocation_id, stack).await {
             Ok(summary) => return Ok(summary),
             Err(error) => {
                 last_error = Some(error);
                 if attempt != POLL_ATTEMPTS {
                     eprintln!(
-                        "waiting for Parallax to index observable run {run_id} ({attempt}/{POLL_ATTEMPTS})"
+                        "waiting for Parallax to index observable invocation {invocation_id} ({attempt}/{POLL_ATTEMPTS})"
                     );
                     tokio::time::sleep(POLL_INTERVAL).await;
                 }
@@ -42,33 +42,36 @@ pub(crate) async fn verify(api_url: &str, run_id: &str, stack: &str) -> Result<S
 async fn fetch_and_analyze(
     client: &reqwest::Client,
     endpoint: &str,
-    run_id: &str,
+    invocation_id: &str,
     stack: &str,
 ) -> Result<Summary> {
     let overview = graphql(
         client,
         endpoint,
         &format!(
-            r#"{{ run(runId: {run_id:?}) {{ status exitCode }} tracesByRun(runId: {run_id:?}, limit: 100) {{ traceId }} }}"#
+            r#"{{ invocation(invocationId: {invocation_id:?}) {{ status exitCode }} tracesByInvocation(invocationId: {invocation_id:?}, limit: 100) {{ traceId }} }}"#
         ),
     )
     .await?;
-    let run = overview
-        .pointer("/data/run")
-        .context("run is not indexed yet")?;
-    ensure!(run["status"] == "finished", "run has not finished yet");
+    let invocation = overview
+        .pointer("/data/invocation")
+        .context("invocation is not indexed yet")?;
     ensure!(
-        run["exitCode"].as_i64() == Some(0),
+        invocation["status"] == "finished",
+        "invocation has not finished yet"
+    );
+    ensure!(
+        invocation["exitCode"].as_i64() == Some(0),
         "observable runner did not finish successfully"
     );
     let trace_ids = overview
-        .pointer("/data/tracesByRun")
+        .pointer("/data/tracesByInvocation")
         .and_then(Value::as_array)
-        .context("run traces are not indexed yet")?
+        .context("invocation traces are not indexed yet")?
         .iter()
         .filter_map(|trace| trace["traceId"].as_str())
         .collect::<Vec<_>>();
-    ensure!(!trace_ids.is_empty(), "run has no indexed traces");
+    ensure!(!trace_ids.is_empty(), "invocation has no indexed traces");
 
     let mut traces = Vec::with_capacity(trace_ids.len());
     for trace_id in &trace_ids {
@@ -82,7 +85,7 @@ async fn fetch_and_analyze(
         .await?;
         traces.push(response);
     }
-    analyze(run_id, stack, &traces)
+    analyze(invocation_id, stack, &traces)
 }
 
 async fn graphql(client: &reqwest::Client, endpoint: &str, query: &str) -> Result<Value> {
@@ -104,7 +107,7 @@ async fn graphql(client: &reqwest::Client, endpoint: &str, query: &str) -> Resul
     Ok(response)
 }
 
-fn analyze(run_id: &str, stack: &str, traces: &[Value]) -> Result<Summary> {
+fn analyze(invocation_id: &str, stack: &str, traces: &[Value]) -> Result<Summary> {
     let spans = traces
         .iter()
         .filter_map(|trace| trace.pointer("/data/trace/spans").and_then(Value::as_array))
@@ -112,8 +115,8 @@ fn analyze(run_id: &str, stack: &str, traces: &[Value]) -> Result<Summary> {
         .map(DecodedSpan::try_from)
         .collect::<Result<Vec<_>>>()?;
     ensure!(
-        spans.iter().any(|span| span.name == "parallax.run.session"),
-        "exported parallax.run.session parent is missing"
+        spans.iter().any(|span| span.name == "cli.command"),
+        "exported cli.command wrapper parent is missing"
     );
     let tests = spans
         .iter()
@@ -122,10 +125,11 @@ fn analyze(run_id: &str, stack: &str, traces: &[Value]) -> Result<Summary> {
     ensure!(!tests.is_empty(), "no test-attempt spans were indexed");
     ensure!(
         tests.iter().all(|span| {
-            attribute_string(&span.attributes, semconv::PARALLAX_RUN_ID) == Some(run_id)
-                || attribute_string(&span.resource, semconv::PARALLAX_RUN_ID) == Some(run_id)
+            attribute_string(&span.attributes, semconv::CLI_INVOCATION_ID) == Some(invocation_id)
+                || attribute_string(&span.resource, semconv::CLI_INVOCATION_ID)
+                    == Some(invocation_id)
         }),
-        "one or more test spans lost the Parallax run identity"
+        "one or more test spans lost the invocation identity"
     );
     ensure!(
         tests
@@ -287,7 +291,7 @@ mod tests {
     fn complete_fixture() -> Value {
         let run = "run-1";
         let resource =
-            json!({"parallax.run.id": run, "vcs.ref.head.revision": "abc", "service.version": "1"})
+            json!({"cli.invocation.id": run, "vcs.ref.head.revision": "abc", "service.version": "1"})
                 .to_string();
         let span = |id: &str, parent: Option<&str>, name: &str, status: &str, attributes: Value| {
             json!({
@@ -296,10 +300,10 @@ mod tests {
             })
         };
         json!({"data":{"trace":{"spans":[
-            span("root", None, "parallax.run.session", "UNSET", json!({})),
-            span("fail", Some("root"), "test.case", "ERROR", json!({"test.case.name":"assert", "parallax.run.id":run, "parallax.test.id":"explicit", "test.case.parameters":"x=1", "test.configuration.os":"linux", "test.attempt.ordinal":1, "test.case.result.status":"fail", "test.case.failure.kind":"assertion_failure"})),
-            span("error", Some("root"), "test.case", "ERROR", json!({"test.case.name":"harness", "parallax.run.id":run, "test.configuration.os":"linux", "test.attempt.ordinal":1, "test.case.result.status":"fail", "test.case.failure.kind":"harness_error"})),
-            span("pass", Some("root"), "test.case", "UNSET", json!({"test.case.name":"assert", "parallax.run.id":run, "test.case.parameters":"x=1", "test.configuration.os":"linux", "test.attempt.ordinal":2, "test.case.result.status":"pass"})),
+            span("root", None, "cli.command", "UNSET", json!({})),
+            span("fail", Some("root"), "test.case", "ERROR", json!({"test.case.name":"assert", "cli.invocation.id":run, "parallax.test.id":"explicit", "test.case.parameters":"x=1", "test.configuration.os":"linux", "test.attempt.ordinal":1, "test.case.result.status":"fail", "test.case.failure.kind":"assertion_failure"})),
+            span("error", Some("root"), "test.case", "ERROR", json!({"test.case.name":"harness", "cli.invocation.id":run, "test.configuration.os":"linux", "test.attempt.ordinal":1, "test.case.result.status":"fail", "test.case.failure.kind":"harness_error"})),
+            span("pass", Some("root"), "test.case", "UNSET", json!({"test.case.name":"assert", "cli.invocation.id":run, "test.case.parameters":"x=1", "test.configuration.os":"linux", "test.attempt.ordinal":2, "test.case.result.status":"pass"})),
             span("app", Some("pass"), "http.client", "UNSET", json!({}))
         ]}}})
     }

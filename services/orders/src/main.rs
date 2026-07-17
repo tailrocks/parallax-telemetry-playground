@@ -32,6 +32,7 @@ const BATCH_WINDOW: Duration = Duration::from_millis(50);
 
 struct Msg {
     order_id: String,
+    job_id: String,
     producer_cx: Context,
     poison: bool,
     lag_ms: u64,
@@ -67,6 +68,7 @@ async fn publish(
     State(state): State<App>,
     Query(p): Query<Publish>,
 ) -> Json<Value> {
+    let job_id = uuid::Uuid::new_v4().to_string();
     let span = tracing::info_span!(
         "send orders",
         otel.kind = semconv::SPAN_KIND_PRODUCER,
@@ -74,12 +76,14 @@ async fn publish(
         "messaging.destination.name" = "orders",
         "messaging.operation.name" = "send",
         "messaging.operation.type" = "send",
+        job.id = %job_id,
+        job.type = semconv::JOB_TYPE_ORDER_DISPATCH,
     );
     playground_telemetry::set_parent_from_headers(&span, &headers);
-    publish_inner(state, p).instrument(span).await
+    publish_inner(state, p, job_id).instrument(span).await
 }
 
-async fn publish_inner(state: App, p: Publish) -> Json<Value> {
+async fn publish_inner(state: App, p: Publish, job_id: String) -> Json<Value> {
     let poison_message_flag =
         playground_telemetry::feature_flag("poisonMessage", "POISON_MESSAGE").await;
     let poison = p.poison || poison_message_flag;
@@ -92,6 +96,7 @@ async fn publish_inner(state: App, p: Publish) -> Json<Value> {
     tracing::Span::current().set_attribute(semconv::MESSAGING_MESSAGE_ID, order_id.clone());
     let msg = Msg {
         order_id: order_id.clone(),
+        job_id,
         producer_cx,
         poison,
         lag_ms: p.lag_ms,
@@ -124,6 +129,9 @@ async fn consume(msg: Msg, attempt: u32) {
         "messaging.message.id" = %msg.order_id,
         "messaging.delivery.lag_ms" = delivery_lag_ms,
         "messaging.orphan" = msg.orphan,
+        job.id = %msg.job_id,
+        job.type = semconv::JOB_TYPE_ORDER_DISPATCH,
+        outcome = if msg.poison { semconv::OUTCOME_FAILURE } else { semconv::OUTCOME_SUCCESS },
     );
     // The normal CONSUMER span links to the PRODUCER span. Orphan messages
     // deliberately carry no context so evidence-gap detectors have raw data.
@@ -195,6 +203,7 @@ async fn consume_single(msg: Msg) {
     if msg.poison {
         // Redeliver up to 3 attempts, then dead-letter.
         let order_id = msg.order_id.clone();
+        let job_id = msg.job_id.clone();
         let producer_cx = msg.producer_cx.clone();
         let lag_ms = msg.lag_ms;
         let orphan = msg.orphan;
@@ -203,6 +212,7 @@ async fn consume_single(msg: Msg) {
             consume(
                 Msg {
                     order_id: order_id.clone(),
+                    job_id: job_id.clone(),
                     producer_cx: producer_cx.clone(),
                     poison: true,
                     lag_ms,
@@ -222,6 +232,9 @@ async fn consume_single(msg: Msg) {
             "messaging.operation.name" = "process",
             "messaging.operation.type" = "process",
             "messaging.message.id" = %order_id,
+            job.id = %job_id,
+            job.type = semconv::JOB_TYPE_ORDER_DISPATCH,
+            outcome = semconv::OUTCOME_FAILURE,
         );
         let _guard = span.enter();
         playground_telemetry::mark_span_error("dead_letter");
@@ -353,6 +366,7 @@ mod tests {
     fn test_msg_with_poison(batch: bool, poison: bool) -> Msg {
         Msg {
             order_id: next_order_id(),
+            job_id: uuid::Uuid::new_v4().to_string(),
             producer_cx: Context::new(),
             poison,
             lag_ms: 0,
@@ -400,6 +414,29 @@ mod tests {
 
         assert_eq!(batch.len(), 1);
         assert_eq!(depth.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn published_message_carries_the_producer_job_id() {
+        let (tx, mut rx) = mpsc::channel::<Msg>(1);
+        let state = App {
+            tx,
+            queue_depth: Arc::new(AtomicI64::new(0)),
+        };
+        let job_id = "job-fixed".to_string();
+        let _ = publish_inner(
+            state,
+            Publish {
+                poison: false,
+                batch: false,
+                orphan: false,
+                lag_ms: 0,
+            },
+            job_id.clone(),
+        )
+        .await;
+        let msg = rx.recv().await.expect("published message");
+        assert_eq!(msg.job_id, job_id, "consumer attempt shares the job id");
     }
 
     #[tokio::test]

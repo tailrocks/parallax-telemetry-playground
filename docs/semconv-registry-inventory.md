@@ -21,7 +21,7 @@ constraint; it does not rename telemetry.
 | Resource | `SERVICE_NAME=service.name`, `SERVICE_VERSION=service.version`, `SERVICE_NAMESPACE=service.namespace`, `SERVICE_INSTANCE_ID=service.instance.id`, `DEPLOYMENT_ENVIRONMENT_NAME=deployment.environment.name`, `PLAYGROUND_NAMESPACE=playground`, `DEFAULT_ENVIRONMENT=playground` |
 | Event and error | `EVENT_NAME=event.name`, `SESSION_ID=session.id`, `APP_SCREEN_NAME=app.screen.name`, `ERROR_TYPE=error.type` |
 | Span kind | `OTEL_KIND=otel.kind`, `SPAN_KIND_CLIENT=client`, `SPAN_KIND_SERVER=server`, `SPAN_KIND_INTERNAL=internal`, `SPAN_KIND_PRODUCER=producer`, `SPAN_KIND_CONSUMER=consumer` |
-| Parallax | `PARALLAX_RUN_ID=parallax.run.id`, `PARALLAX_SESSION_ID=parallax.session.id`, `PARALLAX_EXECUTION_LAYER=parallax.execution.layer`, `PARALLAX_AGENT_ID=parallax.agent.id` |
+| Neutral CLI contract | `CLI_INVOCATION_ID=cli.invocation.id`, `session.id`, `app.mode`, `outcome` (the retired `parallax.*` vendor keys were removed 2026-07-17) |
 | Agent | `GEN_AI_OPERATION_NAME=gen_ai.operation.name`, `TOOL_NAME=tool.name`, `SHELL_COMMAND=shell.command` |
 | Test/redaction | `USER_TIER=user.tier`, `CANARY_EMAIL=canary.email`, `CANARY_TOKEN=canary.token`, `CANARY_CARD=canary.card`, `CANARY_JWT=canary.jwt` |
 | Named events | `WEB_CHECKOUT_SUBMITTED=web.checkout.submitted`, `CATALOG_PRODUCTS_SERVED=catalog.products.served`, `PAYMENT_AUTHORIZED=payment.authorized`, `CATALOG_PRODUCT_QUERIES=catalog.product.queries` |

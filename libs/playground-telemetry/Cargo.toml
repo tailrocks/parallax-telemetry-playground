@@ -22,6 +22,7 @@ open-feature = { workspace = true }
 open-feature-flagd = { workspace = true }
 http = { workspace = true }
 reqwest = { workspace = true }
+uuid = { workspace = true }
 sentry = { workspace = true }
 sentry-tracing = { workspace = true }
 tokio = { workspace = true }

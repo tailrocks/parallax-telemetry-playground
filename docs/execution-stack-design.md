@@ -36,24 +36,26 @@ Boundary flow:
 - Agent process: the simulated agent runs inside the container span, so
   `invoke_agent` and `execute_tool` inherit the container context.
 
-## run.id Stitching
+## Invocation Stitching
 
-The scenario script sets `PARALLAX_RUN_ID` once and also ensures
-`OTEL_RESOURCE_ATTRIBUTES` contains `parallax.run.id=<run-id>`. The daemon
-inherits it and passes the same value to `playground enter`. The shared
-telemetry library stamps `parallax.run.id` from `PARALLAX_RUN_ID` into the
-OpenTelemetry resource for every Rust playground process.
+The scenario script sets `CLI_INVOCATION_ID` once and also ensures
+`OTEL_RESOURCE_ATTRIBUTES` contains `cli.invocation.id=<invocation-id>`. The
+daemon inherits it and passes the same value to `playground enter`. The
+shared telemetry library surfaces `cli.invocation.id` from
+`CLI_INVOCATION_ID` as a resource attribute only for wrapped child
+processes; the CLI itself stamps the id on its root spans and logs (the
+jackin shape — ids never live on Resource for a natively instrumented CLI).
 
-This keeps daemon, container, and agent telemetry queryable as one Parallax
-run while still letting the orphan variant create a separate trace.
+This keeps daemon, capsule, and agent telemetry queryable as one Parallax
+invocation while still letting the orphan variant create a separate trace.
 
 ## Failure Scenario
 
 The orphan variant runs `playground daemon --orphan`. That mode deliberately
 does not inject `TRACEPARENT`, `TRACESTATE`, or `BAGGAGE` into the child. The
-child still receives the same `parallax.run.id`, so Parallax can show the run
-contains related daemon and child/agent activity, but the child trace is not a
-descendant of the daemon trace. The orphan child marks its container boundary
+child still receives the same `cli.invocation.id`, so Parallax can show the
+invocation contains related daemon and child/agent activity, but the child
+trace is not a descendant of the daemon trace. The orphan child marks its container boundary
 as a client span with `url.full=container://agent`, which lets Parallax's
 existing trace evidence-gap detector flag the broken continuation as a client
 span without a backend child.
@@ -83,5 +85,5 @@ Real today:
 
 - process boundary via spawned child
 - W3C trace context and baggage propagation through environment variables
-- shared `parallax.run.id` resource stitching
+- shared `cli.invocation.id` invocation stitching
 - error span status on the failed tool event

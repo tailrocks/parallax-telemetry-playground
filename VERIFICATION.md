@@ -15,9 +15,9 @@ Every local stack test session has one fail-closed run-parent entrypoint. It
 refuses to run without the identity and W3C carrier supplied by Parallax:
 
 ```bash
-parallax run start -- scripts/observable-test-session.sh rust
-parallax run start -- scripts/observable-test-session.sh java
-parallax run start -- scripts/observable-test-session.sh web
+parallax invocation start -- scripts/observable-test-session.sh rust
+parallax invocation start -- scripts/observable-test-session.sh java
+parallax invocation start -- scripts/observable-test-session.sh web
 ```
 
 The Rust mode runs nextest and converts its durable JUnit in the same session;
@@ -29,13 +29,13 @@ After the wrapper prints its finished run ID, verify the indexed payload through
 Parallax's GraphQL API:
 
 ```bash
-parallax run start -- scripts/observable-test-session.sh rust --acceptance
+parallax invocation start -- scripts/observable-test-session.sh rust --acceptance
 mise exec -- cargo run --locked -p playground-cli -- test-verify <run-id> rust
 
-parallax run start -- scripts/observable-test-session.sh java --acceptance
+parallax invocation start -- scripts/observable-test-session.sh java --acceptance
 mise exec -- cargo run --locked -p playground-cli -- test-verify <run-id> java
 
-parallax run start -- scripts/observable-test-session.sh web --acceptance
+parallax invocation start -- scripts/observable-test-session.sh web --acceptance
 mise exec -- cargo run --locked -p playground-cli -- test-verify <run-id> web
 ```
 
@@ -147,7 +147,7 @@ identity plus parent context; the agent instruments integration-test client
 work beneath those test executions. JUnit XML keeps `mergeReruns=true` as the
 authoritative retry record.
 
-Verify: run each service's Gradle tests with `TRACEPARENT`, `PARALLAX_RUN_ID`,
+Verify: run each service's Gradle tests with `TRACEPARENT`, `CLI_INVOCATION_ID`,
 and `OTEL_EXPORTER_OTLP_ENDPOINT` set, then inspect the test root, failure
 payload, and any HTTP/gRPC/Kafka/JDBC child spans in the same trace. With no
 endpoint, local tests explicitly set the Java agent's trace/metric/log

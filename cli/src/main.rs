@@ -1,12 +1,17 @@
-//! Playground driver CLI — short-lived process producing run-scoped telemetry.
-//!   playground            drive the checkout flow (A1/A12)
-//!   playground cron       a scheduled job with weighted outcomes (B17):
-//!                         ~90% success, ~5% failure (nonzero exit),
-//!                         ~5% "stuck" (long sleep → missed check-in)
-//!   playground daemon     host CLI → daemon → child/container → agent sim
-//!   playground enter      child/container side of the execution-stack sim
+//! Playground driver CLI — short-lived process producing invocation-scoped
+//! telemetry in the neutral CLI contract (`cli.invocation.id`, `app.mode`,
+//! `outcome`; plan 158).
+//!   playground            drive the checkout flow (A1/A12), one_shot
+//!   playground cron       a scheduled job with weighted outcomes (B17),
+//!                         one_shot per firing
+//!   playground daemon     host CLI → daemon (+ background cycles) →
+//!                         capsule child → agent sim
+//!   playground enter      capsule side of the execution-stack sim
+//!   playground console    scripted interactive TUI session (sessions,
+//!                         screens, ui.action roots)
 //! Flushes telemetry on exit (short-lived discipline).
 
+mod console_sim;
 mod test_report;
 mod test_verify;
 
@@ -16,6 +21,7 @@ use std::process::Command as ProcessCommand;
 use tokio::process::Command;
 use tracing::Instrument;
 
+use playground_telemetry::invocation;
 use playground_telemetry::semconv;
 
 #[tokio::main]
@@ -30,8 +36,8 @@ async fn main() -> anyhow::Result<()> {
 
     // The report converter is useful as a local JUnit reconciliation tool as
     // well as a live OTLP producer. Avoid the SDK's implicit localhost exporter
-    // when no collector was requested; `parallax run start` supplies the
-    // endpoint for the observable path.
+    // when no collector was requested; `parallax invocation start` supplies
+    // the endpoint for the observable path.
     let telemetry = if matches!(mode.as_str(), "test-report" | "test-verify")
         && std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
             .ok()
@@ -41,14 +47,31 @@ async fn main() -> anyhow::Result<()> {
     } else {
         Some(playground_telemetry::init("playground-cli")?)
     };
-    let result = match mode.as_str() {
-        "test-report" => test_report_command(&rest),
-        "test-verify" => test_verify_command(&rest).await,
-        "cron" => cron(rest).await,
-        "daemon" => daemon(rest).await,
-        "enter" => enter(rest).await,
-        _ => drive().await,
-    };
+    let command_name = command_name(&mode);
+    let app_mode = app_mode(&mode);
+    let invocation_id = invocation::invocation_id();
+    let root = tracing::info_span!(
+        "cli.command",
+        otel.kind = semconv::SPAN_KIND_INTERNAL,
+        cli.invocation.id = %invocation_id,
+        cli.command.name = %command_name,
+        app.mode = %app_mode,
+        outcome = tracing::field::Empty,
+        process.exit.code = tracing::field::Empty,
+    );
+    let result = async {
+        match mode.as_str() {
+            "test-report" => test_report_command(&rest),
+            "test-verify" => test_verify_command(&rest).await,
+            "cron" => cron(rest).await,
+            "daemon" => daemon(rest).await,
+            "enter" => enter(rest).await,
+            "console" => console_sim::run(rest).await,
+            _ => drive().await,
+        }
+    }
+    .instrument(root.clone())
+    .await;
     let code = match result {
         Ok(code) => code,
         Err(err) => {
@@ -57,25 +80,60 @@ async fn main() -> anyhow::Result<()> {
             1
         }
     };
+    root.record("outcome", outcome_for_exit(code));
+    root.record("process.exit.code", i64::from(code));
+    drop(root);
     if let Some(telemetry) = telemetry {
         telemetry.shutdown(); // flush before exit
     }
     std::process::exit(code);
 }
 
+/// Bounded dotted command-registry names (neutral contract decision 3).
+fn command_name(mode: &str) -> &'static str {
+    match mode {
+        "cron" => "playground.cron",
+        "daemon" => "playground.daemon",
+        "enter" => "playground.enter",
+        "console" => "playground.console",
+        "test-report" => "playground.test.report",
+        "test-verify" => "playground.test.verify",
+        _ => "playground.drive",
+    }
+}
+
+/// `app.mode` per mode: each cron firing is an invocation (one_shot); the
+/// capsule child layer reports `capsule`.
+fn app_mode(mode: &str) -> &'static str {
+    match mode {
+        "daemon" => semconv::APP_MODE_DAEMON,
+        "enter" => semconv::APP_MODE_CAPSULE,
+        "console" => semconv::APP_MODE_INTERACTIVE,
+        _ => semconv::APP_MODE_ONE_SHOT,
+    }
+}
+
+fn outcome_for_exit(code: i32) -> &'static str {
+    if code == 0 {
+        semconv::OUTCOME_SUCCESS
+    } else {
+        semconv::OUTCOME_FAILURE
+    }
+}
+
 async fn test_verify_command(args: &[String]) -> anyhow::Result<i32> {
-    let [run_id, stack, rest @ ..] = args else {
+    let [invocation_id, stack, rest @ ..] = args else {
         return Err(anyhow::anyhow!(
-            "usage: playground test-verify <run-id> <rust|java|web> [parallax-api-url]"
+            "usage: playground test-verify <invocation-id> <rust|java|web> [parallax-api-url]"
         ));
     };
     let api_url = rest
         .first()
         .map(String::as_str)
         .unwrap_or("http://127.0.0.1:4000");
-    let summary = test_verify::verify(api_url, run_id, stack).await?;
+    let summary = test_verify::verify(api_url, invocation_id, stack).await?;
     println!(
-        "verified {stack} observable run {run_id}: {} traces, {} test attempts, {} app descendants",
+        "verified {stack} observable invocation {invocation_id}: {} traces, {} test attempts, {} app descendants",
         summary.traces, summary.test_attempts, summary.app_descendants
     );
     Ok(0)
@@ -104,44 +162,51 @@ async fn drive() -> anyhow::Result<i32> {
 }
 
 async fn daemon(args: Vec<String>) -> anyhow::Result<i32> {
-    let session = option_value(&args, "--session").unwrap_or_else(default_session_id);
-    let run_id = run_id(&session);
+    let session = option_value(&args, "--session").unwrap_or_else(invocation::new_session_id);
+    let invocation_id = invocation::invocation_id().to_owned();
     let orphan = flag_present(&args, "--orphan");
     let span = tracing::info_span!(
         "host_cli",
         otel.kind = semconv::SPAN_KIND_CLIENT,
-        cli.command = "playground daemon",
-        parallax.session.id = %session,
-        parallax.run.id = %run_id,
+        cli.invocation.id = %invocation_id,
+        session.id = %session,
         orphan
     );
-    async move { daemon_session(session, run_id, orphan).await }
+    async move { daemon_session(session, invocation_id, orphan).await }
         .instrument(span)
         .await
 }
 
-async fn daemon_session(session: String, run_id: String, orphan: bool) -> anyhow::Result<i32> {
+async fn daemon_session(
+    session: String,
+    invocation_id: String,
+    orphan: bool,
+) -> anyhow::Result<i32> {
     let span = tracing::info_span!(
         "daemon_session",
         otel.kind = semconv::SPAN_KIND_INTERNAL,
-        parallax.execution.layer = "daemon",
-        parallax.session.id = %session,
-        parallax.run.id = %run_id,
+        app.mode = semconv::APP_MODE_DAEMON,
+        session.id = %session,
         orphan
     );
     async move {
+        // Substantive periodic daemon work: two named reconciliation cycles
+        // (neutral contract decision 7) emitted while the daemon runs.
+        background_cycle(semconv::BACKGROUND_CYCLE_QUEUE_HEALTH, false).await;
+        background_cycle(semconv::BACKGROUND_CYCLE_PRICE_REFRESH, true).await;
+
         let carrier = playground_telemetry::current_context_env();
         let child = execution_child_command(
             &std::env::current_exe()?,
             &session,
-            &run_id,
+            &invocation_id,
             orphan,
             &carrier,
             std::env::var("OTEL_RESOURCE_ATTRIBUTES").ok().as_deref(),
         );
         let mut child = Command::from(child);
 
-        tracing::info!(%session, %run_id, orphan, "spawning execution child");
+        tracing::info!(%session, %invocation_id, orphan, "spawning execution child");
         let status = child.status().await?;
         let code = status.code().unwrap_or(1);
         if !status.success() {
@@ -154,20 +219,45 @@ async fn daemon_session(session: String, run_id: String, orphan: bool) -> anyhow
     .await
 }
 
+/// One `background.cycle` root span (a fresh trace: cycles are periodic
+/// daemon work, not part of the spawn trace).
+async fn background_cycle(name: &'static str, fail: bool) {
+    let invocation_id = invocation::invocation_id();
+    let span = tracing::info_span!(
+        parent: None,
+        "background.cycle",
+        otel.kind = semconv::SPAN_KIND_INTERNAL,
+        cli.invocation.id = %invocation_id,
+        background.cycle.name = %name,
+        outcome = if fail { semconv::OUTCOME_FAILURE } else { semconv::OUTCOME_SUCCESS },
+    );
+    async move {
+        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+        if fail {
+            playground_telemetry::mark_span_error("cycle_failure");
+            tracing::error!(cycle = %name, "background cycle failed");
+        } else {
+            tracing::info!(cycle = %name, "background cycle completed");
+        }
+    }
+    .instrument(span)
+    .await
+}
+
 fn execution_child_command(
     executable: &Path,
     session: &str,
-    run_id: &str,
+    invocation_id: &str,
     orphan: bool,
     carrier: &[(String, String)],
     resource_attributes: Option<&str>,
 ) -> ProcessCommand {
     let mut child = ProcessCommand::new(executable);
     child.arg("enter").arg("--session").arg(session);
-    child.env("PARALLAX_RUN_ID", run_id);
+    child.env(invocation::INVOCATION_ENV, invocation_id);
     child.env(
         "OTEL_RESOURCE_ATTRIBUTES",
-        resource_attrs_with_run_id_from(resource_attributes, run_id),
+        invocation::resource_attrs_with_invocation_id(resource_attributes, invocation_id),
     );
     if orphan {
         child.arg("--orphan");
@@ -181,9 +271,9 @@ fn execution_child_command(
         child.env(
             "BAGGAGE",
             format!(
-                "{}={session},{}={run_id}",
-                semconv::PARALLAX_SESSION_ID,
-                semconv::PARALLAX_RUN_ID
+                "{}={session},{}={invocation_id}",
+                semconv::SESSION_ID,
+                semconv::CLI_INVOCATION_ID
             ),
         );
     }
@@ -191,47 +281,49 @@ fn execution_child_command(
 }
 
 async fn enter(args: Vec<String>) -> anyhow::Result<i32> {
-    let session = option_value(&args, "--session").unwrap_or_else(default_session_id);
-    let run_id = run_id(&session);
+    let session = option_value(&args, "--session").unwrap_or_else(invocation::new_session_id);
+    let invocation_id = invocation::invocation_id().to_owned();
     let orphan = flag_present(&args, "--orphan");
     let span = if orphan {
         tracing::info_span!(
             "container_session",
             otel.kind = semconv::SPAN_KIND_CLIENT,
             url.full = "container://agent",
-            parallax.execution.layer = "container",
-            parallax.session.id = %session,
-            parallax.run.id = %run_id,
+            app.mode = semconv::APP_MODE_CAPSULE,
+            cli.invocation.id = %invocation_id,
+            session.id = %session,
             orphan
         )
     } else {
         tracing::info_span!(
             "container_session",
             otel.kind = semconv::SPAN_KIND_INTERNAL,
-            parallax.execution.layer = "container",
-            parallax.session.id = %session,
-            parallax.run.id = %run_id,
+            app.mode = semconv::APP_MODE_CAPSULE,
+            cli.invocation.id = %invocation_id,
+            session.id = %session,
             orphan
         )
     };
     playground_telemetry::set_parent_from_env(&span);
     async move {
-        tracing::info!(%session, %run_id, orphan, "entered simulated container");
-        invoke_agent(&session, &run_id).await;
+        tracing::info!(%session, %invocation_id, orphan, "entered simulated capsule");
+        invoke_agent(&session).await;
         Ok(0)
     }
     .instrument(span)
     .await
 }
 
-async fn invoke_agent(session: &str, run_id: &str) {
+async fn invoke_agent(session: &str) {
+    let conversation_id = uuid::Uuid::new_v4().to_string();
     let span = tracing::info_span!(
         "invoke_agent",
         otel.kind = semconv::SPAN_KIND_INTERNAL,
         gen_ai.operation.name = "invoke_agent",
-        parallax.agent.id = "demo-agent",
-        parallax.session.id = %session,
-        parallax.run.id = %run_id
+        gen_ai.agent.name = "claude",
+        gen_ai.provider.name = "anthropic",
+        gen_ai.conversation.id = %conversation_id,
+        session.id = %session,
     );
     async move {
         tracing::info!("agent invocation started");
@@ -272,11 +364,12 @@ enum CronOutcome {
 }
 
 impl CronOutcome {
-    fn as_str(self) -> &'static str {
+    /// Generic bounded `outcome` (decision 5): stuck check-ins time out.
+    fn as_outcome(self) -> &'static str {
         match self {
-            Self::Ok => "ok",
-            Self::Fail => "fail",
-            Self::Stuck => "stuck",
+            Self::Ok => semconv::OUTCOME_SUCCESS,
+            Self::Fail => semconv::OUTCOME_FAILURE,
+            Self::Stuck => semconv::OUTCOME_TIMEOUT,
         }
     }
 }
@@ -285,35 +378,31 @@ impl CronOutcome {
 /// dep; bucket 0-89 ok, 90-94 fail, 95-99 stuck.
 async fn cron(args: Vec<String>) -> anyhow::Result<i32> {
     let mode = args.first().map(String::as_str).unwrap_or("weighted");
-    let invocation_id = option_value(&args, "--invocation-id").unwrap_or_else(default_cron_id);
     match mode {
-        "ok" => cron_once(CronOutcome::Ok, &invocation_id, 0).await,
-        "fail" => cron_once(CronOutcome::Fail, &invocation_id, 0).await,
-        "stuck" => cron_once(CronOutcome::Stuck, &invocation_id, 0).await,
+        "ok" => cron_once(CronOutcome::Ok, 0).await,
+        "fail" => cron_once(CronOutcome::Fail, 0).await,
+        "stuck" => cron_once(CronOutcome::Stuck, 0).await,
         "duplicate" => {
-            let first = cron_once(CronOutcome::Ok, &invocation_id, 1).await?;
+            let first = cron_once(CronOutcome::Ok, 1).await?;
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            let second = cron_once(CronOutcome::Ok, &invocation_id, 2).await?;
+            let second = cron_once(CronOutcome::Ok, 2).await?;
             Ok(first.max(second))
         }
         "missed" => Ok(0),
-        "weighted" | "" => cron_once(weighted_cron_outcome(), &invocation_id, 0).await,
+        "weighted" | "" => cron_once(weighted_cron_outcome(), 0).await,
         other => Err(anyhow::anyhow!("unknown cron mode: {other}")),
     }
 }
 
-async fn cron_once(
-    outcome: CronOutcome,
-    invocation_id: &str,
-    duplicate_ordinal: i64,
-) -> anyhow::Result<i32> {
+async fn cron_once(outcome: CronOutcome, duplicate_ordinal: i64) -> anyhow::Result<i32> {
+    let invocation_id = invocation::invocation_id();
     let span = tracing::info_span!(
         "cron_job",
         otel.kind = semconv::SPAN_KIND_INTERNAL,
+        cli.invocation.id = %invocation_id,
         "cron.job.name" = "playground-report",
         "cron.schedule" = "*/1 * * * *",
-        "cron.invocation.id" = %invocation_id,
-        "cron.outcome" = outcome.as_str(),
+        outcome = outcome.as_outcome(),
         "cron.duplicate.ordinal" = duplicate_ordinal
     );
     async move {
@@ -361,80 +450,57 @@ fn option_value(args: &[String], flag: &str) -> Option<String> {
         .map(|pair| pair[1].clone())
 }
 
-fn default_session_id() -> String {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("exec-stack-{seconds}-{}", std::process::id())
-}
-
-fn default_cron_id() -> String {
-    let millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    format!("playground-report-{millis}-{}", std::process::id())
-}
-
-fn run_id(session: &str) -> String {
-    std::env::var("PARALLAX_RUN_ID").unwrap_or_else(|_| session.to_string())
-}
-
-fn resource_attrs_with_run_id_from(existing: Option<&str>, run_id: &str) -> String {
-    let existing = existing.unwrap_or_default();
-    if existing
-        .split(',')
-        .filter_map(|item| item.split_once('='))
-        .any(|(key, _)| key.trim() == semconv::PARALLAX_RUN_ID)
-    {
-        return existing.to_owned();
-    }
-    if existing.trim().is_empty() {
-        format!("{}={run_id}", semconv::PARALLAX_RUN_ID)
-    } else {
-        format!("{existing},{}={run_id}", semconv::PARALLAX_RUN_ID)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::ffi::OsString;
     use std::path::Path;
 
-    use super::{CronOutcome, cron_once, execution_child_command, resource_attrs_with_run_id_from};
+    use super::{
+        CronOutcome, app_mode, command_name, cron_once, execution_child_command, outcome_for_exit,
+    };
+    use playground_telemetry::semconv;
 
     #[tokio::test]
     async fn cron_outcomes_preserve_process_exit_contract() {
-        assert_eq!(
-            cron_once(CronOutcome::Ok, "test-ok", 0)
-                .await
-                .expect("ok cron"),
-            0
-        );
-        assert_eq!(
-            cron_once(CronOutcome::Fail, "test-fail", 0)
-                .await
-                .expect("fail cron"),
-            1
-        );
+        assert_eq!(cron_once(CronOutcome::Ok, 0).await.expect("ok cron"), 0);
+        assert_eq!(cron_once(CronOutcome::Fail, 0).await.expect("fail cron"), 1);
     }
 
     #[test]
-    fn resource_attributes_add_run_id_once() {
-        assert_eq!(
-            resource_attrs_with_run_id_from(None, "run-a"),
-            "parallax.run.id=run-a"
-        );
-        assert_eq!(
-            resource_attrs_with_run_id_from(Some("service.name=cli"), "run-a"),
-            "service.name=cli,parallax.run.id=run-a"
-        );
-        assert_eq!(
-            resource_attrs_with_run_id_from(Some("parallax.run.id=existing"), "run-a"),
-            "parallax.run.id=existing"
-        );
+    fn every_mode_maps_to_a_bounded_command_and_app_mode() {
+        let cases = [
+            ("", "playground.drive", semconv::APP_MODE_ONE_SHOT),
+            ("drive", "playground.drive", semconv::APP_MODE_ONE_SHOT),
+            ("cron", "playground.cron", semconv::APP_MODE_ONE_SHOT),
+            ("daemon", "playground.daemon", semconv::APP_MODE_DAEMON),
+            ("enter", "playground.enter", semconv::APP_MODE_CAPSULE),
+            (
+                "console",
+                "playground.console",
+                semconv::APP_MODE_INTERACTIVE,
+            ),
+            (
+                "test-report",
+                "playground.test.report",
+                semconv::APP_MODE_ONE_SHOT,
+            ),
+            (
+                "test-verify",
+                "playground.test.verify",
+                semconv::APP_MODE_ONE_SHOT,
+            ),
+        ];
+        for (mode, command, app) in cases {
+            assert_eq!(command_name(mode), command, "{mode}");
+            assert_eq!(app_mode(mode), app, "{mode}");
+        }
+    }
+
+    #[test]
+    fn exit_codes_map_to_the_bounded_outcome() {
+        assert_eq!(outcome_for_exit(0), semconv::OUTCOME_SUCCESS);
+        assert_eq!(outcome_for_exit(1), semconv::OUTCOME_FAILURE);
     }
 
     #[test]
@@ -446,7 +512,7 @@ mod tests {
         let linked = execution_child_command(
             Path::new("playground"),
             "session-a",
-            "run-a",
+            "inv-a",
             false,
             &carrier,
             Some("service.name=cli"),
@@ -460,22 +526,26 @@ mod tests {
             Some(&Some(OsString::from("00-abc-def-01")))
         );
         assert_eq!(
+            linked_env.get(&OsString::from("CLI_INVOCATION_ID")),
+            Some(&Some(OsString::from("inv-a")))
+        );
+        assert_eq!(
             linked_env.get(&OsString::from("OTEL_RESOURCE_ATTRIBUTES")),
             Some(&Some(OsString::from(
-                "service.name=cli,parallax.run.id=run-a"
+                "service.name=cli,cli.invocation.id=inv-a"
             )))
         );
         assert_eq!(
             linked_env.get(&OsString::from("BAGGAGE")),
             Some(&Some(OsString::from(
-                "parallax.session.id=session-a,parallax.run.id=run-a"
+                "session.id=session-a,cli.invocation.id=inv-a"
             )))
         );
 
         let orphan = execution_child_command(
             Path::new("playground"),
             "session-a",
-            "run-a",
+            "inv-a",
             true,
             &carrier,
             None,

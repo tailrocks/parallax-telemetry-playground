@@ -28,7 +28,7 @@ export function testTraceparentPath(testId: string): string {
 
 export function testTraceparentDirectory(): string {
   const runIdentity =
-    process.env["PARALLAX_RUN_ID"] ??
+    process.env["CLI_INVOCATION_ID"] ??
     process.env["CI_RUN_ID"] ??
     process.env["TRACEPARENT"] ??
     "standalone";

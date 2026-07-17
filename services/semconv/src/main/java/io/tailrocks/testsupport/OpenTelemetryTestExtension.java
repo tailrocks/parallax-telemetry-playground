@@ -65,7 +65,7 @@ public final class OpenTelemetryTestExtension implements InvocationInterceptor {
         span.setAttribute(Semconv.TEST_CASE_NAME, name);
         span.setAttribute(Semconv.TEST_SUITE_RUN_STATUS, "pass");
         span.setAttribute(Semconv.CICD_PIPELINE_TASK_TYPE, "test");
-        span.setAttribute(Semconv.CICD_PIPELINE_RUN_ID, System.getenv().getOrDefault("PARALLAX_RUN_ID", ""));
+        span.setAttribute(Semconv.CICD_PIPELINE_RUN_ID, System.getenv().getOrDefault("CLI_INVOCATION_ID", ""));
         span.setAttribute(Semconv.PARALLAX_TEST_ID, testId(name));
         span.setAttribute(Semconv.TEST_ATTEMPT_ORDINAL, attempt);
         span.setAttribute(Semconv.TEST_CONFIGURATION_OS, System.getProperty("os.name"));

@@ -54,7 +54,7 @@ dependencies {
 openTelemetryBuild {
     endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") ?: "http://rotel:4317"
     serviceName = "payment-tests"
-    customTags = mapOf("parallax.run.id" to (System.getenv("PARALLAX_RUN_ID") ?: ""))
+    customTags = mapOf("cli.invocation.id" to (System.getenv("CLI_INVOCATION_ID") ?: ""))
     taskTraceEnvironmentEnabled = true
 }
 tasks.withType<Test>().configureEach {
@@ -67,7 +67,7 @@ tasks.withType<Test>().configureEach {
     }
     inputs.files(otelJavaAgent)
     jvmArgs("-javaagent:${otelJavaAgent.singleFile.absolutePath}")
-    environment("PARALLAX_RUN_ID", System.getenv("PARALLAX_RUN_ID") ?: "")
+    environment("CLI_INVOCATION_ID", System.getenv("CLI_INVOCATION_ID") ?: "")
     environment("PARALLAX_TEST_ID", System.getenv("PARALLAX_TEST_ID") ?: "")
     environment("PARALLAX_TEST_ENVIRONMENT", System.getenv("PARALLAX_TEST_ENVIRONMENT") ?: "local")
     environment("TRACEPARENT", System.getenv("TRACEPARENT") ?: "")

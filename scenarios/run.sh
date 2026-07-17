@@ -95,7 +95,7 @@ scenario() {
     b3b) echo "b3b-grpc-deadline.sh|Traces: pricing.attempt sibling spans carry rpc.grpc.status_code=4 and deadline_exceeded" ;;
     b-degradation) echo "b-degradation.sh|Traces/Issues: degraded response and skewed span timing" ;;
     b17) echo "b17-cron.sh|Runs: cron success/fail/stuck outcome; requires cargo build first" ;;
-    b17b) echo "b17b-cron-suite.sh|Runs: cron attrs, missing slot, duplicate cron.invocation.id; requires cargo build first" ;;
+    b17b) echo "b17b-cron-suite.sh|CLI Apps: cron attrs, missing slot, duplicate firings sharing one cli.invocation.id; requires cargo build first" ;;
     b19) echo "b19-jvm-gc-pressure.sh|Services -> catalog -> Runtime lane: jvm.memory.used / jvm.gc.*; GraphQL spans slow" ;;
     b20) echo "b20-container-oom.sh|Docker OOM/restart + telemetry gap; destructive, pass --yes to the script" ;;
     b21) echo "b21-orphan-consumer.sh|Traces: normal consumer has link, orphan consumer is linkless root; Runtime: messaging.queue.depth rises" ;;

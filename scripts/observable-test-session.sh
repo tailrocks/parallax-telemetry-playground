@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${PARALLAX_RUN_ID:-}" || -z "${TRACEPARENT:-}" ]]; then
-  echo "error: run through: parallax run start -- scripts/observable-test-session.sh <rust|java|web>" >&2
+if [[ -z "${CLI_INVOCATION_ID:-}" || -z "${TRACEPARENT:-}" ]]; then
+  echo "error: run through: parallax invocation start -- scripts/observable-test-session.sh <rust|java|web>" >&2
   exit 2
 fi
 

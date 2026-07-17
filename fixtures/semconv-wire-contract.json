@@ -74,11 +74,362 @@
       "owner": "shared"
     },
     {
-      "id": "parallax.run.id",
-      "rust": "PARALLAX_RUN_ID",
-      "typescript": "PARALLAX_RUN_ID",
-      "java": "PARALLAX_RUN_ID",
-      "value": "parallax.run.id",
+      "id": "cli.invocation.id",
+      "rust": "CLI_INVOCATION_ID",
+      "typescript": "CLI_INVOCATION_ID",
+      "java": "CLI_INVOCATION_ID",
+      "value": "cli.invocation.id",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "cli.command.name",
+      "rust": "CLI_COMMAND_NAME",
+      "typescript": "CLI_COMMAND_NAME",
+      "java": "CLI_COMMAND_NAME",
+      "value": "cli.command.name",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "app.mode",
+      "rust": "APP_MODE",
+      "typescript": "APP_MODE",
+      "java": "APP_MODE",
+      "value": "app.mode",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "app.mode.one_shot",
+      "rust": "APP_MODE_ONE_SHOT",
+      "typescript": "APP_MODE_ONE_SHOT",
+      "java": "APP_MODE_ONE_SHOT",
+      "value": "one_shot",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "app.mode.interactive",
+      "rust": "APP_MODE_INTERACTIVE",
+      "typescript": "APP_MODE_INTERACTIVE",
+      "java": "APP_MODE_INTERACTIVE",
+      "value": "interactive",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "app.mode.daemon",
+      "rust": "APP_MODE_DAEMON",
+      "typescript": "APP_MODE_DAEMON",
+      "java": "APP_MODE_DAEMON",
+      "value": "daemon",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "app.mode.capsule",
+      "rust": "APP_MODE_CAPSULE",
+      "typescript": "APP_MODE_CAPSULE",
+      "java": "APP_MODE_CAPSULE",
+      "value": "capsule",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "session.previous_id",
+      "rust": "SESSION_PREVIOUS_ID",
+      "typescript": "SESSION_PREVIOUS_ID",
+      "java": "SESSION_PREVIOUS_ID",
+      "value": "session.previous_id",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "session.start.event.name",
+      "rust": "SESSION_START_EVENT_NAME",
+      "typescript": "SESSION_START_EVENT_NAME",
+      "java": "SESSION_START_EVENT_NAME",
+      "value": "session.start",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "session.end.event.name",
+      "rust": "SESSION_END_EVENT_NAME",
+      "typescript": "SESSION_END_EVENT_NAME",
+      "java": "SESSION_END_EVENT_NAME",
+      "value": "session.end",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "ui.screen.entered.event.name",
+      "rust": "UI_SCREEN_ENTERED_EVENT_NAME",
+      "typescript": "UI_SCREEN_ENTERED_EVENT_NAME",
+      "java": "UI_SCREEN_ENTERED_EVENT_NAME",
+      "value": "ui.screen.entered",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "ui.screen.exited.event.name",
+      "rust": "UI_SCREEN_EXITED_EVENT_NAME",
+      "typescript": "UI_SCREEN_EXITED_EVENT_NAME",
+      "java": "UI_SCREEN_EXITED_EVENT_NAME",
+      "value": "ui.screen.exited",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "ui.widget.focused.event.name",
+      "rust": "UI_WIDGET_FOCUSED_EVENT_NAME",
+      "typescript": "UI_WIDGET_FOCUSED_EVENT_NAME",
+      "java": "UI_WIDGET_FOCUSED_EVENT_NAME",
+      "value": "ui.widget.focused",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "ui.widget.unfocused.event.name",
+      "rust": "UI_WIDGET_UNFOCUSED_EVENT_NAME",
+      "typescript": "UI_WIDGET_UNFOCUSED_EVENT_NAME",
+      "java": "UI_WIDGET_UNFOCUSED_EVENT_NAME",
+      "value": "ui.widget.unfocused",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "app.screen.id",
+      "rust": "APP_SCREEN_ID",
+      "typescript": "APP_SCREEN_ID",
+      "java": "APP_SCREEN_ID",
+      "value": "app.screen.id",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "ui.action.name",
+      "rust": "UI_ACTION_NAME",
+      "typescript": "UI_ACTION_NAME",
+      "java": "UI_ACTION_NAME",
+      "value": "ui.action.name",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "ui.screen.visit.id",
+      "rust": "UI_SCREEN_VISIT_ID",
+      "typescript": "UI_SCREEN_VISIT_ID",
+      "java": "UI_SCREEN_VISIT_ID",
+      "value": "ui.screen.visit.id",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "ui.navigation.sequence",
+      "rust": "UI_NAVIGATION_SEQUENCE",
+      "typescript": "UI_NAVIGATION_SEQUENCE",
+      "java": "UI_NAVIGATION_SEQUENCE",
+      "value": "ui.navigation.sequence",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "ui.transition.reason",
+      "rust": "UI_TRANSITION_REASON",
+      "typescript": "UI_TRANSITION_REASON",
+      "java": "UI_TRANSITION_REASON",
+      "value": "ui.transition.reason",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "background.cycle.span.name",
+      "rust": "BACKGROUND_CYCLE_SPAN_NAME",
+      "typescript": "BACKGROUND_CYCLE_SPAN_NAME",
+      "java": "BACKGROUND_CYCLE_SPAN_NAME",
+      "value": "background.cycle",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "background.cycle.name",
+      "rust": "BACKGROUND_CYCLE_NAME",
+      "typescript": "BACKGROUND_CYCLE_NAME",
+      "java": "BACKGROUND_CYCLE_NAME",
+      "value": "background.cycle.name",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "job.id",
+      "rust": "JOB_ID",
+      "typescript": "JOB_ID",
+      "java": "JOB_ID",
+      "value": "job.id",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "job.type",
+      "rust": "JOB_TYPE",
+      "typescript": "JOB_TYPE",
+      "java": "JOB_TYPE",
+      "value": "job.type",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "outcome",
+      "rust": "OUTCOME",
+      "typescript": "OUTCOME",
+      "java": "OUTCOME",
+      "value": "outcome",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "outcome.success",
+      "rust": "OUTCOME_SUCCESS",
+      "typescript": "OUTCOME_SUCCESS",
+      "java": "OUTCOME_SUCCESS",
+      "value": "success",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "outcome.failure",
+      "rust": "OUTCOME_FAILURE",
+      "typescript": "OUTCOME_FAILURE",
+      "java": "OUTCOME_FAILURE",
+      "value": "failure",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "outcome.error",
+      "rust": "OUTCOME_ERROR",
+      "typescript": "OUTCOME_ERROR",
+      "java": "OUTCOME_ERROR",
+      "value": "error",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "outcome.timeout",
+      "rust": "OUTCOME_TIMEOUT",
+      "typescript": "OUTCOME_TIMEOUT",
+      "java": "OUTCOME_TIMEOUT",
+      "value": "timeout",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "outcome.skip",
+      "rust": "OUTCOME_SKIP",
+      "typescript": "OUTCOME_SKIP",
+      "java": "OUTCOME_SKIP",
+      "value": "skip",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "outcome.cancellation",
+      "rust": "OUTCOME_CANCELLATION",
+      "typescript": "OUTCOME_CANCELLATION",
+      "java": "OUTCOME_CANCELLATION",
+      "value": "cancellation",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "gen_ai.agent.name",
+      "rust": "GEN_AI_AGENT_NAME",
+      "typescript": "GEN_AI_AGENT_NAME",
+      "java": "GEN_AI_AGENT_NAME",
+      "value": "gen_ai.agent.name",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "gen_ai.conversation.id",
+      "rust": "GEN_AI_CONVERSATION_ID",
+      "typescript": "GEN_AI_CONVERSATION_ID",
+      "java": "GEN_AI_CONVERSATION_ID",
+      "value": "gen_ai.conversation.id",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "gen_ai.provider.name",
+      "rust": "GEN_AI_PROVIDER_NAME",
+      "typescript": "GEN_AI_PROVIDER_NAME",
+      "java": "GEN_AI_PROVIDER_NAME",
+      "value": "gen_ai.provider.name",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "gen_ai.usage.input_tokens",
+      "rust": "GEN_AI_USAGE_INPUT_TOKENS",
+      "typescript": "GEN_AI_USAGE_INPUT_TOKENS",
+      "java": "GEN_AI_USAGE_INPUT_TOKENS",
+      "value": "gen_ai.usage.input_tokens",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "gen_ai.usage.output_tokens",
+      "rust": "GEN_AI_USAGE_OUTPUT_TOKENS",
+      "typescript": "GEN_AI_USAGE_OUTPUT_TOKENS",
+      "java": "GEN_AI_USAGE_OUTPUT_TOKENS",
+      "value": "gen_ai.usage.output_tokens",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "process.exit.code",
+      "rust": "PROCESS_EXIT_CODE",
+      "typescript": "PROCESS_EXIT_CODE",
+      "java": "PROCESS_EXIT_CODE",
+      "value": "process.exit.code",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "cli.command.span.name",
+      "rust": "CLI_COMMAND_SPAN_NAME",
+      "typescript": "CLI_COMMAND_SPAN_NAME",
+      "java": "CLI_COMMAND_SPAN_NAME",
+      "value": "cli.command",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "app.startup.span.name",
+      "rust": "APP_STARTUP_SPAN_NAME",
+      "typescript": "APP_STARTUP_SPAN_NAME",
+      "java": "APP_STARTUP_SPAN_NAME",
+      "value": "app.startup",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "app.shutdown.span.name",
+      "rust": "APP_SHUTDOWN_SPAN_NAME",
+      "typescript": "APP_SHUTDOWN_SPAN_NAME",
+      "java": "APP_SHUTDOWN_SPAN_NAME",
+      "value": "app.shutdown",
+      "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "ui.action.span.name",
+      "rust": "UI_ACTION_SPAN_NAME",
+      "typescript": "UI_ACTION_SPAN_NAME",
+      "java": "UI_ACTION_SPAN_NAME",
+      "value": "ui.action",
       "values": null,
       "owner": "shared"
     },
@@ -197,6 +548,122 @@
       "java": "SESSION_ID",
       "value": "session.id",
       "values": null,
+      "owner": "shared"
+    },
+    {
+      "id": "job.type.order_dispatch",
+      "rust": "JOB_TYPE_ORDER_DISPATCH",
+      "typescript": "JOB_TYPE_ORDER_DISPATCH",
+      "java": "JOB_TYPE_ORDER_DISPATCH",
+      "value": "order_dispatch",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "job.type.fulfillment_shipment",
+      "rust": "JOB_TYPE_FULFILLMENT_SHIPMENT",
+      "typescript": "JOB_TYPE_FULFILLMENT_SHIPMENT",
+      "java": "JOB_TYPE_FULFILLMENT_SHIPMENT",
+      "value": "fulfillment_shipment",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "background.cycle.queue_health",
+      "rust": "BACKGROUND_CYCLE_QUEUE_HEALTH",
+      "typescript": "BACKGROUND_CYCLE_QUEUE_HEALTH",
+      "java": "BACKGROUND_CYCLE_QUEUE_HEALTH",
+      "value": "queue_health",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "background.cycle.price_refresh",
+      "rust": "BACKGROUND_CYCLE_PRICE_REFRESH",
+      "typescript": "BACKGROUND_CYCLE_PRICE_REFRESH",
+      "java": "BACKGROUND_CYCLE_PRICE_REFRESH",
+      "value": "price_refresh",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "app.screen.home",
+      "rust": "APP_SCREEN_HOME",
+      "typescript": "APP_SCREEN_HOME",
+      "java": "APP_SCREEN_HOME",
+      "value": "home",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "app.screen.cart",
+      "rust": "APP_SCREEN_CART",
+      "typescript": "APP_SCREEN_CART",
+      "java": "APP_SCREEN_CART",
+      "value": "cart",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "app.screen.checkout",
+      "rust": "APP_SCREEN_CHECKOUT",
+      "typescript": "APP_SCREEN_CHECKOUT",
+      "java": "APP_SCREEN_CHECKOUT",
+      "value": "checkout",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "ui.action.cart_add",
+      "rust": "UI_ACTION_CART_ADD",
+      "typescript": "UI_ACTION_CART_ADD",
+      "java": "UI_ACTION_CART_ADD",
+      "value": "cart.add",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "ui.action.checkout_submit",
+      "rust": "UI_ACTION_CHECKOUT_SUBMIT",
+      "typescript": "UI_ACTION_CHECKOUT_SUBMIT",
+      "java": "UI_ACTION_CHECKOUT_SUBMIT",
+      "value": "checkout.submit",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "ui.action.screen_back",
+      "rust": "UI_ACTION_SCREEN_BACK",
+      "typescript": "UI_ACTION_SCREEN_BACK",
+      "java": "UI_ACTION_SCREEN_BACK",
+      "value": "screen.back",
+      "values": null,
+      "owner": "playground"
+    },
+    {
+      "id": "gen_ai.agents",
+      "rust": "GEN_AI_AGENT_NAMES",
+      "typescript": "GEN_AI_AGENT_NAMES",
+      "java": "GEN_AI_AGENT_NAMES",
+      "value": null,
+      "values": [
+        "claude",
+        "codex",
+        "amp"
+      ],
+      "owner": "playground"
+    },
+    {
+      "id": "gen_ai.providers",
+      "rust": "GEN_AI_PROVIDER_NAMES",
+      "typescript": "GEN_AI_PROVIDER_NAMES",
+      "java": "GEN_AI_PROVIDER_NAMES",
+      "value": null,
+      "values": [
+        "anthropic",
+        "openai",
+        "sourcegraph"
+      ],
       "owner": "playground"
     },
     {
@@ -277,33 +744,6 @@
       "typescript": "SPAN_KIND_CONSUMER",
       "java": "SPAN_KIND_CONSUMER",
       "value": "consumer",
-      "values": null,
-      "owner": "playground"
-    },
-    {
-      "id": "parallax.session.id",
-      "rust": "PARALLAX_SESSION_ID",
-      "typescript": "PARALLAX_SESSION_ID",
-      "java": "PARALLAX_SESSION_ID",
-      "value": "parallax.session.id",
-      "values": null,
-      "owner": "playground"
-    },
-    {
-      "id": "parallax.execution.layer",
-      "rust": "PARALLAX_EXECUTION_LAYER",
-      "typescript": "PARALLAX_EXECUTION_LAYER",
-      "java": "PARALLAX_EXECUTION_LAYER",
-      "value": "parallax.execution.layer",
-      "values": null,
-      "owner": "playground"
-    },
-    {
-      "id": "parallax.agent.id",
-      "rust": "PARALLAX_AGENT_ID",
-      "typescript": "PARALLAX_AGENT_ID",
-      "java": "PARALLAX_AGENT_ID",
-      "value": "parallax.agent.id",
       "values": null,
       "owner": "playground"
     },

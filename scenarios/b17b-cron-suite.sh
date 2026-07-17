@@ -12,7 +12,7 @@ fi
 
 run_wrapped() {
   if command -v parallax >/dev/null 2>&1; then
-    parallax run start -- "$@"
+    parallax invocation start -- "$@"
   else
     "$@"
   fi
@@ -30,13 +30,11 @@ run_slot() {
   fi
   set +e
   if [[ "$mode" == "duplicate" ]]; then
-    run_wrapped "$BIN" cron ok --invocation-id "$id"
-    local first_code="$?"
-    run_wrapped "$BIN" cron ok --invocation-id "$id"
-    local second_code="$?"
-    local code="$(( first_code > second_code ? first_code : second_code ))"
+    # Duplicate firings share one invocation id via the neutral env carrier.
+    CLI_INVOCATION_ID="$id" run_wrapped "$BIN" cron duplicate
+    local code="$?"
   else
-    run_wrapped "$BIN" cron "$mode" --invocation-id "$id"
+    CLI_INVOCATION_ID="$id" run_wrapped "$BIN" cron "$mode"
     local code="$?"
   fi
   set -e
@@ -52,5 +50,5 @@ run_slot 5 missed
 run_slot 6 duplicate
 
 echo "B17b done."
-echo "Check in Parallax: Runs show exit codes and durations; slot 5 is absent by design."
-echo "Check traces/log attrs: slot 6 has two runs/spans sharing cron.invocation.id."
+echo "Check in Parallax: CLI Apps show exit codes and durations; slot 5 is absent by design."
+echo "Check traces/log attrs: slot 6 has two cron_job spans sharing cli.invocation.id."

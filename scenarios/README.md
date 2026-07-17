@@ -45,7 +45,7 @@ rows here and in `run.sh`.
 | b3b | `b3b-grpc-deadline.sh` | Checkout uses tonic `grpc-timeout` against delayed pricing, with retries. | Traces: sibling `pricing.attempt` spans show `rpc.grpc.status_code=4` and `deadline_exceeded` ERROR status. |
 | b-degradation | `b-degradation.sh` | Partial degrade and real backdated child span. | Traces/Issues: degraded response and skewed span timing. |
 | b17 | `b17-cron.sh` | Short-lived Rust CLI cron mode. | Runs: cron success/fail/stuck outcome; run `cargo build` first. `parallax run start -- scenarios/b17-cron.sh` is optional when you want run-scoped resource attrs. |
-| b17b | `b17b-cron-suite.sh` | Cron timeline: ok, ok, fail, stuck, missed, duplicate. | Runs: schedule attrs, exit codes, missing beat, and duplicate `cron.invocation.id`; run `cargo build` first. |
+| b17b | `b17b-cron-suite.sh` | Cron timeline: ok, ok, fail, stuck, missed, duplicate. | CLI Apps: schedule attrs, exit codes, missing beat, and duplicate firings sharing one `cli.invocation.id`; run `cargo build` first. |
 | b19 | `b19-jvm-gc-pressure.sh` | Catalog bounded heap pressure while GraphQL products queries run. | Services -> catalog -> Runtime lane: `jvm.memory.used` / `jvm.gc.*` rise; GraphQL spans slow in the same window. |
 | b20 | `b20-container-oom.sh --yes` | Recommendation leak under `deploy/docker-compose.limits.yml` (`mem_limit: 128m`). | Docker OOM/restart evidence plus a recommendation telemetry gap; destructive and requires `--yes`. |
 | b21 | `b21-orphan-consumer.sh` | Orders normal linked consumer, orphan linkless consumer, and lag burst. | Traces: normal consumer has a span link, orphan consumer is root/linkless with `messaging.orphan=true`; Runtime: `messaging.queue.depth` rises. |

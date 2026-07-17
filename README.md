@@ -78,7 +78,7 @@ The acceptance run is executable and machine-checked against Parallax rather
 than accepted from screenshots:
 
 ```bash
-parallax run start -- scripts/observable-test-session.sh web --acceptance
+parallax invocation start -- scripts/observable-test-session.sh web --acceptance
 mise exec -- cargo run --locked -p playground-cli -- \
   test-verify <run-id-printed-above> web
 ```

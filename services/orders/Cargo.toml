@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 playground-telemetry = { workspace = true }
+uuid = { workspace = true }
 anyhow = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }

@@ -2,15 +2,18 @@ package dev.tailrocks.fulfillment;
 
 import dev.tailrocks.pricing.v1.PricingGrpc;
 import dev.tailrocks.pricing.v1.QuoteRequest;
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.TextMapGetter;
 import io.opentelemetry.context.propagation.TextMapSetter;
+import io.tailrocks.semconv.Semconv;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
@@ -50,10 +53,21 @@ class OrderProducer {
         this.kafka = kafka;
     }
 
+    static final String JOB_ID_HEADER = "x-job-id";
+
     @PostMapping("/publish")
     String publish(@RequestParam(defaultValue = "order-1") String order) {
+        // Detached-job identity (plan 158 decision 6): the PRODUCER mints a
+        // job id, stamps it on its span, and carries it over Kafka headers so
+        // the CONSUMER attempt shares the same job.
+        String jobId = UUID.randomUUID().toString();
+        Span.current().setAttribute(AttributeKey.stringKey(Semconv.JOB_ID), jobId);
+        Span.current()
+            .setAttribute(
+                AttributeKey.stringKey(Semconv.JOB_TYPE), Semconv.JOB_TYPE_FULFILLMENT_SHIPMENT);
         ProducerRecord<String, String> record = new ProducerRecord<>("orders", order);
         KafkaTraceContext.inject(Context.current(), record.headers());
+        record.headers().add(JOB_ID_HEADER, jobId.getBytes(StandardCharsets.US_ASCII));
         kafka.send(record);
         return "published " + order;
     }
@@ -96,6 +110,14 @@ class OrderConsumer {
         if (producerSpan.isValid()) {
             Span.current().addLink(producerSpan);
         }
+        String jobId = KafkaTraceContext.header(record.headers(), OrderProducer.JOB_ID_HEADER);
+        if (jobId != null && !jobId.isEmpty()) {
+            Span.current().setAttribute(AttributeKey.stringKey(Semconv.JOB_ID), jobId);
+            Span.current()
+                .setAttribute(
+                    AttributeKey.stringKey(Semconv.JOB_TYPE),
+                    Semconv.JOB_TYPE_FULFILLMENT_SHIPMENT);
+        }
         String order = record.value();
         pricing.quote(QuoteRequest.newBuilder().setSku(order).setQuantity(1).build());
         notifications.notifyOrder();
@@ -133,5 +155,10 @@ final class KafkaTraceContext {
 
     static Context extract(Headers headers) {
         return W3C.extract(Context.root(), headers, GETTER);
+    }
+
+    static String header(Headers headers, String key) {
+        Header header = headers.lastHeader(key);
+        return header == null ? null : new String(header.value(), StandardCharsets.US_ASCII);
     }
 }

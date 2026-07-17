@@ -18,6 +18,7 @@
 //! source.)
 
 mod feature_flags;
+pub mod invocation;
 pub mod propagation;
 pub mod semconv;
 
@@ -500,15 +501,18 @@ fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
             environment_from(std::env::var("PARALLAX_ENV").ok()),
         ),
     ];
+    // A wrapped child (the CLI's own descendants) receives the invocation id
+    // through the env carrier and surfaces it as a resource attribute — the
+    // generic wrapped-emitter path. Long-running services never set it.
     let otel_resource_attributes = std::env::var("OTEL_RESOURCE_ATTRIBUTES").ok();
-    if let Ok(run_id) = std::env::var("PARALLAX_RUN_ID")
-        && !run_id.trim().is_empty()
+    if let Ok(invocation_id) = std::env::var(invocation::INVOCATION_ENV)
+        && !invocation_id.trim().is_empty()
         && !resource_attr_list_contains(
             otel_resource_attributes.as_deref(),
-            semconv::PARALLAX_RUN_ID,
+            semconv::CLI_INVOCATION_ID,
         )
     {
-        attributes.push(KeyValue::new(semconv::PARALLAX_RUN_ID, run_id));
+        attributes.push(KeyValue::new(semconv::CLI_INVOCATION_ID, invocation_id));
     }
     if let Some(git_sha) = non_empty_env("GIT_SHA") {
         attributes.push(KeyValue::new(semconv::VCS_REF_HEAD_REVISION, git_sha));
@@ -624,21 +628,24 @@ mod tests {
     }
 
     #[test]
-    fn resource_attr_list_detects_existing_run_id() {
+    fn resource_attr_list_detects_existing_invocation_id() {
         assert!(resource_attr_list_contains(
-            Some("service.name=checkout, parallax.run.id=run-a"),
-            semconv::PARALLAX_RUN_ID
+            Some("service.name=checkout, cli.invocation.id=inv-a"),
+            semconv::CLI_INVOCATION_ID
         ));
         assert!(!resource_attr_list_contains(
-            Some("service.name=checkout, parallax.session.id=s1"),
-            semconv::PARALLAX_RUN_ID
+            Some("service.name=checkout, session.id=s1"),
+            semconv::CLI_INVOCATION_ID
         ));
-        assert!(!resource_attr_list_contains(None, semconv::PARALLAX_RUN_ID));
+        assert!(!resource_attr_list_contains(
+            None,
+            semconv::CLI_INVOCATION_ID
+        ));
     }
 
     #[test]
     fn shared_wire_names_are_frozen() {
-        assert_eq!(semconv::PARALLAX_RUN_ID, "parallax.run.id");
+        assert_eq!(semconv::CLI_INVOCATION_ID, "cli.invocation.id");
         assert_eq!(semconv::SERVICE_NAME, "service.name");
         assert_eq!(semconv::SERVICE_VERSION, "service.version");
         assert_eq!(

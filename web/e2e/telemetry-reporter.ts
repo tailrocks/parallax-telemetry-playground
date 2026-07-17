@@ -10,7 +10,7 @@ import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
 import {
   CICD_PIPELINE_RUN_ID,
   CICD_PIPELINE_TASK_TYPE,
-  PARALLAX_RUN_ID,
+  CLI_INVOCATION_ID,
   PARALLAX_TEST_ID,
   SERVICE_VERSION,
   TEST_ATTEMPT_ORDINAL,
@@ -38,7 +38,7 @@ const TEST_TRACER = "playground.web.test";
  * Opt-in Playwright-to-OTLP bridge. The reporter deliberately has no browser
  * dependency: Playwright invokes it in Bun, and explicit timestamps retain the
  * runner's measured test duration. Set PLAYGROUND_TEST_OTLP_ENDPOINT to enable
- * exports, normally under `parallax run start -- bun run e2e`.
+ * exports, normally under `parallax invocation start -- bun run e2e`.
  */
 export default class TelemetryReporter implements Reporter {
   private readonly spans = new Map<string, Span>();
@@ -47,7 +47,7 @@ export default class TelemetryReporter implements Reporter {
     ? new WebTracerProvider({
         resource: resourceFromAttributes({
           [ATTR_SERVICE_NAME]: "playground-web-tests",
-          [PARALLAX_RUN_ID]: process.env.PARALLAX_RUN_ID ?? "",
+          [CLI_INVOCATION_ID]: process.env.CLI_INVOCATION_ID ?? "",
           [SERVICE_VERSION]: process.env.RELEASE ?? "dev",
           [VCS_REF_HEAD_REVISION]: process.env.GITHUB_SHA ?? process.env.VCS_REF ?? "",
         }),
