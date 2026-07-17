@@ -132,7 +132,7 @@ conversion is lossless.
 
 | Backend | Expected recording evidence | Result |
 | --- | --- | --- |
-| Parallax | Native ingest disposition (currently expected to drop unsupported exponential histograms) | pending live run |
+| Parallax | Native ingest disposition (currently expected to drop unsupported exponential histograms) | **CODE-CONFIRMED drop** (2026-07-17): `parallax-ingest` `normalize_metrics` keeps explicit-bucket histograms only; exponential histograms / summaries hit the `_ => {}` arm and store nothing (`crates/parallax-ingest/src/metrics.rs`). Live JVM probe still useful as regression guard; product claim is drop-until-modeled. |
 | Maple | Histogram type/buckets visible or documented conversion | pending live run |
 | SigNoz | Histogram type/buckets visible or documented conversion | pending live run |
 | OpenObserve | Histogram type/buckets visible or documented conversion | pending live run |
@@ -295,8 +295,9 @@ Durable packet:
 | SigNoz v0.129.0 | **PASS** | CH `signoz-smoke=102`, `signoz-smoke2=82` after first-org register (OpAMP OTLP gate) |
 | Sentry self-hosted 26.6.0 | **PASS** | `verify.sh` A1 OTLP HTTP 200 + A15/A16 `times_seen=5` (`PaymentError`) |
 
-W5 histogram / cross-language `PaymentError` **product disposition** rows in
-the table above this section remain pending live UI inspection per backend
-(plumbing fan-out is green; disposition is product-side). Collector-backed
-`observable-test-session` wrappers against each external remain residual
-(Parallax arm covered under plan 159).
+W5 histogram disposition for **Parallax** is code-confirmed drop of exponential
+histograms (table above). Cross-language `PaymentError` and external-backend
+histogram **product disposition** rows remain pending live UI inspection per
+backend (plumbing fan-out is green; disposition is product-side).
+Collector-backed `observable-test-session` wrappers against each external remain
+residual (Parallax arm covered under plan 159).
