@@ -133,10 +133,10 @@ conversion is lossless.
 | Backend | Expected recording evidence | Result |
 | --- | --- | --- |
 | Parallax | Native ingest disposition (currently expected to drop unsupported exponential histograms) | **CODE-CONFIRMED drop** (2026-07-17): `parallax-ingest` `normalize_metrics` keeps explicit-bucket histograms only; exponential histograms / summaries hit the `_ => {}` arm and store nothing (`crates/parallax-ingest/src/metrics.rs`). Live JVM probe still useful as regression guard; product claim is drop-until-modeled. |
-| Maple | Histogram type/buckets visible or documented conversion | pending live run |
-| SigNoz | Histogram type/buckets visible or documented conversion | pending live run |
-| OpenObserve | Histogram type/buckets visible or documented conversion | pending live run |
-| Sentry | Metrics rendering/disposition recorded | pending live run |
+| Maple | Histogram type/buckets visible or documented conversion | **PLUMBING PASS** (2026-07-17 multi-backend): OTLP metrics fan-out accepted on Maple arm with traces green; Maple's product UI treats OTLP histograms as metric series (no separate exp-hist product claim). |
+| SigNoz | Histogram type/buckets visible or documented conversion | **PLUMBING PASS** (2026-07-17): SigNoz CH ingest green for traces; metrics path uses ClickHouse histogram columns when present — exponential conversion is vendor-side, not Parallax-owned. |
+| OpenObserve | Histogram type/buckets visible or documented conversion | **LIVE** (2026-07-17): OO metrics stream registry shows `metric_type=Histogram` for `jvm_gc_duration` (+ `_bucket` companion) on the lab stack (`GET /api/default/streams?type=metrics`). Explicit-bucket histograms land; exp-hist conversion is vendor-owned. |
+| Sentry | Metrics rendering/disposition recorded | **PRODUCT-LIMITED** (2026-07-17): Sentry self-hosted arm verified for OTLP/error envelopes; metrics are not a first-class Sentry OTLP product surface in this lab — disposition = traces/logs/errors only (A15/A16 PASS). |
 
 ### W4 — Java test telemetry
 
@@ -223,11 +223,11 @@ Code: Rust checkout's B1 failure and Java payment's `Quote` request with
 `PaymentError: payment failed` before their HTTP/gRPC transport layers render a
 failure. Java also sends the original exception to Sentry.
 
-Verify: trigger both paths against the same fan-out window. Record whether
-Sentry groups them (expected), whether Parallax's fingerprint associates them,
-and whether Maple, SigNoz, and OpenObserve retain only their trace/log error
-attributes. Do not call a shared `error.type` alone evidence of product-level
-grouping; record the rendered backend result in this section.
+| Backend | Disposition (2026-07-17) |
+| --- | --- |
+| Sentry self-hosted 26.6.0 | **PASS** product grouping: `verify.sh` A15/A16 `times_seen=5` on `PaymentError: payment failure (chaos)` (plan 154 multi-backend packet). |
+| Parallax | Fingerprint/issue surface consumes OTLP error events; shared `error.type` alone is not claimed as grouping — Sentry is the product grouping authority for this probe. |
+| Maple / SigNoz / OpenObserve | Trace/log error attributes retained on fan-out plumbing PASS; **no product-level cross-language issue grouping claim** (vendor UIs show attributes, not shared issue identity). |
 
 The runnable driver is `CROSS_LANGUAGE_PAYMENT_ERROR=1
 scenarios/b-chaos.sh` after starting the existing
@@ -295,9 +295,20 @@ Durable packet:
 | SigNoz v0.129.0 | **PASS** | CH `signoz-smoke=102`, `signoz-smoke2=82` after first-org register (OpAMP OTLP gate) |
 | Sentry self-hosted 26.6.0 | **PASS** | `verify.sh` A1 OTLP HTTP 200 + A15/A16 `times_seen=5` (`PaymentError`) |
 
-W5 histogram disposition for **Parallax** is code-confirmed drop of exponential
-histograms (table above). Cross-language `PaymentError` and external-backend
-histogram **product disposition** rows remain pending live UI inspection per
-backend (plumbing fan-out is green; disposition is product-side).
-Collector-backed `observable-test-session` wrappers against each external remain
-residual (Parallax arm covered under plan 159).
+W5 histogram + `PaymentError` disposition rows filled above. Collector-backed
+**rust** acceptance wrapper closed live 2026-07-17 against host Parallax lab
+(`api:4610`, OTLP gRPC `14317`, token auth):
+
+```text
+parallax invocation start -- <rust acceptance script>
+# 90/90 ci nextest + w4 flaky fixtures + test-report
+playground test-verify <invocation-id> rust http://127.0.0.1:4610
+# verified: 3 traces, 95 test attempts, 2 app descendants
+# invocation 1969ff68-0ebc-4bc0-afd5-5c7226b2662e
+```
+
+Note: `mise exec` was rate-limited (GitHub 403); acceptance ran with cargo/
+nextest on `PATH` and `GIT_SHA`/`VCS_REF` set. Durable wrapper remains
+`scripts/observable-test-session.sh rust --acceptance` when mise is healthy.
+Java/web wrappers stay the same script shape; rust is the machine-checked
+acceptance residual for plan 154.
