@@ -76,16 +76,8 @@ pub const APP_SCREEN_CHECKOUT: &str = "checkout";
 pub const UI_ACTION_CART_ADD: &str = "cart.add";
 pub const UI_ACTION_CHECKOUT_SUBMIT: &str = "checkout.submit";
 pub const UI_ACTION_SCREEN_BACK: &str = "screen.back";
-pub const GEN_AI_AGENT_NAMES: &[&str] = &[
-    "claude",
-    "codex",
-    "amp",
-];
-pub const GEN_AI_PROVIDER_NAMES: &[&str] = &[
-    "anthropic",
-    "openai",
-    "sourcegraph",
-];
+pub const GEN_AI_AGENT_NAMES: &[&str] = &["claude", "codex", "amp"];
+pub const GEN_AI_PROVIDER_NAMES: &[&str] = &["anthropic", "openai", "sourcegraph"];
 pub const APP_SCREEN_NAME: &str = "app.screen.name";
 pub const APP_WIDGET_NAME: &str = "app.widget.name";
 pub const TELEMETRY_PROPAGATION_DISABLED: &str = "telemetry.propagation.disabled";
