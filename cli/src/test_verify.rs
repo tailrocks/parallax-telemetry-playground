@@ -198,7 +198,9 @@ fn analyze(invocation_id: &str, stack: &str, traces: &[Value]) -> Result<Summary
         "test resource service version is missing"
     );
     ensure!(
-        tests.iter().any(|span| span.status_code == "ERROR"),
+        tests
+            .iter()
+            .any(|span| matches!(span.status_code.as_str(), "ERROR" | "STATUS_CODE_ERROR")),
         "failed test span status is not ERROR"
     );
 

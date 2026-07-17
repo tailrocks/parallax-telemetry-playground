@@ -75,6 +75,16 @@ mod tests {
         let telemetry = playground_telemetry::init_test_telemetry("notifications-test")
             .expect("test telemetry initializes");
         let scope = telemetry.as_ref().map(|telemetry| telemetry.enter());
+        // Live per-test root: the junit-converted test.case spans are emitted
+        // after the fact and cannot parent live spans, so the observable rust
+        // session stitches its application descendants below this span.
+        let test_root = tracing::info_span!(
+            "test.case",
+            test.case.name = "tests::serves_notifications_over_a_real_tcp_listener",
+            test.suite.name = "notifications",
+            test.attempt.ordinal = 1i64,
+        );
+        let test_root_guard = test_root.enter();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listener binds");
@@ -104,6 +114,8 @@ mod tests {
             .expect("server shuts down")
             .expect("server task joins");
 
+        drop(test_root_guard);
+        drop(test_root);
         drop(scope);
         if let Some(telemetry) = telemetry {
             telemetry.shutdown();

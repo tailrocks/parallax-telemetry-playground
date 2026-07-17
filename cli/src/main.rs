@@ -79,6 +79,9 @@ async fn main() -> anyhow::Result<()> {
         Err(err) => {
             playground_telemetry::mark_span_error("cli_error");
             tracing::error!(error = %err, "cli failed");
+            // tracing may have no subscriber (telemetry off) — always reach the
+            // operator's terminal too.
+            eprintln!("error: {err:#}");
             1
         }
     };
