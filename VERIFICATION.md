@@ -293,7 +293,7 @@ Durable packet:
 | OpenObserve | **PASS** | `smoke.sh` + search `count=102`; Parallax SQL `service=smoke` → 102 |
 | Maple v0.0.12 | **PASS** | `maple traces` shows `maple-fanout`; Parallax SQL → 102 |
 | SigNoz v0.129.0 | **PASS** | CH `signoz-smoke=102`, `signoz-smoke2=82` after first-org register (OpAMP OTLP gate) |
-| Sentry self-hosted | **pending** | `sentry/setup.sh` re-run this session; verify.sh not yet green |
+| Sentry self-hosted 26.6.0 | **PASS** | `verify.sh` A1 OTLP HTTP 200 + A15/A16 `times_seen=5` (`PaymentError`) |
 
 W5 histogram / cross-language `PaymentError` **product disposition** rows in
 the table above this section remain pending live UI inspection per backend
