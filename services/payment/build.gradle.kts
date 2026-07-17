@@ -43,7 +43,7 @@ dependencies {
     compileOnly("org.apache.tomcat:annotations-api:6.0.53")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation("io.sentry:sentry-spring-boot-starter-jakarta:8.46.0")
+    implementation("io.sentry:sentry-spring-boot-4-starter:8.46.0")
     implementation("io.opentelemetry:opentelemetry-api")
     compileOnly("org.junit.jupiter:junit-jupiter-api")
     testImplementation("org.springframework.boot:spring-boot-starter-test")

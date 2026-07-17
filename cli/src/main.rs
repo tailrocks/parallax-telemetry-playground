@@ -159,7 +159,13 @@ async fn drive() -> anyhow::Result<i32> {
     let base = std::env::var("CHECKOUT_URL").unwrap_or_else(|_| "http://localhost:8088".into());
     let url = format!("{base}/checkout?sku=WIDGET-1&quantity=3");
     let body = playground_telemetry::traced_get(&url).await?.text().await?;
-    tracing::info!(%url, "drove checkout");
+    // Log records don't inherit span attributes; stamp the invocation id so
+    // invocation-scoped log queries can find this line.
+    tracing::info!(
+        %url,
+        cli.invocation.id = %invocation::invocation_id(),
+        "drove checkout"
+    );
     println!("{body}");
     Ok(0)
 }
@@ -411,12 +417,18 @@ async fn cron_once(outcome: CronOutcome, duplicate_ordinal: i64) -> anyhow::Resu
     async move {
         match outcome {
             CronOutcome::Ok => {
-                tracing::info!("cron job succeeded");
+                tracing::info!(
+                    cli.invocation.id = %invocation::invocation_id(),
+                    "cron job succeeded"
+                );
                 Ok(0)
             }
             CronOutcome::Fail => {
                 playground_telemetry::mark_span_error("nonzero_exit");
-                tracing::error!("cron job failed");
+                tracing::error!(
+                    cli.invocation.id = %invocation::invocation_id(),
+                    "cron job failed"
+                );
                 Ok(1)
             }
             CronOutcome::Stuck => {
