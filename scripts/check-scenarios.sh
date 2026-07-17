@@ -19,7 +19,11 @@ sed -nE 's/^    ([a-z0-9-]+)\) echo "([^|]+)\|.*/\1 \2/p' "$RUNNER" |
 {
   sed -nE 's/^\| ([a-z0-9-]+) \| `([^ `]+).*/\1 \2/p' \
     "$ROOT/scenarios/README.md"
-  sed -nE 's/^\| `([a-z0-9-]+)` \|.*/\1 corner-cases.sh/p' \
+  # Matrix rows with a dedicated `*.sh` driver column map to that script;
+  # every other corpus row is driven by corner-cases.sh.
+  sed -nE 's/^\| `([a-z0-9-]+)` \| `([a-z0-9-]+\.sh)`.*/\1 \2/p' \
+    "$ROOT/docs/corner-case-matrix.md"
+  sed -nE '/^\| `[a-z0-9-]+` \| `[a-z0-9-]+\.sh`/d; s/^\| `([a-z0-9-]+)` \|.*/\1 corner-cases.sh/p' \
     "$ROOT/docs/corner-case-matrix.md"
 } |
   LC_ALL=C sort -u |

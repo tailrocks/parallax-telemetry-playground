@@ -43,6 +43,9 @@ b16             b16-load.sh                    k6 checkout load entry           
 b-chaos         b-chaos.sh                     payment failure and latency                  Issues/Services: checkout error and slow-span rendering
 b-checkout-chaos b-checkout-chaos.sh           retry timeout and N+1 fan-out                Traces: retry/timeout branch and N+1 waterfall
 b3b             b3b-grpc-deadline.sh           real grpc-timeout deadline and retry spans    Traces: rpc.grpc.status_code=4 on pricing.attempt spans
+a-breach-error-rate a-breach-error-rate.sh      sustained checkout failure via paymentFailure flag (>=3 min)  Alerts: high-error-rate incident opens for checkout
+a-breach-p95    a-breach-p95.sh                sustained slow recommendation responses (>=3 min)             Alerts: p95 latency incident opens for recommendation
+a-recover       a-recover.sh                   flag off + healthy traffic until incidents resolve            Alerts: incidents resolve; resolved webhook delivered
 b-degradation   b-degradation.sh               partial degrade and skew                     Traces/Issues: degraded response and skewed span timing
 b17             b17-cron.sh                    playground cron mode                         Runs: cron success/fail/stuck outcome; cargo build first
 b17b            b17b-cron-suite.sh             cron ok/fail/stuck/missed/duplicate          Runs: schedule attrs, missing beat, duplicate invocation id
@@ -66,8 +69,8 @@ l-patterns      corner-cases.sh l-patterns     corner-case corpus (plan 165)    
 m-shapes        corner-cases.sh m-shapes       corner-case corpus (plan 161)             Metrics: counter reset mid-window, gauge gap, exemplar-bearing histogram
 m-labels        corner-cases.sh m-labels       corner-case corpus (plan 168)             Metrics: gauge + sum with region label eu/us/ap at fixed 6/3/1 proportions (group-by assertions)
 f-attrs         corner-cases.sh f-attrs        corner-case corpus (plan 164)             Traces/Logs: 100 spans + 100 logs with http.request.method 70/20/10 GET/POST/DELETE (facet count assertions)
-e-burst         corner-cases.sh e-burst        corner-case corpus (plan 161)             Issues: one recurring error type plus five distinct error.type values
 eco-external    corner-cases.sh eco-external   corner-case corpus (plan 166)             Ecosystem: checkout CLIENT span to api.stripe.test with no instrumented SERVER side
+e-burst         corner-cases.sh e-burst        corner-case corpus (plan 161)             Issues: one recurring error type plus five distinct error.type values
 e-multi-lang    corner-cases.sh e-multi-lang   corner-case corpus (plan 161)             Issues: same failure with Rust/Java/browser fingerprints
 p-grpc-err      corner-cases.sh p-grpc-err     corner-case corpus (plan 161)             Traces: gRPC OK/INVALID_ARGUMENT/DEADLINE_EXCEEDED variants
 p-grpc-stream   corner-cases.sh p-grpc-stream  corner-case corpus (plan 161)             Traces: streaming RPC with per-message events
@@ -121,6 +124,9 @@ scenario() {
     b-chaos) echo "b-chaos.sh|Issues/Services: checkout error and slow-span rendering" ;;
     b-checkout-chaos) echo "b-checkout-chaos.sh|Traces: retry/timeout branch and N+1 waterfall" ;;
     b3b) echo "b3b-grpc-deadline.sh|Traces: pricing.attempt sibling spans carry rpc.grpc.status_code=4 and deadline_exceeded" ;;
+    a-breach-error-rate) echo "a-breach-error-rate.sh|Alerts: sustained checkout failures open a high-error-rate incident" ;;
+    a-breach-p95) echo "a-breach-p95.sh|Alerts: sustained slow recommendation opens a p95 latency incident" ;;
+    a-recover) echo "a-recover.sh|Alerts: healthy traffic resolves open incidents; resolved webhook delivered" ;;
     b-degradation) echo "b-degradation.sh|Traces/Issues: degraded response and skewed span timing" ;;
     b17) echo "b17-cron.sh|Runs: cron success/fail/stuck outcome; requires cargo build first" ;;
     b17b) echo "b17b-cron-suite.sh|CLI Apps: cron attrs, missing slot, duplicate firings sharing one cli.invocation.id; requires cargo build first" ;;
@@ -144,12 +150,12 @@ scenario() {
     m-shapes) echo "corner-cases.sh m-shapes|Metrics: counter reset mid-window, gauge gap, exemplar-bearing histogram" ;;
     m-labels) echo "corner-cases.sh m-labels|Metrics: gauge + sum with region label eu/us/ap at fixed 6/3/1 proportions (group-by assertions)" ;;
     f-attrs) echo "corner-cases.sh f-attrs|Traces/Logs: 100 spans + 100 logs with http.request.method 70/20/10 GET/POST/DELETE (facet count assertions)" ;;
+    eco-external) echo "corner-cases.sh eco-external|Ecosystem: checkout CLIENT span to api.stripe.test with no instrumented SERVER side" ;;
     e-burst) echo "corner-cases.sh e-burst|Issues: one recurring error type plus five distinct error.type values" ;;
     e-multi-lang) echo "corner-cases.sh e-multi-lang|Issues: same failure with Rust/Java/browser fingerprints" ;;
     p-grpc-err) echo "corner-cases.sh p-grpc-err|Traces: gRPC OK/INVALID_ARGUMENT/DEADLINE_EXCEEDED variants" ;;
     p-grpc-stream) echo "corner-cases.sh p-grpc-stream|Traces: streaming RPC with per-message events" ;;
     p-graphql-err) echo "corner-cases.sh p-graphql-err|Traces: GraphQL field error with partial data + request-level error" ;;
-    eco-external) echo "corner-cases.sh eco-external|Ecosystem: checkout CLIENT span to api.stripe.test with no instrumented SERVER side" ;;
     p-kafka-lag) echo "corner-cases.sh p-kafka-lag|Traces: consumer lag + dead-letter over the Kafka leg" ;;
     j-happy) echo "corner-cases.sh j-happy|CLI Apps journey: home→cart→checkout, all actions succeed" ;;
     j-error) echo "corner-cases.sh j-error|CLI Apps journey: checkout.submit fails on the checkout screen with widget context" ;;
