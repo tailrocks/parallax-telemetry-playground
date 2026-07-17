@@ -49,6 +49,7 @@ opentelemetry-http = "0.32"
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.32", default-features = false, features = ["grpc-tonic", "trace", "logs", "metrics"] }
 opentelemetry-appender-tracing = "0.32"
+opentelemetry-proto = { version = "0.32", default-features = false, features = ["gen-tonic-messages", "trace", "logs", "metrics"] }
 opentelemetry-semantic-conventions = "0.32"
 open-feature = "0.3.0"
 # Checkout uses the RPC resolver. open-feature-flagd 0.2.1 still needs

@@ -2341,7 +2341,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "opentelemetry",
+ "opentelemetry-proto",
  "playground-telemetry",
+ "prost",
  "quick-xml",
  "reqwest",
  "serde_json",

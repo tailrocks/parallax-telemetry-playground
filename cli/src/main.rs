@@ -12,6 +12,7 @@
 //! Flushes telemetry on exit (short-lived discipline).
 
 mod console_sim;
+mod shapes;
 mod test_report;
 mod test_verify;
 
@@ -67,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
             "daemon" => daemon(rest).await,
             "enter" => enter(rest).await,
             "console" => console_sim::run(rest).await,
+            "shapes" => shapes::run(rest).await,
             _ => drive().await,
         }
     }
@@ -96,6 +98,7 @@ fn command_name(mode: &str) -> &'static str {
         "daemon" => "playground.daemon",
         "enter" => "playground.enter",
         "console" => "playground.console",
+        "shapes" => "playground.shapes",
         "test-report" => "playground.test.report",
         "test-verify" => "playground.test.verify",
         _ => "playground.drive",

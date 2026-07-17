@@ -19,6 +19,9 @@ ARG SERVICE
 # "../../proto" → services/<svc> up two levels to the shared proto/).
 WORKDIR /src
 COPY services/${SERVICE} /src/services/${SERVICE}
+# The generated shared semconv sources are included by every Java service
+# via srcDir("../semconv/src/main/java").
+COPY services/semconv /src/services/semconv
 COPY proto /src/proto
 COPY graphql /src/graphql
 WORKDIR /src/services/${SERVICE}

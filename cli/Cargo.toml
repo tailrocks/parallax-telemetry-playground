@@ -18,3 +18,5 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 quick-xml = { workspace = true }
 opentelemetry = { workspace = true }
+opentelemetry-proto = { workspace = true }
+prost = { workspace = true }

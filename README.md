@@ -156,3 +156,10 @@ Java (catalog/payment/fulfillment) + web wiring, then the async/broker, chaos
 (flagd), deploy-regression, and canary-redaction scenarios — per the design doc's
 phasing. Comparison is manual (open each backend's UI); a scored harness is out
 of scope for now.
+
+## Corner-case corpus
+
+`docs/corner-case-matrix.md` maps every UI rendering risk to a stable
+scenario id (`scenarios/run.sh <id>`); run the whole corpus with
+`scenarios/corner-cases.sh --all-corner-cases`. Synthetic shapes export as
+`service.name=playground-shapes`; journey cases ride `playground console`.

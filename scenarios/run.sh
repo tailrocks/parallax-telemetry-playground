@@ -51,6 +51,30 @@ b20             b20-container-oom.sh --yes     recommendation leak under 128m ov
 b21             b21-orphan-consumer.sh          linked vs orphan consumer plus lag gauge     Traces: linkless root consumer; Runtime: messaging.queue.depth
 b22             b22-sampling-gap.sh            checkout at 10 percent root sampling         Traces: sampled-out gaps; Logs: full request evidence
 b23             b23-uncorrelated-log.sh        detached checkout log outside span context   Logs: error row without trace chip
+t-deep          corner-cases.sh t-deep         corner-case corpus (plan 161)             Traces: 14-span linear chain across three simulated tiers (depth rendering)
+t-wide          corner-cases.sh t-wide         corner-case corpus (plan 161)             Traces: 521-span fan-out in one trace (virtualization, minimap sampling)
+t-multiroot     corner-cases.sh t-multiroot    corner-case corpus (plan 161)             Traces: one trace id with two root spans; both must render
+t-orphan        corner-cases.sh t-orphan       corner-case corpus (plan 161)             Traces: detached child whose parent never arrives (renders, not vanishes)
+t-skew          corner-cases.sh t-skew         corner-case corpus (plan 161)             Traces: SERVER child starts before its CLIENT parent (skew banner, non-negative bars)
+t-zero          corner-cases.sh t-zero         corner-case corpus (plan 161)             Traces: zero-duration span and a 1µs twin (no divide-by-zero, visible bars)
+t-links         corner-cases.sh t-links        corner-case corpus (plan 161)             Traces: two traces cross-linked both ways (link navigation)
+t-longnames     corner-cases.sh t-longnames    corner-case corpus (plan 161)             Traces: 1-4 KiB unicode/emoji names and values (truncation, copy)
+t-events        corner-cases.sh t-events       corner-case corpus (plan 161)             Trace detail: 51 span events incl. Rust/Java/browser stacktraces
+l-burst         corner-cases.sh l-burst        corner-case corpus (plan 161)             Logs: 5k logs in seconds (live tail caps, histogram)
+l-bodies        corner-cases.sh l-bodies       corner-case corpus (plan 161)             Logs: JSON body, 32 KiB body, ANSI escapes, blank body, identical timestamps
+m-shapes        corner-cases.sh m-shapes       corner-case corpus (plan 161)             Metrics: counter reset mid-window, gauge gap, exemplar-bearing histogram
+e-burst         corner-cases.sh e-burst        corner-case corpus (plan 161)             Issues: one recurring error type plus five distinct error.type values
+e-multi-lang    corner-cases.sh e-multi-lang   corner-case corpus (plan 161)             Issues: same failure with Rust/Java/browser fingerprints
+p-grpc-err      corner-cases.sh p-grpc-err     corner-case corpus (plan 161)             Traces: gRPC OK/INVALID_ARGUMENT/DEADLINE_EXCEEDED variants
+p-grpc-stream   corner-cases.sh p-grpc-stream  corner-case corpus (plan 161)             Traces: streaming RPC with per-message events
+p-graphql-err   corner-cases.sh p-graphql-err  corner-case corpus (plan 161)             Traces: GraphQL field error with partial data + request-level error
+p-kafka-lag     corner-cases.sh p-kafka-lag    corner-case corpus (plan 161)             Traces: consumer lag + dead-letter over the Kafka leg
+j-happy         corner-cases.sh j-happy        corner-case corpus (plan 161)             CLI Apps journey: home→cart→checkout, all actions succeed
+j-error         corner-cases.sh j-error        corner-case corpus (plan 161)             CLI Apps journey: checkout.submit fails on the checkout screen with widget context
+j-outside       corner-cases.sh j-outside      corner-case corpus (plan 161)             CLI Apps journey: error between screen visits lands in the unattributed bucket
+j-reattach      corner-cases.sh j-reattach     corner-case corpus (plan 161)             CLI Apps journey: three sessions chained via session.previous_id
+j-parallel      corner-cases.sh j-parallel     corner-case corpus (plan 161)             CLI Apps: three concurrent console invocations + the daemon (four correlation domains)
+eco-full        corner-cases.sh eco-full       corner-case corpus (plan 161)             Ecosystem: every edge with cli/browser/service node kinds present
 TABLE
 }
 
@@ -101,6 +125,30 @@ scenario() {
     b21) echo "b21-orphan-consumer.sh|Traces: normal consumer has link, orphan consumer is linkless root; Runtime: messaging.queue.depth rises" ;;
     b22) echo "b22-sampling-gap.sh|Traces: sampled-out gaps at 10 percent root sampling; Logs: full request evidence" ;;
     b23) echo "b23-uncorrelated-log.sh|Logs: orphan diagnostic without trace chip" ;;
+    t-deep) echo "corner-cases.sh t-deep|Traces: 14-span linear chain across three simulated tiers (depth rendering)" ;;
+    t-wide) echo "corner-cases.sh t-wide|Traces: 521-span fan-out in one trace (virtualization, minimap sampling)" ;;
+    t-multiroot) echo "corner-cases.sh t-multiroot|Traces: one trace id with two root spans; both must render" ;;
+    t-orphan) echo "corner-cases.sh t-orphan|Traces: detached child whose parent never arrives (renders, not vanishes)" ;;
+    t-skew) echo "corner-cases.sh t-skew|Traces: SERVER child starts before its CLIENT parent (skew banner, non-negative bars)" ;;
+    t-zero) echo "corner-cases.sh t-zero|Traces: zero-duration span and a 1µs twin (no divide-by-zero, visible bars)" ;;
+    t-links) echo "corner-cases.sh t-links|Traces: two traces cross-linked both ways (link navigation)" ;;
+    t-longnames) echo "corner-cases.sh t-longnames|Traces: 1-4 KiB unicode/emoji names and values (truncation, copy)" ;;
+    t-events) echo "corner-cases.sh t-events|Trace detail: 51 span events incl. Rust/Java/browser stacktraces" ;;
+    l-burst) echo "corner-cases.sh l-burst|Logs: 5k logs in seconds (live tail caps, histogram)" ;;
+    l-bodies) echo "corner-cases.sh l-bodies|Logs: JSON body, 32 KiB body, ANSI escapes, blank body, identical timestamps" ;;
+    m-shapes) echo "corner-cases.sh m-shapes|Metrics: counter reset mid-window, gauge gap, exemplar-bearing histogram" ;;
+    e-burst) echo "corner-cases.sh e-burst|Issues: one recurring error type plus five distinct error.type values" ;;
+    e-multi-lang) echo "corner-cases.sh e-multi-lang|Issues: same failure with Rust/Java/browser fingerprints" ;;
+    p-grpc-err) echo "corner-cases.sh p-grpc-err|Traces: gRPC OK/INVALID_ARGUMENT/DEADLINE_EXCEEDED variants" ;;
+    p-grpc-stream) echo "corner-cases.sh p-grpc-stream|Traces: streaming RPC with per-message events" ;;
+    p-graphql-err) echo "corner-cases.sh p-graphql-err|Traces: GraphQL field error with partial data + request-level error" ;;
+    p-kafka-lag) echo "corner-cases.sh p-kafka-lag|Traces: consumer lag + dead-letter over the Kafka leg" ;;
+    j-happy) echo "corner-cases.sh j-happy|CLI Apps journey: home→cart→checkout, all actions succeed" ;;
+    j-error) echo "corner-cases.sh j-error|CLI Apps journey: checkout.submit fails on the checkout screen with widget context" ;;
+    j-outside) echo "corner-cases.sh j-outside|CLI Apps journey: error between screen visits lands in the unattributed bucket" ;;
+    j-reattach) echo "corner-cases.sh j-reattach|CLI Apps journey: three sessions chained via session.previous_id" ;;
+    j-parallel) echo "corner-cases.sh j-parallel|CLI Apps: three concurrent console invocations + the daemon (four correlation domains)" ;;
+    eco-full) echo "corner-cases.sh eco-full|Ecosystem: every edge with cli/browser/service node kinds present" ;;
     *) return 1 ;;
   esac
 }
@@ -121,12 +169,16 @@ fi
 
 script="${entry%%|*}"
 check="${entry#*|}"
+# The script field may carry fixed arguments (e.g. "corner-cases.sh t-deep").
+read -r script_file script_args <<<"$script"
 if [[ "$id" == "a7" ]]; then
-  bun "$SCRIPT_DIR/$script" "$@"
-elif [[ "$script" == "requires-live-host" ]]; then
+  bun "$SCRIPT_DIR/$script_file" "$@"
+elif [[ "$script_file" == "requires-live-host" ]]; then
   echo "Scenario $id requires a live host: $check"
+elif [[ -n "$script_args" ]]; then
+  "$SCRIPT_DIR/$script_file" $script_args "$@"
 else
-  "$SCRIPT_DIR/$script" "$@"
+  "$SCRIPT_DIR/$script_file" "$@"
 fi
 echo
 echo "Check in Parallax UI: $check"
