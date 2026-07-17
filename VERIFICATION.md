@@ -279,3 +279,24 @@ out of the run: the test-telemetry exporter deadlock + wrapper-protocol
 clash, the Boot-4 Sentry starter for the Java services, invocation-id
 stamping on drive/cron log lines, and `PLAYGROUND_DAEMON_HOLD_SECONDS` +
 `app.mode` on background cycles for live daemon observation.
+
+## Multi-backend fan-out residual (plan 154, 2026-07-17)
+
+Live re-run on the operator host (64 GiB, Docker/OrbStack), **one self-hosted
+external at a time** through Rotel (`bench/otlp-fanout` in the Parallax
+repo). Host Parallax on offset OTLP `14317/14318` with `bind=0.0.0.0`.
+Durable packet:
+`parallax/docs/research/validation/2026-07-17-plan-154-multi-backend/`.
+
+| Backend | Result | Assert |
+|---|---|---|
+| OpenObserve | **PASS** | `smoke.sh` + search `count=102`; Parallax SQL `service=smoke` → 102 |
+| Maple v0.0.12 | **PASS** | `maple traces` shows `maple-fanout`; Parallax SQL → 102 |
+| SigNoz v0.129.0 | **PASS** | CH `signoz-smoke=102`, `signoz-smoke2=82` after first-org register (OpAMP OTLP gate) |
+| Sentry self-hosted | **pending** | `sentry/setup.sh` re-run this session; verify.sh not yet green |
+
+W5 histogram / cross-language `PaymentError` **product disposition** rows in
+the table above this section remain pending live UI inspection per backend
+(plumbing fan-out is green; disposition is product-side). Collector-backed
+`observable-test-session` wrappers against each external remain residual
+(Parallax arm covered under plan 159).
