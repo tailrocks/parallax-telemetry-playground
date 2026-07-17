@@ -57,6 +57,7 @@ pub const HTTP_ROUTE: &str = "http.route";
 pub const HTTP_RESPONSE_STATUS_CODE: &str = "http.response.status_code";
 pub const URL_PATH: &str = "url.path";
 pub const HTTP_SERVER_REQUEST_DURATION: &str = "http.server.request.duration";
+pub const SERVER_ADDRESS: &str = "server.address";
 pub const MESSAGING_SYSTEM: &str = "messaging.system";
 pub const MESSAGING_DESTINATION_NAME: &str = "messaging.destination.name";
 pub const MESSAGING_OPERATION_NAME: &str = "messaging.operation.name";
@@ -75,8 +76,16 @@ pub const APP_SCREEN_CHECKOUT: &str = "checkout";
 pub const UI_ACTION_CART_ADD: &str = "cart.add";
 pub const UI_ACTION_CHECKOUT_SUBMIT: &str = "checkout.submit";
 pub const UI_ACTION_SCREEN_BACK: &str = "screen.back";
-pub const GEN_AI_AGENT_NAMES: &[&str] = &["claude", "codex", "amp"];
-pub const GEN_AI_PROVIDER_NAMES: &[&str] = &["anthropic", "openai", "sourcegraph"];
+pub const GEN_AI_AGENT_NAMES: &[&str] = &[
+    "claude",
+    "codex",
+    "amp",
+];
+pub const GEN_AI_PROVIDER_NAMES: &[&str] = &[
+    "anthropic",
+    "openai",
+    "sourcegraph",
+];
 pub const APP_SCREEN_NAME: &str = "app.screen.name";
 pub const APP_WIDGET_NAME: &str = "app.widget.name";
 pub const TELEMETRY_PROPAGATION_DISABLED: &str = "telemetry.propagation.disabled";

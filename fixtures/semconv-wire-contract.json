@@ -479,6 +479,15 @@
       "owner": "playground"
     },
     {
+      "id": "server.address",
+      "rust": "SERVER_ADDRESS",
+      "typescript": "SERVER_ADDRESS",
+      "java": "SERVER_ADDRESS",
+      "value": "server.address",
+      "values": null,
+      "owner": "playground"
+    },
+    {
       "id": "messaging.system",
       "rust": "MESSAGING_SYSTEM",
       "typescript": "MESSAGING_SYSTEM",
