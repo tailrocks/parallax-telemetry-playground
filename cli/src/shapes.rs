@@ -446,11 +446,28 @@ fn logs_request(records: Vec<LogRecord>) -> ExportLogsServiceRequest {
     }
 }
 
-/// m-shapes: counter reset mid-window, gauge with gaps, explicit histogram
-/// with exemplar-bearing buckets.
-pub(crate) fn m_shapes() -> ExportMetricsServiceRequest {
+/// m-shapes anchor trace: the span the histogram exemplar deep-links to. An
+/// exemplar pointing at a trace that was never exported cannot prove the
+/// deep-link works — the target page would 404.
+pub(crate) fn m_shapes_anchor() -> Vec<SpanSpec> {
+    let trace = id16(42);
     let base = now_nanos();
-    let step = 10_000_000_000u64; // 10 s
+    let mut span = SpanSpec::basic(&trace, 42, None, "shapes.exemplar_anchor", base);
+    span.kind = 2;
+    vec![span]
+}
+
+/// m-shapes: counter reset mid-window, gauge with gaps, explicit histogram
+/// with exemplar-bearing buckets. The histogram uses the standard
+/// `http.server.request.duration` name so the service latency panel — the
+/// exemplar-rendering surface — picks it up; the exemplar references the
+/// anchor trace exported alongside.
+pub(crate) fn m_shapes(anchor: &[SpanSpec]) -> ExportMetricsServiceRequest {
+    let anchor_span = anchor.first().expect("anchor span");
+    // Points step 5 minutes back into the past: dashboard charts bucket by
+    // minutes, so a sub-minute gap (or future timestamps) can never render.
+    let step = 300_000_000_000u64; // 5 min
+    let base = now_nanos() - 3 * step;
     let number = |ts: u64, value: f64| NumberDataPoint {
         time_unix_nano: ts,
         start_time_unix_nano: base,
@@ -483,7 +500,7 @@ pub(crate) fn m_shapes() -> ExportMetricsServiceRequest {
         ..Default::default()
     };
     let histogram = Metric {
-        name: "shapes.request.duration".to_string(),
+        name: semconv::HTTP_SERVER_REQUEST_DURATION.to_string(),
         data: Some(Data::Histogram(Histogram {
             data_points: vec![HistogramDataPoint {
                 time_unix_nano: base + step,
@@ -494,8 +511,8 @@ pub(crate) fn m_shapes() -> ExportMetricsServiceRequest {
                 explicit_bounds: vec![0.1, 0.5],
                 exemplars: vec![opentelemetry_proto::tonic::metrics::v1::Exemplar {
                     time_unix_nano: base + step / 2,
-                    trace_id: id16(42),
-                    span_id: id8(42),
+                    trace_id: anchor_span.trace.clone(),
+                    span_id: anchor_span.id.clone(),
                     value: Some(
                         opentelemetry_proto::tonic::metrics::v1::exemplar::Value::AsDouble(0.42),
                     ),
@@ -639,7 +656,12 @@ pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
         "t-events" => post_traces(t_events()).await?,
         "l-burst" => post("v1/logs", l_burst(5_000).encode_to_vec()).await?,
         "l-bodies" => post("v1/logs", l_bodies().encode_to_vec()).await?,
-        "m-shapes" => post("v1/metrics", m_shapes().encode_to_vec()).await?,
+        "m-shapes" => {
+            let anchor = m_shapes_anchor();
+            let metrics = m_shapes(&anchor);
+            post_traces(anchor).await?;
+            post("v1/metrics", metrics.encode_to_vec()).await?;
+        }
         "e-burst" => post_traces(e_burst()).await?,
         "e-multi-lang" => post("v1/logs", e_multi_lang().encode_to_vec()).await?,
         other => anyhow::bail!("unknown shape id: {other}"),
@@ -840,7 +862,8 @@ mod tests {
 
     #[test]
     fn metric_shapes_cover_reset_gap_and_exemplar() {
-        let request = m_shapes();
+        let anchor = m_shapes_anchor();
+        let request = m_shapes(&anchor);
         let metrics = &request.resource_metrics[0].scope_metrics[0].metrics;
         assert_eq!(metrics.len(), 3);
         let Some(Data::Sum(sum)) = &metrics[0].data else {
@@ -859,5 +882,12 @@ mod tests {
             panic!("histogram")
         };
         assert_eq!(histogram.data_points[0].exemplars.len(), 1);
+        // The exemplar must deep-link to a trace that is actually exported.
+        let exemplar = &histogram.data_points[0].exemplars[0];
+        assert_eq!(exemplar.trace_id, anchor[0].trace);
+        assert_eq!(exemplar.span_id, anchor[0].id);
+        // The histogram rides the standard duration metric so the service
+        // latency panel (the exemplar surface) renders it.
+        assert_eq!(metrics[2].name, semconv::HTTP_SERVER_REQUEST_DURATION);
     }
 }
