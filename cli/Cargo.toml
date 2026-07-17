@@ -20,3 +20,14 @@ quick-xml = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-proto = { workspace = true }
 prost = { workspace = true }
+
+[dev-dependencies]
+libtest-mimic = "0.8.2"
+
+# Parameterized-name coverage: rustc test fn paths cannot carry `[…]`
+# parameter suffixes, so the parameterized-test contract fixture uses a
+# custom harness that registers bracketed case names (converted to
+# `test.case.parameters` by `playground test-report`).
+[[test]]
+name = "parameterized"
+harness = false

@@ -89,9 +89,11 @@ async fn fetch_and_analyze(
 }
 
 async fn graphql(client: &reqwest::Client, endpoint: &str, query: &str) -> Result<Value> {
-    let response = client
-        .post(endpoint)
-        .json(&json!({"query": query}))
+    let mut request = client.post(endpoint).json(&json!({"query": query}));
+    if let Ok(token) = std::env::var("PARALLAX_API_TOKEN") {
+        request = request.bearer_auth(token);
+    }
+    let response = request
         .send()
         .await
         .with_context(|| format!("cannot reach Parallax GraphQL at {endpoint}"))?
