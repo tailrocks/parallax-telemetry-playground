@@ -63,6 +63,8 @@ t-events        corner-cases.sh t-events       corner-case corpus (plan 161)    
 l-burst         corner-cases.sh l-burst        corner-case corpus (plan 161)             Logs: 5k logs in seconds (live tail caps, histogram)
 l-bodies        corner-cases.sh l-bodies       corner-case corpus (plan 161)             Logs: JSON body, 32 KiB body, ANSI escapes, blank body, identical timestamps
 m-shapes        corner-cases.sh m-shapes       corner-case corpus (plan 161)             Metrics: counter reset mid-window, gauge gap, exemplar-bearing histogram
+m-labels        corner-cases.sh m-labels       corner-case corpus (plan 168)             Metrics: gauge + sum with region label eu/us/ap at fixed 6/3/1 proportions (group-by assertions)
+f-attrs         corner-cases.sh f-attrs        corner-case corpus (plan 164)             Traces/Logs: 100 spans + 100 logs with http.request.method 70/20/10 GET/POST/DELETE (facet count assertions)
 e-burst         corner-cases.sh e-burst        corner-case corpus (plan 161)             Issues: one recurring error type plus five distinct error.type values
 e-multi-lang    corner-cases.sh e-multi-lang   corner-case corpus (plan 161)             Issues: same failure with Rust/Java/browser fingerprints
 p-grpc-err      corner-cases.sh p-grpc-err     corner-case corpus (plan 161)             Traces: gRPC OK/INVALID_ARGUMENT/DEADLINE_EXCEEDED variants
@@ -137,6 +139,8 @@ scenario() {
     l-burst) echo "corner-cases.sh l-burst|Logs: 5k logs in seconds (live tail caps, histogram)" ;;
     l-bodies) echo "corner-cases.sh l-bodies|Logs: JSON body, 32 KiB body, ANSI escapes, blank body, identical timestamps" ;;
     m-shapes) echo "corner-cases.sh m-shapes|Metrics: counter reset mid-window, gauge gap, exemplar-bearing histogram" ;;
+    m-labels) echo "corner-cases.sh m-labels|Metrics: gauge + sum with region label eu/us/ap at fixed 6/3/1 proportions (group-by assertions)" ;;
+    f-attrs) echo "corner-cases.sh f-attrs|Traces/Logs: 100 spans + 100 logs with http.request.method 70/20/10 GET/POST/DELETE (facet count assertions)" ;;
     e-burst) echo "corner-cases.sh e-burst|Issues: one recurring error type plus five distinct error.type values" ;;
     e-multi-lang) echo "corner-cases.sh e-multi-lang|Issues: same failure with Rust/Java/browser fingerprints" ;;
     p-grpc-err) echo "corner-cases.sh p-grpc-err|Traces: gRPC OK/INVALID_ARGUMENT/DEADLINE_EXCEEDED variants" ;;

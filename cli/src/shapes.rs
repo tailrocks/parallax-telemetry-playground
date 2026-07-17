@@ -539,6 +539,121 @@ pub(crate) fn m_shapes(anchor: &[SpanSpec]) -> ExportMetricsServiceRequest {
     }
 }
 
+/// f-attrs (plan 164): spans and logs carrying a documented attribute set
+/// with known value distributions — `http.request.method` split exactly
+/// 70/20/10 GET/POST/DELETE across 100 spans and 100 logs — so facet counts
+/// and where-clause narrowing are exactly assertable.
+pub(crate) fn f_attrs_method(index: u64) -> &'static str {
+    match index {
+        0..=69 => "GET",
+        70..=89 => "POST",
+        _ => "DELETE",
+    }
+}
+
+pub(crate) fn f_attrs_spans() -> Vec<SpanSpec> {
+    let base = now_nanos();
+    (0..100u64)
+        .map(|index| {
+            let trace = id16(7_000 + index);
+            let mut span = SpanSpec::basic(
+                &trace,
+                7_000 + index,
+                None,
+                "shapes.facet_request",
+                base + index * 3_000_000,
+            );
+            span.kind = 2;
+            span.attrs = vec![
+                kv(semconv::HTTP_REQUEST_METHOD, f_attrs_method(index)),
+                kv("shape.case", "f-attrs"),
+            ];
+            span
+        })
+        .collect()
+}
+
+pub(crate) fn f_attrs_logs() -> ExportLogsServiceRequest {
+    let base = now_nanos();
+    let records = (0..100u64)
+        .map(|index| {
+            log_record(
+                base + index * 3_000,
+                9,
+                &format!("facet corpus request {index}"),
+                vec![
+                    kv(semconv::HTTP_REQUEST_METHOD, f_attrs_method(index)),
+                    kv("shape.case", "f-attrs"),
+                ],
+            )
+        })
+        .collect();
+    logs_request(records)
+}
+
+/// m-labels (plan 168): one gauge and one monotonic sum emitted with a
+/// 3-value `region` label (eu/us/ap) at fixed per-region values, so group-by
+/// breakdown output is exactly assertable.
+pub(crate) fn m_labels() -> ExportMetricsServiceRequest {
+    let step = 300_000_000_000u64; // 5 min, matching m-shapes bucketing
+    let base = now_nanos() - 3 * step;
+    // Fixed per-region magnitudes: eu=60, us=30, ap=10 (a 6/3/1 split).
+    let regions: [(&str, f64); 3] = [("eu", 60.0), ("us", 30.0), ("ap", 10.0)];
+    let point = |ts: u64, value: f64, region: &str| NumberDataPoint {
+        time_unix_nano: ts,
+        start_time_unix_nano: base,
+        value: Some(number_data_point::Value::AsDouble(value)),
+        attributes: vec![kv("region", region)],
+        ..Default::default()
+    };
+    let gauge_points = (0..=3u64)
+        .flat_map(|step_index| {
+            regions.map(|(region, magnitude)| point(base + step_index * step, magnitude, region))
+        })
+        .collect();
+    let sum_points = (0..=3u64)
+        .flat_map(|step_index| {
+            regions.map(|(region, magnitude)| {
+                // Monotonic: each region grows by its magnitude every step.
+                point(
+                    base + step_index * step,
+                    magnitude * (step_index + 1) as f64,
+                    region,
+                )
+            })
+        })
+        .collect();
+    let gauge = Metric {
+        name: "shapes.region.load".to_string(),
+        data: Some(Data::Gauge(Gauge {
+            data_points: gauge_points,
+        })),
+        ..Default::default()
+    };
+    let sum = Metric {
+        name: "shapes.region.requests_total".to_string(),
+        data: Some(Data::Sum(Sum {
+            data_points: sum_points,
+            aggregation_temporality: 2,
+            is_monotonic: true,
+        })),
+        ..Default::default()
+    };
+    ExportMetricsServiceRequest {
+        resource_metrics: vec![ResourceMetrics {
+            resource: Some(Resource {
+                attributes: vec![kv(semconv::SERVICE_NAME, SERVICE)],
+                ..Default::default()
+            }),
+            scope_metrics: vec![ScopeMetrics {
+                metrics: vec![gauge, sum],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    }
+}
+
 /// e-burst: one error type repeated for grouping + five distinct
 /// `error.type` values under one invocation.
 pub(crate) fn e_burst() -> Vec<SpanSpec> {
@@ -640,7 +755,7 @@ async fn post(path: &str, body: Vec<u8>) -> anyhow::Result<()> {
 pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
     let Some(id) = args.first().map(String::as_str) else {
         anyhow::bail!(
-            "usage: playground shapes <t-deep|t-wide|t-multiroot|t-orphan|t-skew|t-zero|t-links|t-longnames|t-events|l-burst|l-bodies|m-shapes|e-burst|e-multi-lang>"
+            "usage: playground shapes <t-deep|t-wide|t-multiroot|t-orphan|t-skew|t-zero|t-links|t-longnames|t-events|l-burst|l-bodies|m-shapes|m-labels|f-attrs|e-burst|e-multi-lang>"
         );
     };
     println!("shapes: emitting {id} as {SERVICE}");
@@ -662,6 +777,11 @@ pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
             post_traces(anchor).await?;
             post("v1/metrics", metrics.encode_to_vec()).await?;
         }
+        "f-attrs" => {
+            post_traces(f_attrs_spans()).await?;
+            post("v1/logs", f_attrs_logs().encode_to_vec()).await?;
+        }
+        "m-labels" => post("v1/metrics", m_labels().encode_to_vec()).await?,
         "e-burst" => post_traces(e_burst()).await?,
         "e-multi-lang" => post("v1/logs", e_multi_lang().encode_to_vec()).await?,
         other => anyhow::bail!("unknown shape id: {other}"),
@@ -699,6 +819,65 @@ mod tests {
 
     fn roots(spans: &[SpanSpec]) -> usize {
         spans.iter().filter(|span| span.parent.is_none()).count()
+    }
+
+    #[test]
+    fn f_attrs_method_split_is_seventy_twenty_ten() {
+        let spans = f_attrs_spans();
+        assert_eq!(spans.len(), 100);
+        let count = |method: &str| {
+            spans
+                .iter()
+                .filter(|span| {
+                    span.attrs.iter().any(|attr| {
+                        attr.key == semconv::HTTP_REQUEST_METHOD
+                            && attr.value.as_ref().is_some_and(|value| {
+                                value.value == Some(AnyValueEnum::StringValue(method.to_string()))
+                            })
+                    })
+                })
+                .count()
+        };
+        assert_eq!(count("GET"), 70);
+        assert_eq!(count("POST"), 20);
+        assert_eq!(count("DELETE"), 10);
+        let logs = f_attrs_logs();
+        let records = &logs.resource_logs[0].scope_logs[0].log_records;
+        assert_eq!(records.len(), 100);
+    }
+
+    #[test]
+    fn m_labels_regions_split_six_three_one() {
+        let request = m_labels();
+        let metrics = &request.resource_metrics[0].scope_metrics[0].metrics;
+        assert_eq!(metrics.len(), 2);
+        let Some(Data::Gauge(gauge)) = &metrics[0].data else {
+            panic!("first metric must be the gauge");
+        };
+        // 4 timestamps × 3 regions.
+        assert_eq!(gauge.data_points.len(), 12);
+        let Some(Data::Sum(sum)) = &metrics[1].data else {
+            panic!("second metric must be the sum");
+        };
+        assert!(sum.is_monotonic);
+        assert_eq!(sum.data_points.len(), 12);
+        // Monotonic within each region: last eu point is 4 × 60.
+        let eu_last = sum
+            .data_points
+            .iter()
+            .rfind(|point| {
+                point.attributes.iter().any(|attr| {
+                    attr.key == "region"
+                        && attr.value.as_ref().is_some_and(|value| {
+                            value.value == Some(AnyValueEnum::StringValue("eu".to_string()))
+                        })
+                })
+            })
+            .expect("eu points");
+        assert_eq!(
+            eu_last.value,
+            Some(number_data_point::Value::AsDouble(240.0))
+        );
     }
 
     #[test]
