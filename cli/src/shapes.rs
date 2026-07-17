@@ -79,6 +79,10 @@ pub(crate) struct SpanSpec {
     pub attrs: Vec<KeyValue>,
     pub events: Vec<Event>,
     pub links: Vec<Link>,
+    /// Override the exporting service (`None` = the shared shapes service).
+    /// Clock-skew detection is cross-service by definition, so skew shapes
+    /// must place parent and child on different services.
+    pub service: Option<String>,
 }
 
 impl SpanSpec {
@@ -95,15 +99,19 @@ impl SpanSpec {
             attrs: Vec::new(),
             events: Vec::new(),
             links: Vec::new(),
+            service: None,
         }
     }
 }
 
 pub(crate) fn traces_request(spans: Vec<SpanSpec>) -> ExportTraceServiceRequest {
     let invocation_id = invocation::invocation_id();
-    let spans = spans
-        .into_iter()
-        .map(|spec| Span {
+    // Group by exporting service so per-span overrides land under their own
+    // resource, preserving order within each group.
+    let mut groups: Vec<(String, Vec<Span>)> = Vec::new();
+    for spec in spans {
+        let service = spec.service.as_deref().unwrap_or(SERVICE).to_string();
+        let span = Span {
             trace_id: spec.trace,
             span_id: spec.id,
             parent_span_id: spec.parent.unwrap_or_default(),
@@ -119,23 +127,30 @@ pub(crate) fn traces_request(spans: Vec<SpanSpec>) -> ExportTraceServiceRequest 
                 message: "shape error".into(),
             }),
             ..Default::default()
-        })
-        .collect();
+        };
+        match groups.iter_mut().find(|(name, _)| *name == service) {
+            Some((_, list)) => list.push(span),
+            None => groups.push((service, vec![span])),
+        }
+    }
     ExportTraceServiceRequest {
-        resource_spans: vec![ResourceSpans {
-            resource: Some(Resource {
-                attributes: vec![
-                    kv(semconv::SERVICE_NAME, SERVICE),
-                    kv(semconv::CLI_INVOCATION_ID, invocation_id),
-                ],
+        resource_spans: groups
+            .into_iter()
+            .map(|(service, spans)| ResourceSpans {
+                resource: Some(Resource {
+                    attributes: vec![
+                        kv(semconv::SERVICE_NAME, &service),
+                        kv(semconv::CLI_INVOCATION_ID, invocation_id),
+                    ],
+                    ..Default::default()
+                }),
+                scope_spans: vec![ScopeSpans {
+                    spans,
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }),
-            scope_spans: vec![ScopeSpans {
-                spans,
-                ..Default::default()
-            }],
-            ..Default::default()
-        }],
+            })
+            .collect(),
     }
 }
 
@@ -207,22 +222,27 @@ pub(crate) fn t_orphan() -> Vec<SpanSpec> {
     vec![root, orphan]
 }
 
-/// t-skew: a SERVER child that starts before its CLIENT parent.
+/// t-skew: a SERVER child on a second service that starts before its CLIENT
+/// parent. Cross-service placement is essential: skew detection thresholds
+/// same-service drift at minutes (normal scheduler jitter) but cross-service
+/// drift at 50 ms, and real clock skew only exists across hosts. 120 ms
+/// backdate crosses the 50 ms warning threshold.
 pub(crate) fn t_skew() -> Vec<SpanSpec> {
     let trace = id16(5);
     let base = now_nanos();
     let mut parent = SpanSpec::basic(&trace, 1, None, "skew.client_call", base);
     parent.kind = 3;
-    parent.end = base + 10_000_000;
+    parent.end = base + 200_000_000;
     let mut child = SpanSpec::basic(
         &trace,
         2,
         Some(parent.id.clone()),
         "skew.server_handle",
-        base - 3_000_000, // starts BEFORE the parent (clock skew)
+        base - 120_000_000, // starts BEFORE the parent (clock skew)
     );
     child.kind = 2;
     child.end = base + 5_000_000;
+    child.service = Some(format!("{SERVICE}-remote"));
     vec![parent, child]
 }
 
@@ -703,6 +723,20 @@ mod tests {
         let child = &spans[1];
         assert_eq!(child.parent.as_deref(), Some(parent.id.as_slice()));
         assert!(child.start < parent.start, "negative skew required");
+        assert!(
+            parent.start - child.start > 50_000_000,
+            "skew must exceed the 50 ms cross-service warning threshold"
+        );
+        assert_ne!(
+            child.service, parent.service,
+            "skew is cross-service by definition"
+        );
+        let request = traces_request(t_skew());
+        assert_eq!(
+            request.resource_spans.len(),
+            2,
+            "parent and child export under separate service resources"
+        );
     }
 
     #[test]

@@ -19,7 +19,7 @@ surfaces the audit found rendering incorrectly, and empties as fixes land.
 | `t-wide` | `shapes t-wide` | 1 trace, 521 spans fanning from one root | Waterfall + minimap | Virtualized list stays responsive; minimap samples but row count says 521 | |
 | `t-multiroot` | `shapes t-multiroot` | 1 trace id, 2 root spans | Waterfall | Both roots render; neither is dropped or misparented | |
 | `t-orphan` | `shapes t-orphan` | root + child whose parent id never arrives | Waterfall | Detached child renders (flagged/detached), never vanishes | |
-| `t-skew` | `shapes t-skew` | CLIENT parent; SERVER child starts 3 ms earlier | Waterfall | Non-negative bars; skew visible/flagged; child not clipped | |
+| `t-skew` | `shapes t-skew` | CLIENT parent; SERVER child on second service starts 120 ms earlier (crosses the 50 ms cross-service skew threshold) | Waterfall | Non-negative bars; skew flagged; child not clipped | |
 | `t-zero` | `shapes t-zero` | zero-duration span + 1 µs span | Waterfall | Visible zero-width markers; no NaN/divide-by-zero layout | |
 | `t-links` | `shapes t-links` | 2 traces linked to each other | Trace detail links panel | Both directions navigable | |
 | `t-longnames` | `shapes t-longnames` | 1-4 KiB unicode/emoji names, values, keys | Waterfall + span inspector | Truncation with tooltip/copy; no layout break | |
