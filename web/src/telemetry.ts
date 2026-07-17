@@ -18,7 +18,10 @@ import {
   W3CBaggagePropagator,
   W3CTraceContextPropagator,
 } from "@opentelemetry/core";
-import { resourceFromAttributes } from "@opentelemetry/resources";
+import {
+  defaultResource,
+  resourceFromAttributes,
+} from "@opentelemetry/resources";
 import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
@@ -68,13 +71,18 @@ let currentStepContext: Context | undefined;
 
 export function initOtel() {
   sessionId = getSessionId();
-  const resource = resourceFromAttributes({
+  // Merge onto the SDK default resource: replacing it drops
+  // telemetry.sdk.language=webjs, the generic signal observability tools use
+  // to classify this service as a browser.
+  const resource = defaultResource().merge(
+    resourceFromAttributes({
     [ATTR_SERVICE_NAME]: "web",
     [ATTR_SERVICE_VERSION]: import.meta.env["VITE_RELEASE"] ?? "dev",
     [DEPLOYMENT_ENVIRONMENT_NAME]:
       import.meta.env["VITE_PARALLAX_ENV"] ?? DEFAULT_ENVIRONMENT,
     [SESSION_ID]: sessionId,
-  });
+    })
+  );
   const provider = new WebTracerProvider({
     resource,
     spanProcessors: [
