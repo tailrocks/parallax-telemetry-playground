@@ -19,6 +19,18 @@ export const test = base.extend({
       observer.observe(document, { childList: true, subtree: true });
     }, traceparent);
     await use(page);
+    // Await the page's deterministic telemetry flush before teardown closes
+    // it; closing skips pagehide in headless automation and drops batches.
+    try {
+      await page.evaluate(async () => {
+        const flush = (window as unknown as Record<string, unknown>)[
+          "__playgroundFlushTelemetry"
+        ];
+        if (typeof flush === "function") await (flush as () => Promise<void>)();
+      });
+    } catch {
+      // Page may already be gone (crash tests); telemetry loss is acceptable there.
+    }
   },
 });
 

@@ -262,6 +262,13 @@ function attachFlushListeners() {
     if (document.visibilityState === "hidden") flush();
   });
   window.addEventListener("pagehide", flush);
+  // Deterministic flush hook: automated browsers (Playwright) close pages
+  // without reliably firing pagehide, so test teardown awaits this instead.
+  (window as unknown as Record<string, unknown>)["__playgroundFlushTelemetry"] =
+    async () => {
+      await providerRef?.forceFlush();
+      await loggerProviderRef?.forceFlush();
+    };
 }
 
 async function startWebVitals() {
