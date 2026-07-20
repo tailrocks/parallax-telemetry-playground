@@ -174,8 +174,8 @@ jobs:
             web/test-results
           if-no-files-found: warn
 
-  required:
-    name: Required (${{ matrix.config.lane }})
+  ci-required:
+    name: CI required (${{ matrix.config.lane }})
     if: always()
     needs: [policy, rust, java, web]
     timeout-minutes: 20
