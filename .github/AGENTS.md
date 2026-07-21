@@ -6,6 +6,9 @@ default on `self-hosted,velnor-target-mvp`; `github` uses pinned
 inline `matrix.config` expression. Only `matrix.config.writer` may gate a
 mutating step, with exactly one writer.
 
+The canonical Sunday parity schedule selects `both`. Other automatic events
+remain Velnor-default.
+
 Rust jobs use mold and local-only sccache v0.16.0. Java uses the mise-managed
 JDK and lane-scoped Gradle caches; web uses mise-managed Bun and a lane-scoped
 package cache. Never add a second compiler cache or branch semantics by lane.
