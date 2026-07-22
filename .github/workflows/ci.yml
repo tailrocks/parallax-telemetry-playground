@@ -164,6 +164,13 @@ jobs:
           key: bun-${{ matrix.config.lane }}-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
           restore-keys: |
             bun-${{ matrix.config.lane }}-${{ runner.os }}-
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ matrix.config.lane }}-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
+          restore-keys: |
+            playwright-${{ matrix.config.lane }}-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run test
       - run: bun run build
