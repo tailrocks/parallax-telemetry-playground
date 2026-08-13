@@ -38,6 +38,11 @@ All services export OTLP to a host listener on `4317`/`4318`: local
 via SDK/envelope paths. One distributed trace stitches browser -> Rust -> Java
 -> broker -> Java -> Rust via W3C trace context.
 
+Infra images in `deploy/docker-compose.yml` are pinned 2026-08-14 (plan 162):
+`postgres:18`, `redpandadata/redpanda:v26.2.1`, `ghcr.io/open-feature/flagd:v0.16.1`,
+`grafana/k6:2.2.0`. Existing `postgres` volumes must be dropped
+(`docker compose down -v`) when moving 17→18; schema is created fresh on `up`.
+
 ## Status
 
 | Component | Lang | State |

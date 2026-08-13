@@ -9,7 +9,7 @@
 # notifications, orders, storefront GraphQL) + Java (catalog GraphQL, payment gRPC, fulfillment
 # Kafka) + web (TanStack Start) all wired. Java uses the upstream OTel agent
 # plus the Spring Sentry SDK (deploy/Dockerfile.java); web is the Nitro server
-# (deploy/Dockerfile.web). Pin image tags at a real deploy.
+# (deploy/Dockerfile.web). Image tags pinned 2026-08-14 (plan 162).
 
 name: telemetry-playground
 
@@ -94,7 +94,7 @@ services:
     networks: [pg]
 
   postgres:
-    image: postgres:17
+    image: postgres:18
     environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}", POSTGRES_DB: playground }
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d playground"]
@@ -105,7 +105,7 @@ services:
     networks: [pg]
 
   broker:
-    image: redpandadata/redpanda:latest # Kafka-API-compatible, light
+    image: redpandadata/redpanda:v26.2.1 # Kafka-API-compatible, light
     # Advertise the compose service name so clients in other containers reach the
     # broker via broker:9092 (default advertises 127.0.0.1:9092 → unreachable
     # cross-container, breaking the producer/consumer round-trip).
@@ -115,7 +115,7 @@ services:
     networks: [pg]
 
   flagd:
-    image: ghcr.io/open-feature/flagd:latest
+    image: ghcr.io/open-feature/flagd:v0.16.1
     command: ["start", "--uri", "file:/etc/flagd/flagd.json"]
     volumes: ["../flags/flagd.json:/etc/flagd/flagd.json:ro"]
     ports: ["8013:8013"]
@@ -207,7 +207,7 @@ services:
     networks: [pg]
 
   loadgen:
-    image: grafana/k6:latest
+    image: grafana/k6:2.2.0
     profiles: [demo]
     command: ["run", "/scripts/demo.ts"]
     environment:
