@@ -11,3 +11,15 @@ java = "oracle-graalvm-25.0.3"
 
 [settings]
 lockfile = true
+
+[tasks.ci]
+run = "cargo check --locked --workspace --all-targets --all-features"
+
+[tasks.test]
+run = "cargo nextest run --locked --workspace --profile ci --no-tests=fail"
+
+[tasks.lint]
+run = "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings"
+
+[tasks.fmt]
+run = "cargo fmt --all -- --check"
