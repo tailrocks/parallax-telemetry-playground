@@ -49,11 +49,11 @@ an upstream link.
 |---|---|---|---|---|---|
 | Counter | catalog Micrometer + checkout RED | a2, a1 | `catalog.product.queries` | Metrics | PASS 2026-08-14 (`catalog.product.queries` exemplars + catalog) |
 | Up-down counter | checkout middleware | a30 | `http.server.active_requests` | Metrics | PASS 2026-08-14 (`http_server_active_requests`) |
-| Gauge | tokio + db pool + cache | a22, a25, a26 | `tokio.runtime.*`, `db.client.connection.*`, `cache_size` | Services Runtime | PASS 2026-08-14 (metricNames include tokio + cache_size) |
+| Gauge | tokio + db pool + cache | a22, a25, a26 | `tokio.runtime.*`, `db.client.connection.*`, `cache_size` | Services Runtime `/services/$name` | PASS 2026-08-14 (`/services/checkout` tokio lanes; `/services/catalog` jvm.*) |
 | Explicit-bucket histogram | checkout RED | a1 | `http.server.request.duration` | Metrics workbench | PASS 2026-08-14 |
 | Exponential histogram (JVM W5) | catalog agent | a2 + compose env | exp histogram | Metrics + VERIFICATION W5 | DISPOSITION — Parallax drops exp histograms (`normalize_metrics`); probe env stays. VERIFICATION W5 CODE-CONFIRMED drop |
 | Summaries | — | — | OTel dropped Summary | Metrics | DISPOSITION — [OTEP 203](https://github.com/open-telemetry/oteps/blob/main/text/0203-more-metrics-data-model.md) |
-| Exemplars (JVM `trace_based`) | catalog | a2 | exemplar `trace_id` | Metrics → trace | PASS 2026-08-14 (`metricExemplars` on `catalog.product.queries` → `9a3941a829b19628`; UI metrics-teach-exemplars) |
+| Exemplars (JVM `trace_based`) | catalog | a2 | exemplar `trace_id` | Metrics → trace | PASS 2026-08-14 GraphQL `metricExemplars` → `9a3941a829b19628`. FAIL display: workbench chart has no clickable trace id (W5 DISCREPANCY) |
 | Exemplars (Rust) | Rust SDK | — | — | Metrics | DISPOSITION — [opentelemetry-rust#3369](https://github.com/open-telemetry/opentelemetry-rust/issues/3369) |
 | JVM runtime GC/memory/threads | catalog agent | b19 | `jvm.memory.used` | Services Runtime | PASS 2026-08-14 (metricNames `jvm.*`) |
 | Tokio + process metrics | checkout | a22 | `tokio.runtime.*` | Services Runtime | PASS 2026-08-14 |
@@ -150,6 +150,7 @@ an upstream link.
 - **FAIL** `parallax-mcp check` CLI≢GraphQL bundle JSON — W5 DISCREPANCY (product).
 - **FAIL** clock-skew banner absent on `?skew=1` same-service trace.
 - **FAIL** Issues list snapshot did not show `c8-rust-sdk` string (virtualized; GraphQL has the issue).
+- **FAIL** Metrics workbench does not expose a clickable exemplar `trace_id` (GraphQL has exemplars). Service detail lives at `/services/$name` — `/$name` is not-found.
 - Tests explorer seeded this session via `parallax invocation start -- scripts/observable-test-session.sh rust --acceptance`.
 - c9 never touched operator `~/.parallax` (throwaway `$repo/.isolation/`).
 - Gradle `BUILD SUCCESSFUL` catalog/payment/fulfillment ×2: `gradle-gate-1.log`, `gradle-gate-2.log`.
