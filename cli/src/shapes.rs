@@ -36,6 +36,32 @@ pub(crate) fn kv(key: &str, value: &str) -> KeyValue {
     }
 }
 
+fn required_resource_kvs(service: &str, git_sha: Option<&str>) -> Vec<KeyValue> {
+    let mut attributes = vec![
+        kv(semconv::SERVICE_NAME, service),
+        kv(
+            semconv::SERVICE_VERSION,
+            std::env::var("RELEASE")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .as_deref()
+                .unwrap_or("0.1.0"),
+        ),
+        kv(semconv::DEPLOYMENT_ENVIRONMENT_NAME, "playground"),
+    ];
+    if let Some(sha) = git_sha.map(str::trim).filter(|value| !value.is_empty()) {
+        attributes.push(kv(semconv::VCS_REF_HEAD_REVISION, sha));
+    }
+    attributes
+}
+
+fn env_git_sha() -> Option<String> {
+    std::env::var("GIT_SHA")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn kv_int(key: &str, value: i64) -> KeyValue {
     KeyValue {
         key: key.to_string(),
@@ -138,10 +164,12 @@ pub(crate) fn traces_request(spans: Vec<SpanSpec>) -> ExportTraceServiceRequest 
             .into_iter()
             .map(|(service, spans)| ResourceSpans {
                 resource: Some(Resource {
-                    attributes: vec![
-                        kv(semconv::SERVICE_NAME, &service),
-                        kv(semconv::CLI_INVOCATION_ID, invocation_id),
-                    ],
+                    attributes: {
+                        let mut attributes =
+                            required_resource_kvs(&service, env_git_sha().as_deref());
+                        attributes.push(kv(semconv::CLI_INVOCATION_ID, invocation_id));
+                        attributes
+                    },
                     ..Default::default()
                 }),
                 scope_spans: vec![ScopeSpans {
@@ -434,7 +462,7 @@ fn logs_request(records: Vec<LogRecord>) -> ExportLogsServiceRequest {
     ExportLogsServiceRequest {
         resource_logs: vec![ResourceLogs {
             resource: Some(Resource {
-                attributes: vec![kv(semconv::SERVICE_NAME, SERVICE)],
+                attributes: required_resource_kvs(SERVICE, env_git_sha().as_deref()),
                 ..Default::default()
             }),
             scope_logs: vec![ScopeLogs {
@@ -527,7 +555,7 @@ pub(crate) fn m_shapes(anchor: &[SpanSpec]) -> ExportMetricsServiceRequest {
     ExportMetricsServiceRequest {
         resource_metrics: vec![ResourceMetrics {
             resource: Some(Resource {
-                attributes: vec![kv(semconv::SERVICE_NAME, SERVICE)],
+                attributes: required_resource_kvs(SERVICE, env_git_sha().as_deref()),
                 ..Default::default()
             }),
             scope_metrics: vec![ScopeMetrics {
@@ -749,7 +777,7 @@ pub(crate) fn m_labels() -> ExportMetricsServiceRequest {
     ExportMetricsServiceRequest {
         resource_metrics: vec![ResourceMetrics {
             resource: Some(Resource {
-                attributes: vec![kv(semconv::SERVICE_NAME, SERVICE)],
+                attributes: required_resource_kvs(SERVICE, env_git_sha().as_deref()),
                 ..Default::default()
             }),
             scope_metrics: vec![ScopeMetrics {
@@ -934,6 +962,22 @@ mod tests {
 
     fn roots(spans: &[SpanSpec]) -> usize {
         spans.iter().filter(|span| span.parent.is_none()).count()
+    }
+
+    #[test]
+    fn required_resource_includes_vcs_when_git_sha_set() {
+        let attributes = required_resource_kvs("playground-shapes", Some("abc123def"));
+        assert!(attributes.iter().any(|attribute| {
+            attribute.key == semconv::VCS_REF_HEAD_REVISION
+                && attribute.value.as_ref().is_some_and(|value| {
+                    value.value == Some(AnyValueEnum::StringValue("abc123def".into()))
+                })
+        }));
+        let bare = required_resource_kvs("playground-shapes", None);
+        assert!(
+            bare.iter()
+                .all(|attribute| attribute.key != semconv::VCS_REF_HEAD_REVISION)
+        );
     }
 
     #[test]

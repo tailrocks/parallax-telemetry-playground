@@ -6,6 +6,8 @@ WORKDIR /app
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY web/ ./
+ARG VITE_GIT_SHA
+ENV VITE_GIT_SHA=$VITE_GIT_SHA
 RUN bun run build
 
 FROM oven/bun:1 AS run

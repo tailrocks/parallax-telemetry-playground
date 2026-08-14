@@ -51,3 +51,23 @@ rows here and in `run.sh`.
 | b21 | `b21-orphan-consumer.sh` | Orders normal linked consumer, orphan linkless consumer, and lag burst. | Traces: normal consumer has a span link, orphan consumer is root/linkless with `messaging.orphan=true`; Runtime: `messaging.queue.depth` rises. |
 | b22 | `b22-sampling-gap.sh` | Recreate checkout at `PLAYGROUND_SAMPLE_RATIO=0.1`, drive 50 requests, restore default sampling. | Traces: sampled-out gaps; Logs: full request evidence and dangling trace links. |
 | b23 | `b23-uncorrelated-log.sh` | Checkout emits a detached error log outside span context. | Logs: `orphan diagnostic without trace context` row has no trace chip. |
+
+## C-series — Parallax product surfaces
+
+Machine-asserted against a live Parallax (`PARALLAX_URL`, `PARALLAX_BIN`).
+
+| ID | Script | Drives | Check in Parallax UI |
+|---|---|---|---|
+| c1 | `c1-issue-context.sh` | Seed TimeoutError, wait for issue, GraphQL `bundle` + `issue context`, resolve. | Issues: evidence bundle + resolve |
+| c2 | `c2-invocation-lifecycle.sh` | `invocation start -- echo`, inspect + bundle. | CLI Apps: invocation row |
+| c3 | `c3-live-tail.sh` | SSE `/v1/logs/stream` and `/v1/traces/stream` produce bytes. | Logs/Traces live |
+| c4 | `c4-alerting.sh` | Webhook dest + error_rate rule, poll open incident. | Alerts incidents |
+| c5 | `c5-saved-state.sh` | dashboardSave + investigationSave. | Dashboards / Investigations |
+| c6 | `c6-github-ingest.sh` | HMAC-signed deploy fixture; bad HMAC rejected. | Services deploy (needs github enabled) |
+| c7 | `c7-agent-session.sh` | `import-claude` + `parallax-mcp check` + stdio `parallax_issue_context` / `parallax_agent_session_show`. | Story / MCP |
+| c8 | `c8-sentry-envelope.sh` | Real sentry-rust / sentry-java / `@sentry/tanstackstart-react` envelopes into Parallax. | Issues per SDK |
+| c9 | `c9-lifecycle-ops.sh` | Isolated `HOME` doctor + prune `--execute --yes`; `context add`; `--otlp-forward off`. | doctor / prune / contexts |
+| c10 | `c10-redaction-egress.sh` | a18 canary absent from bundle, CLI, MCP, UI GraphQL, Sentry ack, webhook body. | every egress |
+| c11 | `c11-agent-browser.sh` | Snapshot `/` while `/health` green. Full list-route check: `c11-ui-agent-verify.sh`. Screenshots: `artifacts/ui/`. | Overview + every primary/workspace route |
+| a30 | `a30-metric-shapes.sh` | Up-down `http.server.active_requests` + bounded `playground.cardinality.events{demo.bucket}`. | Metrics: teaching up-down + safe cardinality (16 buckets) |
+| a31 | `a31-handled-unhandled.sh` | `?fail=1` handled 502 vs `?unhandled=1` panic. | Issues: handled PaymentError vs unhandled 500 |

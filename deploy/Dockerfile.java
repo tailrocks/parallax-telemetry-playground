@@ -10,7 +10,7 @@
 # while this upstream agent remains the sole OTLP instrumentation/export path.
 ARG SERVICE
 ARG JDK=25
-ARG OTEL_AGENT_VERSION=2.29.0
+ARG OTEL_AGENT_VERSION=2.30.0
 
 FROM eclipse-temurin:${JDK}-jdk AS build
 ARG SERVICE
@@ -33,8 +33,8 @@ ARG OTEL_AGENT_VERSION
 WORKDIR /app
 # Upstream OpenTelemetry Java agent — auto-instruments Spring MVC/GraphQL/gRPC/
 # JDBC/Kafka and exports OTLP per the OTEL_* env (set per-service in the compose:
-# OTLP/HTTP to Rotel :4318, since the agent's gRPC sender can't read Rotel's gRPC
-# response).
+# OTLP/gRPC to Rotel :4317 — retested 2026-08-14 with javaagent 2.30.0 /
+# Rotel v0.2.5; HTTP/protobuf :4318 remains the documented fallback).
 ADD https://repo1.maven.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/${OTEL_AGENT_VERSION}/opentelemetry-javaagent-${OTEL_AGENT_VERSION}.jar /app/otel-agent.jar
 COPY --from=build /src/services/${SERVICE}/build/libs/*.jar /app/app.jar
 ENV JAVA_TOOL_OPTIONS="-javaagent:/app/otel-agent.jar" \

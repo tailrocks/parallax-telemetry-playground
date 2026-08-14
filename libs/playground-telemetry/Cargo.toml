@@ -25,6 +25,10 @@ reqwest = { workspace = true }
 uuid = { workspace = true }
 sentry = { workspace = true }
 sentry-tracing = { workspace = true }
+sentry-opentelemetry = { workspace = true }
 tokio = { workspace = true }
 tokio-metrics = { workspace = true }
 tonic = { workspace = true }
+
+[[example]]
+name = "c8_sentry_emit"

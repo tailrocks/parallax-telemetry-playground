@@ -2,7 +2,7 @@
 # A2: generate catalog traffic while the JVM agent's trace-based exemplar filter is enabled.
 set -euo pipefail
 
-BASE="${CATALOG_URL:-http://localhost:8090}"
+BASE="${CATALOG_URL:-http://localhost:8080}"
 REQUESTS="${A2_REQUESTS:-12}"
 query='{"query":"query Exemplars { products { id sku name } }"}'
 

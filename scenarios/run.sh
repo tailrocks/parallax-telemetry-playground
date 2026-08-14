@@ -82,6 +82,19 @@ j-outside       corner-cases.sh j-outside      corner-case corpus (plan 161)    
 j-reattach      corner-cases.sh j-reattach     corner-case corpus (plan 161)             CLI Apps journey: three sessions chained via session.previous_id
 j-parallel      corner-cases.sh j-parallel     corner-case corpus (plan 161)             CLI Apps: three concurrent console invocations + the daemon (four correlation domains)
 eco-full        corner-cases.sh eco-full       corner-case corpus (plan 161)             Ecosystem: every edge with cli/browser/service node kinds present
+c1              c1-issue-context.sh            issue + evidence bundle + resolve         Issues: bundle hash via GraphQL matches issue context
+c2              c2-invocation-lifecycle.sh     invocation start/inspect/bundle           CLI Apps: wrapped invocation row
+c3              c3-live-tail.sh                SSE logs+traces streams                   Logs/Traces live tail
+c4              c4-alerting.sh                 rule + incident after error seed          Alerts: open incident
+c5              c5-saved-state.sh              dashboard + investigation save            Dashboards / Investigations
+c6              c6-github-ingest.sh            GitHub deploy webhook HMAC                Services deploy (needs github_* enabled)
+c7              c7-agent-session.sh            import-claude + MCP tools                 Story / MCP issue_context + agent_session_show
+c8              c8-sentry-envelope.sh          real Rust/Java/JS SDK envelopes           Issues from each SDK
+c9              c9-lifecycle-ops.sh            isolated-HOME doctor/prune + context      doctor / prune / contexts / --otlp-forward
+c10             c10-redaction-egress.sh        canary absent on every egress             bundle/MCP/UI/webhook/Sentry ack
+c11             c11-agent-browser.sh           snapshot / while /health green            Overview not blank
+a30             a30-metric-shapes.sh           up-down counter + bounded cardinality     Metrics: http.server.active_requests and playground.cardinality.events
+a31             a31-handled-unhandled.sh       handled 502 vs unhandled panic            Issues: PaymentError 502 vs unhandled 500
 TABLE
 }
 
@@ -163,6 +176,19 @@ scenario() {
     j-reattach) echo "corner-cases.sh j-reattach|CLI Apps journey: three sessions chained via session.previous_id" ;;
     j-parallel) echo "corner-cases.sh j-parallel|CLI Apps: three concurrent console invocations + the daemon (four correlation domains)" ;;
     eco-full) echo "corner-cases.sh eco-full|Ecosystem: every edge with cli/browser/service node kinds present" ;;
+    c1) echo "c1-issue-context.sh|Issues: bundle hash via GraphQL matches issue context" ;;
+    c2) echo "c2-invocation-lifecycle.sh|CLI Apps: wrapped invocation row" ;;
+    c3) echo "c3-live-tail.sh|Logs/Traces live tail streams" ;;
+    c4) echo "c4-alerting.sh|Alerts: open incident after error seed" ;;
+    c5) echo "c5-saved-state.sh|Dashboards / Investigations saved" ;;
+    c6) echo "c6-github-ingest.sh|GitHub deploy webhook HMAC" ;;
+    c7) echo "c7-agent-session.sh|Story / MCP issue_context + agent_session_show" ;;
+    c8) echo "c8-sentry-envelope.sh|Issues from real Rust/Java/JS Sentry SDKs" ;;
+    c9) echo "c9-lifecycle-ops.sh|isolated-HOME doctor/prune + context + --otlp-forward" ;;
+    c10) echo "c10-redaction-egress.sh|canary absent on bundle/MCP/UI/webhook/Sentry ack" ;;
+    c11) echo "c11-agent-browser.sh|Overview snapshot not blank" ;;
+    a30) echo "a30-metric-shapes.sh|Metrics: http.server.active_requests (up-down) and playground.cardinality.events (demo.bucket ≤15)" ;;
+    a31) echo "a31-handled-unhandled.sh|Issues: handled PaymentError 502 vs unhandled panic 500" ;;
     *) return 1 ;;
   esac
 }
