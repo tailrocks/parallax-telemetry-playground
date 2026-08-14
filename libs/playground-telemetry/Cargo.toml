@@ -29,3 +29,6 @@ sentry-opentelemetry = { workspace = true }
 tokio = { workspace = true }
 tokio-metrics = { workspace = true }
 tonic = { workspace = true }
+
+[[example]]
+name = "c8_sentry_emit"

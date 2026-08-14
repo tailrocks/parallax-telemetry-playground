@@ -48,6 +48,14 @@ openTelemetryBuild {
     customTags = mapOf("cli.invocation.id" to (System.getenv("CLI_INVOCATION_ID") ?: ""))
     taskTraceEnvironmentEnabled = true
 }
+tasks.register<JavaExec>("c8SentryEmit") {
+    group = "verification"
+    description = "Emit one real sentry-java envelope to SENTRY_DSN (c8)."
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("dev.tailrocks.catalog.C8SentryEmit")
+    environment("SENTRY_DSN", System.getenv("SENTRY_DSN") ?: "")
+}
+
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     reports.junitXml.mergeReruns.set(true)

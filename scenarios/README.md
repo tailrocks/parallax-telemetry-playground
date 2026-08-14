@@ -64,10 +64,10 @@ Machine-asserted against a live Parallax (`PARALLAX_URL`, `PARALLAX_BIN`).
 | c4 | `c4-alerting.sh` | Webhook dest + error_rate rule, poll open incident. | Alerts incidents |
 | c5 | `c5-saved-state.sh` | dashboardSave + investigationSave. | Dashboards / Investigations |
 | c6 | `c6-github-ingest.sh` | HMAC-signed deploy fixture; bad HMAC rejected. | Services deploy (needs github enabled) |
-| c7 | `c7-agent-session.sh` | `import-claude` fixture NDJSON. | Story / agent session |
-| c8 | `c8-sentry-envelope.sh` | POST envelope to `/api/1/envelope/`. | Issues (needs `[sentry]`) |
-| c9 | `c9-lifecycle-ops.sh` | `doctor` + `prune` dry-run. Never `--execute` on real HOME. | doctor / prune |
-| c10 | `c10-redaction-egress.sh` | Bundle markdown/json must not contain canary tokens. | Issues bundle |
+| c7 | `c7-agent-session.sh` | `import-claude` + `parallax-mcp check` + stdio `parallax_issue_context` / `parallax_agent_session_show`. | Story / MCP |
+| c8 | `c8-sentry-envelope.sh` | Real sentry-rust / sentry-java / `@sentry/tanstackstart-react` envelopes into Parallax. | Issues per SDK |
+| c9 | `c9-lifecycle-ops.sh` | Isolated `HOME` doctor + prune `--execute --yes`; `context add`; `--otlp-forward off`. | doctor / prune / contexts |
+| c10 | `c10-redaction-egress.sh` | a18 canary absent from bundle, CLI, MCP, UI GraphQL, Sentry ack, webhook body. | every egress |
 | c11 | `c11-agent-browser.sh` | Snapshot `/` while `/health` green. Full list-route check: `c11-ui-agent-verify.sh`. Screenshots: `artifacts/ui/`. | Overview + every primary/workspace route |
 | a30 | `a30-metric-shapes.sh` | Up-down `http.server.active_requests` + bounded `playground.cardinality.events{demo.bucket}`. | Metrics: teaching up-down + safe cardinality (16 buckets) |
 | a31 | `a31-handled-unhandled.sh` | `?fail=1` handled 502 vs `?unhandled=1` panic. | Issues: handled PaymentError vs unhandled 500 |

@@ -136,6 +136,11 @@ Teaching metrics after checkout image rebuild (2026-08-14): a31 handled
 502 vs unhandled empty-reply `000`; metricNames include
 `http_server_active_requests` and `playground_cardinality_events_total`.
 
+Dual-emission 2026-08-14T14:25Z (real SDKs, not synthetic native envelopes):
+Rust `c8_sentry_emit` + Java `C8SentryEmit` land on **both** Parallax
+`/api/1/envelope/` and Sentry 26.7.2 Groups. JS flush does not. OTLP
+waterfalls for checkout/catalog/pricing remain green on the 4-sink lab.
+
 ### Per-concept comparison arms (2026-08-14)
 
 Same Rotel feed. Honest cells — Sentry/Maple/OO win where they do.

@@ -11,6 +11,19 @@ fi
 if [[ -z "${PARALLAX_BIN}" && -x /Users/donbeave/Projects/tailrocks/parallax-project/parallax/target/debug/parallax ]]; then
   PARALLAX_BIN=/Users/donbeave/Projects/tailrocks/parallax-project/parallax/target/debug/parallax
 fi
+PARALLAX_MCP="${PARALLAX_MCP:-$(command -v parallax-mcp || true)}"
+if [[ -z "${PARALLAX_MCP}" && -x /Users/donbeave/Projects/tailrocks/parallax-project/parallax/target/debug/parallax-mcp ]]; then
+  PARALLAX_MCP=/Users/donbeave/Projects/tailrocks/parallax-project/parallax/target/debug/parallax-mcp
+fi
+C_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Throwaway homes live under the repo, never scratch / never the operator HOME.
+C_ISOLATION="${C_ROOT}/.isolation"
+
+# Tokens planted by checkout ?canary=1 (a18). Must stay off every egress.
+C_CANARY_EMAIL="alice@example.com"
+C_CANARY_TOKEN="sk-live-CANARY1234567890"
+C_CANARY_CARD="4111111111111111"
+C_CANARY_JWT="eyJhbGciOiJIUzI1NiJ9.CANARY.sig"
 
 c_gql() {
   local query="$1"
@@ -44,4 +57,35 @@ c_require_bin() {
     echo "parallax binary not found; set PARALLAX_BIN" >&2
     exit 1
   fi
+}
+
+c_require_mcp() {
+  if [[ -z "${PARALLAX_MCP:-}" || ! -x "$PARALLAX_MCP" ]]; then
+    echo "parallax-mcp binary not found; set PARALLAX_MCP" >&2
+    exit 1
+  fi
+}
+
+c_isolation_dir() {
+  mkdir -p "$C_ISOLATION"
+  mktemp -d "${C_ISOLATION}/cXXXXXX"
+}
+
+c_assert_no_canary() {
+  local label="$1"
+  python3 -c "
+import sys
+label = sys.argv[1]
+text = sys.stdin.read()
+needles = [
+    '${C_CANARY_EMAIL}',
+    '${C_CANARY_TOKEN}',
+    '${C_CANARY_CARD}',
+    '${C_CANARY_JWT}',
+]
+low = text.lower()
+for n in needles:
+    if n.lower() in low:
+        raise SystemExit(f'{label}: canary leaked ({n[:16]}…)')
+" "$label"
 }
