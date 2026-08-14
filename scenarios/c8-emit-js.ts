@@ -13,9 +13,17 @@ Sentry.init({
   release: "c8-js-sdk",
   environment: "playground",
   tracesSampleRate: 0,
+  // Session envelopes are type=session; Parallax only derives issues from
+  // type=event. Disable sessions so flush sends the exception item.
+  autoSessionTracking: false,
+  sendClientReports: false,
 })
 
-Sentry.captureException(new Error("c8-js-sdk PaymentError"))
-await Sentry.flush(5000)
-await Sentry.close()
-console.log("c8-js-sdk flushed")
+Sentry.withScope((scope) => {
+  scope.setFingerprint(["c8-js-sdk"])
+  scope.setTag("c8.sdk", "sentry.javascript")
+  Sentry.captureException(new Error("c8-js-sdk PaymentError"))
+})
+const flushed = await Sentry.flush(8000)
+console.log(`c8-js-sdk flushed=${flushed}`)
+await Sentry.close(2000)

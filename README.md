@@ -114,13 +114,13 @@ SigNoz omitted (Foundry-only compose).
 - **Java agent → Rotel gRPC retested PASS** at agent 2.30.0 / Rotel v0.2.5
   (catalog OO count 56→96 after flipping catalog to `grpc` `:4317` + `a6`).
   Compose now defaults Java to gRPC; HTTP/protobuf `:4318` is the fallback.
-- **Sentry** (re-dated 2026-08-14T14:25Z): `verify.sh` A1 OTLP 200; A15/A16
-  `PaymentError` `times_seen=10`. Real SDK envelopes: Sentry Groups
-  `plat=native c8-rust-sdk PaymentError` and
-  `plat=java IllegalStateException: c8-java-sdk PaymentError`. JS SDK
-  (`@sentry/node` flush) produced **no** Group (FAIL, honest). Parallax
-  envelope ingest matches: rust+java issues present, js absent. Compose DSN
-  must stay `host.docker.internal:9000`.
+- **Sentry** (re-dated 2026-08-14T14:35Z): `verify.sh` A1 OTLP 200; A15/A16
+  `PaymentError` `times_seen=10`. Real SDK envelopes land on **both**
+  Parallax `/api/1/envelope/` and Sentry Groups: rust `plat=native
+  c8-rust-sdk`, java `plat=java c8-java-sdk`, js `plat=node
+  Error: c8-js-sdk PaymentError` (`c8 ok rust+java+js`). JS 10.70 first
+  POST is `type=session` (Parallax 415); the second POST is `type=event`.
+  Compose DSN must stay `host.docker.internal:9000`.
 - Java services: upstream OTel agent (never `sentry-opentelemetry-agent`) +
   Spring Sentry starter. Web: `bun run build` + vitest 9/9.
 

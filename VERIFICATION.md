@@ -136,10 +136,13 @@ Teaching metrics after checkout image rebuild (2026-08-14): a31 handled
 502 vs unhandled empty-reply `000`; metricNames include
 `http_server_active_requests` and `playground_cardinality_events_total`.
 
-Dual-emission 2026-08-14T14:25Z (real SDKs, not synthetic native envelopes):
-Rust `c8_sentry_emit` + Java `C8SentryEmit` land on **both** Parallax
-`/api/1/envelope/` and Sentry 26.7.2 Groups. JS flush does not. OTLP
-waterfalls for checkout/catalog/pricing remain green on the 4-sink lab.
+Dual-emission 2026-08-14T14:35Z (real SDKs, not synthetic native envelopes):
+Rust `c8_sentry_emit`, Java `C8SentryEmit`, and `@sentry/node` 10.70 all
+land on Parallax Issues **and** Sentry 26.7.2 Groups (`plat=native` /
+`plat=java` / `plat=node`). Browser RUM click on `:5173` shows
+`intentional RUM error after backend 502`. JS 10 first envelope is
+`type=session` (Parallax 415 `NoEventItem`); the exception is the second
+`type=event` POST. OTLP waterfalls remain green on the 4-sink lab.
 
 ### Per-concept comparison arms (2026-08-14)
 

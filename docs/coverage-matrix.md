@@ -81,7 +81,7 @@ an upstream link.
 | Log-based ERROR events | checkout | b23, b2 | severity ERROR | Issues | PASS 2026-08-14 |
 | Sentry envelopes Rust | checkout + `c8_sentry_emit` | b2, c8 | sentry-rust 0.49 | Sentry + Parallax `/api/1/envelope/` | PASS 2026-08-14 (Parallax issue `c8-rust-sdk`; Sentry Group plat=native) |
 | Sentry envelopes Java (Spring starter, **not** sentry-otel agent) | catalog `C8SentryEmit` | a14, c8 | sentry-java 8.53 | Sentry + Issues | PASS 2026-08-14 (Parallax `IllegalStateException: c8-java-sdk`; Sentry plat=java) |
-| Sentry envelopes browser JS | web / `@sentry/node` | a5, c8 | Sentry JS 10.70 family | Sentry + Issues | FAIL 2026-08-14 (`c8-emit-js.ts` flushed; no Parallax issue and no Sentry Group in 30s) |
+| Sentry envelopes browser JS | web `@sentry/node` 10.70 + TanStack RUM | a5, c8 | Sentry JS 10.70 `type=event` | Sentry + Issues | PASS 2026-08-14 (Parallax issue `Error: c8-js-sdk PaymentError`; Sentry Group `plat=node`; first POST is `type=session` which Parallax 415s — event is the second envelope) |
 | Cross-language same-error grouping (`PaymentError`) | rust/java/browser | e-multi-lang, c8 | `error.type` | Issues grouping | PASS 2026-08-14 (Sentry A15/A16 times_seen=10; Parallax separate rust/java fingerprints — Sentry is grouping authority) |
 | Release/deploy regression v1→v2 | checkout | a13 | `service.version` | Issues + Services | PASS 2026-08-14 (a13 registered; c6 deploy HMAC 200/401) |
 | Handled vs unhandled | checkout | a31 | 502 vs panic | Issues | PASS 2026-08-14 (502 vs 000) |
@@ -109,7 +109,7 @@ an upstream link.
 | c5 saved state | GraphQL | c5 | n/a metadata | Dashboards / Investigations | PASS 2026-08-14 |
 | c6 GitHub webhooks | fixtures | c6 | deploy HMAC | Services deploy | PASS 2026-08-14 |
 | c7 agent-session import + MCP | import-claude + parallax-mcp | c7 | agent session | Story / MCP | PASS 2026-08-14 import+GraphQL `agentSession`; FAIL product `parallax-mcp check` CLI≢GraphQL JSON (W5 DISCREPANCY) |
-| c8 Sentry-envelope parity per SDK | rust/java/js real SDKs | c8 | envelope ingest | Issues | PASS rust+java 2026-08-14; FAIL js (see dual-emission.log) |
+| c8 Sentry-envelope parity per SDK | rust/java/js real SDKs | c8 | envelope ingest | Issues | PASS 2026-08-14 rust+java+js |
 | c9 isolated-HOME prune + contexts + `--otlp-forward` | parallax CLI | c9 | n/a | doctor / prune / contexts | PASS 2026-08-14 (HOME under repo `.isolation/`; prune `--execute --yes`; `context add c9lab`; `--otlp-forward off`) |
 | c10 redaction-egress canary | a18 tokens on egress | c10 | canary.* | bundle/CLI/MCP/UI/Sentry ack/webhook | PASS 2026-08-14 (no leak; webhook body empty this run) |
 | c11 agent-browser UI pass | all seeded surfaces | c11 | n/a | 21-route + teaching traces | PASS 2026-08-14 (c11 smoke + teaching-trace walk 13 PASS / 1 list-virtualize miss) |
@@ -119,7 +119,7 @@ an upstream link.
 | Inventory line | Services / tech | Scenario | Semconv | Parallax surface | Status |
 |---|---|---|---|---|---|
 | OTLP/gRPC + OTLP/HTTP traces/logs/metrics | all emitters | a1 | OTLP | Ingest / Traces / Logs / Metrics | PASS 2026-08-14 (scratch 14319/14320 + Rotel 4317) |
-| Sentry envelope `POST /api/<project>/envelope/` | rust/java/js SDKs | c8 | Sentry envelope | Ingest / Issues | PASS rust+java; FAIL js 2026-08-14 |
+| Sentry envelope `POST /api/<project>/envelope/` | rust/java/js SDKs | c8 | Sentry envelope | Ingest / Issues | PASS 2026-08-14 rust+java+js (`c8 ok`) |
 | GitHub webhooks deploy + Actions | fixtures | c6 | HMAC + `vcs.*` | Deploy / Tests | PASS 2026-08-14 |
 | Claude Code `import-claude` | NDJSON fixture | c7 | agent session | Story | PASS 2026-08-14 |
 | Raw-frame spool → workers → Greptime → issues → live | serve pipeline | a1, c3 | — | `/health`, SSE | PASS 2026-08-14 |
@@ -147,7 +147,6 @@ an upstream link.
 
 ## Gap list / honesty
 
-- **FAIL** JS Sentry envelope → Parallax issue and Sentry Group (rust+java PASS).
 - **FAIL** `parallax-mcp check` CLI≢GraphQL bundle JSON — W5 DISCREPANCY (product).
 - **FAIL** clock-skew banner absent on `?skew=1` same-service trace.
 - **FAIL** Issues list snapshot did not show `c8-rust-sdk` string (virtualized; GraphQL has the issue).
