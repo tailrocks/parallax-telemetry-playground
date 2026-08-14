@@ -93,6 +93,8 @@ c8              c8-sentry-envelope.sh          envelope POST /api/1/envelope    
 c9              c9-lifecycle-ops.sh            doctor + prune dry-run                    doctor / prune
 c10             c10-redaction-egress.sh        canary tokens absent from bundle          Issues bundle redaction
 c11             c11-agent-browser.sh           snapshot / while /health green            Overview not blank
+a30             a30-metric-shapes.sh           up-down counter + bounded cardinality     Metrics: http.server.active_requests and playground.cardinality.events
+a31             a31-handled-unhandled.sh       handled 502 vs unhandled panic            Issues: PaymentError 502 vs unhandled 500
 TABLE
 }
 
@@ -185,6 +187,8 @@ scenario() {
     c9) echo "c9-lifecycle-ops.sh|doctor + prune dry-run" ;;
     c10) echo "c10-redaction-egress.sh|Issues bundle has no canary tokens" ;;
     c11) echo "c11-agent-browser.sh|Overview snapshot not blank" ;;
+    a30) echo "a30-metric-shapes.sh|Metrics: http.server.active_requests (up-down) and playground.cardinality.events (demo.bucket ≤15)" ;;
+    a31) echo "a31-handled-unhandled.sh|Issues: handled PaymentError 502 vs unhandled panic 500" ;;
     *) return 1 ;;
   esac
 }

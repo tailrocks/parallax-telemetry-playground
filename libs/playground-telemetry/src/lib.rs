@@ -198,6 +198,19 @@ pub async fn http_server_observability(request: Request, next: Next) -> Response
     );
     set_parent_from_headers(&span, request.headers());
     let started = Instant::now();
+    let inflight_attrs = [
+        KeyValue::new(semconv::HTTP_REQUEST_METHOD, method.clone()),
+        KeyValue::new(semconv::HTTP_ROUTE, route.clone()),
+    ];
+    let inflight = global::meter("playground.http")
+        .i64_up_down_counter(HTTP_SERVER_ACTIVE_REQUESTS)
+        .with_description("In-flight HTTP server requests (up-down counter teaching case)")
+        .build();
+    inflight.add(1, &inflight_attrs);
+    let _inflight = InFlightGuard {
+        counter: inflight,
+        attrs: inflight_attrs,
+    };
     let response = next.run(request).instrument(span.clone()).await;
     let status = response.status().as_u16();
     span.record("http.response.status_code", i64::from(status));
@@ -218,6 +231,46 @@ pub async fn http_server_observability(request: Request, next: Next) -> Response
             ],
         );
     response
+}
+
+/// Teaching metric: up-down counter of in-flight HTTP requests.
+pub const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
+/// Teaching metric: bounded-cardinality counter (`demo.bucket` ∈ 0..15).
+pub const CARDINALITY_EVENTS: &str = "playground.cardinality.events";
+pub const CARDINALITY_BUCKET_ATTR: &str = "demo.bucket";
+pub const CARDINALITY_BUCKET_COUNT: u64 = 16;
+
+struct InFlightGuard {
+    counter: opentelemetry::metrics::UpDownCounter<i64>,
+    attrs: [KeyValue; 2],
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.counter.add(-1, &self.attrs);
+    }
+}
+
+/// Record one teaching-cardinality event. `demo.bucket` is always in `0..16`.
+pub fn record_cardinality_event(sku: &str) {
+    let bucket = cardinality_bucket(sku);
+    global::meter("playground.demo")
+        .u64_counter(CARDINALITY_EVENTS)
+        .with_description("Teaching counter: demo.bucket is deliberately bounded to 16 values")
+        .build()
+        .add(
+            1,
+            &[KeyValue::new(CARDINALITY_BUCKET_ATTR, bucket.to_string())],
+        );
+}
+
+pub fn cardinality_bucket(sku: &str) -> u64 {
+    let mut hash = 2_166_136_261u64;
+    for byte in sku.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    hash % CARDINALITY_BUCKET_COUNT
 }
 
 fn http_server_error_type(status: u16) -> Option<&'static str> {
@@ -743,6 +796,19 @@ mod tests {
         assert!(!test_telemetry_enabled(None));
         assert!(!test_telemetry_enabled(Some("true")));
         assert!(test_telemetry_enabled(Some("1")));
+    }
+
+    #[test]
+    fn cardinality_bucket_is_bounded_and_stable() {
+        assert!(cardinality_bucket("WIDGET-1") < CARDINALITY_BUCKET_COUNT);
+        assert_eq!(
+            cardinality_bucket("WIDGET-1"),
+            cardinality_bucket("WIDGET-1")
+        );
+        assert_ne!(
+            cardinality_bucket("WIDGET-1"),
+            cardinality_bucket("GADGET-1")
+        );
     }
 
     #[test]

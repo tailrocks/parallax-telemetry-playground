@@ -107,6 +107,15 @@ Sentry envelopes share the OTel `trace_id`. Java still uses the upstream
 OTel javaagent + Spring Sentry starter — never `sentry-opentelemetry-agent`
 (that hijacks fan-out; see `deploy/Dockerfile.java`).
 
+### Metric temporality (teaching note)
+
+Playground OTLP exporters use **CUMULATIVE** temporality by default (OTel Rust
+SDK 0.32 PeriodicReader, Java agent 2.30.0). To reproduce backend conversion
+bugs of the Uptrace-5× class, set
+`OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta` on one emitter and
+compare the same `http.server.request.duration` series. Do not change the
+default: cumulative is what most OTLP backends assume.
+
 ### 4-sink dual-emission re-verify (2026-08-14)
 
 Live Rotel `v0.2.5` fan-out after `a1`/`b2`/`a6` on current-latest SDKs:

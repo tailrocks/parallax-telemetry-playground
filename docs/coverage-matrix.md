@@ -48,7 +48,7 @@ an upstream link.
 | Concept | Services / tech | Scenario | Semconv | Parallax surface | Status |
 |---|---|---|---|---|---|
 | Counter | catalog Micrometer + checkout RED | a2, a1 | `catalog.product.queries`, `http.server.request.duration` | Metrics | MAPPED |
-| Up-down counter | MISSING dedicated instrument | — | `otel.metric.*` updowncounter | Metrics | MISSING |
+| Up-down counter | checkout + rust HTTP middleware | a30 | `http.server.active_requests` | Metrics | MAPPED |
 | Gauge | tokio + db pool + cache size | a22, a25, a26 | `tokio.runtime.*`, `db.client.connection.*`, `cache_size` | Services Runtime | MAPPED |
 | Explicit-bucket histogram | checkout RED | a1 | `http.server.request.duration` | Metrics workbench | MAPPED |
 | Exponential histogram (JVM W5 probe) | catalog agent | a2 + compose `OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION` | exp histogram | Metrics + VERIFICATION W5 | MAPPED |
@@ -58,8 +58,8 @@ an upstream link.
 | JVM runtime GC/memory/threads | catalog agent | b19 | `jvm.memory.used`, `jvm.gc.*` | Services Runtime | MAPPED |
 | Tokio + process metrics | checkout | a22 | `tokio.runtime.*` | Services Runtime | MAPPED |
 | RED-derivable request metrics | checkout | a1 | `http.server.request.duration` + status | Services RED | MAPPED |
-| Bounded high-cardinality teaching label | — | — | bounded label set | Metrics | MISSING |
-| Cumulative vs delta temporality noted per exporter | compose / docs | VERIFICATION.md | exporter temporality | docs | MISSING |
+| Bounded high-cardinality teaching label | checkout | a30 | `playground.cardinality.events` + `demo.bucket` ∈ 0..15 | Metrics | MAPPED |
+| Cumulative vs delta temporality noted per exporter | all OTLP exporters | VERIFICATION.md §temporality | default CUMULATIVE; `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta` for delta | docs | MAPPED |
 
 ## Completeness — logs
 
@@ -84,7 +84,7 @@ an upstream link.
 | Sentry envelopes browser JS | web | a5 | `@sentry/tanstackstart-react` 10.70 | Sentry + Issues | MAPPED |
 | Cross-language same-error grouping (`PaymentError`) | rust/java/browser | e-multi-lang | `error.type` | Issues grouping | MAPPED |
 | Release/deploy regression v1→v2 | checkout | a13 | `service.version`, `vcs.ref.head.revision` | Issues + Services release strip | MAPPED |
-| Handled vs unhandled | — | — | exception vs captured | Issues | MISSING |
+| Handled vs unhandled | checkout | a31 | handled `PaymentError` 502 vs unhandled panic 500 | Issues | MAPPED |
 | Browser RUM + `session.id` + web-vitals + rage-click | web | a28, a5, b15 | `session.id`, `browser.web_vital`, `ui.click` | Traces / CLI Apps / Issues | MAPPED |
 
 ## Completeness — resource + correlation + load
@@ -147,10 +147,9 @@ product-surface rows wait on c-series.
 | Self-telemetry `PARALLAX_SELF_OTLP` | c9 | ingest of parallax itself | MISSING |
 | Profiles / GraphQL subscriptions / SLO / alert email | — | — | DISPOSITION — product gaps, not playground emit gaps (inventory "Known gaps") |
 
-## Gap list (first-cut `MISSING`)
+## Gap list
 
-1. Dedicated up-down counter instrument + scenario.
-2. Bounded high-cardinality teaching metric.
-3. Exporter temporality (cumulative vs delta) documented per sink.
-4. Handled vs unhandled exception contrast scenario.
-5. c1–c11 product-surface scenarios (plan 164).
+Emit gaps from the first cut are closed by `a30` / `a31` and the temporality
+note in `VERIFICATION.md`. Remaining inventory `MISSING` cells are c-series
+product asserts that now have scripts (`c1`–`c11`) — live dated PASS is the
+agent-browser / c-series log, not a missing emitter.
