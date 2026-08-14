@@ -99,12 +99,13 @@ at least one application descendant below a test span.
   Sentry-server product behavior, viewed in a live Sentry UI (the deferred
   ~72-service self-hosted stack — see below).
 
-### Known version blocker — Rust `sentry-opentelemetry` (shared trace_id)
-`sentry-opentelemetry` 0.48 pins `opentelemetry` **0.29**; the workspace is on
-**0.32**. Its `SentrySpanProcessor`/`SentryPropagator` are 0.29 types and won't
-attach to a 0.32 `SdkTracerProvider`, so it can't be added without downgrading
-the whole OTel stack (regressing logs/metrics). Rust Sentry issues therefore
-carry their own trace_id today; revisit when the crate reaches OTel 0.30+.
+### Rust `sentry-opentelemetry` (shared trace_id) — adopted 2026-08-14
+`sentry-opentelemetry` **0.49.1** pins `opentelemetry` **^0.32.0** /
+`opentelemetry_sdk` **^0.32.1**. `playground-telemetry` now installs
+`SentrySpanProcessor` + `SentryPropagator` beside the OTLP batch exporter so
+Sentry envelopes share the OTel `trace_id`. Java still uses the upstream
+OTel javaagent + Spring Sentry starter — never `sentry-opentelemetry-agent`
+(that hijacks fan-out; see `deploy/Dockerfile.java`).
 
 ## Needs a real host — exact steps to verify the last scenarios
 

@@ -7,10 +7,12 @@
 //!   * OpenTelemetry meters  — OTLP **metrics** from explicit instruments,
 //!   * `OpenTelemetryTracingBridge` — `tracing` events → OTLP **logs**,
 //!     auto-stamped with the active trace/span id,
-//!   * `sentry-tracing`      — events → Sentry breadcrumbs/issues.
+//!   * `sentry-tracing`      — events → Sentry breadcrumbs/issues,
+//!   * `sentry-opentelemetry` — `SentrySpanProcessor` + `SentryPropagator`
+//!     so Sentry envelopes share the OTel `trace_id` (crate 0.49 pins OTel 0.32).
 //!
 //! All three OTLP signals share one `Resource` and target the standard
-//! `OTEL_EXPORTER_OTLP_ENDPOINT` (injected by `parallax run start` or the lab),
+//! `OTEL_EXPORTER_OTLP_ENDPOINT` (injected by `parallax invocation start` or the lab),
 //! so pointing the whole app at Rotel needs no code change.
 //!
 //! (Metric **exemplars** are intentionally absent — the Rust SDK doesn't
@@ -46,6 +48,7 @@ use opentelemetry_sdk::logs::{SdkLogger, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
+use sentry_opentelemetry::{SentryPropagator, SentrySpanProcessor};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
 use tracing::Instrument;
@@ -298,15 +301,30 @@ pub async fn shutdown_signal() {
 /// Reads `OTEL_EXPORTER_OTLP_ENDPOINT` (default per the OTLP SDK) and
 /// `SENTRY_DSN` (Sentry disabled when unset). Honors `RUST_LOG`.
 pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
-    global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
-        Box::new(TraceContextPropagator::new()),
-        Box::new(BaggagePropagator::new()),
-    ]));
-
     let resource = Resource::builder()
         .with_attributes(resource_attributes(service))
         .build();
     let release = release();
+
+    // Sentry first so SentrySpanProcessor can attach to the client.
+    let mut sentry_options = sentry::ClientOptions::new()
+        .release(release)
+        .environment(environment_from(std::env::var("PARALLAX_ENV").ok()))
+        .traces_sample_rate(1.0)
+        .attach_stacktrace(true)
+        .send_default_pii(false);
+    if let Ok(dsn) = std::env::var("SENTRY_DSN")
+        && let Ok(parsed) = dsn.parse()
+    {
+        sentry_options.dsn = Some(parsed);
+    }
+    let sentry = sentry::init(sentry_options);
+
+    global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
+        Box::new(TraceContextPropagator::new()),
+        Box::new(BaggagePropagator::new()),
+        Box::new(SentryPropagator::new()),
+    ]));
 
     // --- Traces ---
     let span_exporter = opentelemetry_otlp::SpanExporter::builder()
@@ -315,6 +333,7 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
     let sample_ratio = sample_ratio_from(std::env::var("PLAYGROUND_SAMPLE_RATIO").ok().as_deref());
     let mut tracer_builder = SdkTracerProvider::builder()
         .with_resource(resource.clone())
+        .with_span_processor(SentrySpanProcessor::new())
         .with_batch_exporter(span_exporter);
     if let SampleRatioSetting::Ratio(ratio) = sample_ratio {
         tracer_builder = tracer_builder.with_sampler(Sampler::ParentBased(Box::new(
@@ -359,19 +378,6 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
                 || t.starts_with("opentelemetry")
                 || t.starts_with("tower"))
         }));
-
-    // Sentry rides alongside; DSN from env, disabled gracefully when absent.
-    let sentry = sentry::init(sentry::ClientOptions {
-        dsn: std::env::var("SENTRY_DSN")
-            .ok()
-            .and_then(|d| d.parse().ok()),
-        release: Some(release.into()),
-        environment: Some(environment_from(std::env::var("PARALLAX_ENV").ok()).into()),
-        traces_sample_rate: 1.0,
-        attach_stacktrace: true,
-        send_default_pii: false,
-        ..Default::default()
-    });
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));

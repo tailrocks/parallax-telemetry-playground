@@ -55,9 +55,10 @@ open-feature = "0.3.0"
 # Checkout uses the RPC resolver. open-feature-flagd 0.2.1 still needs
 # `in-process` enabled because its shared error type references
 # flagd_evaluation_engine without a feature guard.
-open-feature-flagd = { version = "0.2.1", default-features = false, features = ["rpc", "in-process"] }
-sentry = "0.48"
-sentry-tracing = "0.48"
+open-feature-flagd = { version = "0.2.2", default-features = false, features = ["rpc", "in-process"] }
+sentry = "0.49"
+sentry-tracing = "0.49"
+sentry-opentelemetry = "0.49"
 tower-http = { version = "0.6", features = ["cors"] }
 tower = { version = "0.5", features = ["util"] }
 futures = "0.3"

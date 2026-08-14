@@ -10,7 +10,7 @@
 # while this upstream agent remains the sole OTLP instrumentation/export path.
 ARG SERVICE
 ARG JDK=25
-ARG OTEL_AGENT_VERSION=2.29.0
+ARG OTEL_AGENT_VERSION=2.30.0
 
 FROM eclipse-temurin:${JDK}-jdk AS build
 ARG SERVICE
