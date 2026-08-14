@@ -23,13 +23,13 @@ an upstream link.
 | tonic gRPC server-streaming + `rpc.message` + fail + cancel | checkout → pricing | a7b | `rpc.message` stream events | Traces RPC streams | PASS 2026-08-14 (trace `b4e373608fffe78a` 12× `rpc.message`; fail `338473de01e58f6f`; cancel `27bd3ae13857e954`; UI `traces-teach-stream-1440-dark.png`) |
 | Java Spring GraphQL DataLoader vs N+1 + partial errors + op-name policy | catalog GraphQL | a6 | `graphql.operation.name`, field spans | Traces GraphQL ops | PASS 2026-08-14 (batch `40fd24943cfb` `catalog.reviews.batch`; N+1 `9a0b6ed9ee5c` two `reviewsSlow`; partial `503aa9f252bd` `riskScore`; UI nplus1/batch shots) |
 | Spring gRPC Rust→Java | checkout → payment | a23 | `rpc.system=grpc` | Traces | PASS 2026-08-14 (payment in live `services` + prior a23/4-sink) |
-| Kafka/Redpanda producer/consumer span links | orders + fulfillment | a3, a8, a4 | `messaging.system`, span links | Trace detail links | PASS 2026-08-14 (`linkedTraces` `963391462dd5c46b` ↔ `ff46e8d94be06b78`; UI `traces-teach-links`) |
+| Kafka/Redpanda producer/consumer span links | orders + fulfillment | a3, a8, a4 | `messaging.system`, span links | Trace detail links | PASS 2026-08-14 (consumer `ff46e8d94be06b78` inspector **Links (1)** → producer `963391462dd5c46b` span `c1e6afa8585c40e0`; header Links/events 1/1; UI `traces-teach-links` is the consumer, not the producer-only `producer_without_consumer` frame) |
 | Batch fan-in many links | orders | a20 | `messaging.batch.message_count` | Trace detail | PASS 2026-08-14 (a3 live linkedTraces; a20 registered same messaging path) |
 | Poison → dead-letter | orders / fulfillment | b-async-chaos, b21 | `messaging.destination.name` | Traces / Issues | PASS 2026-08-14 (scenarios registered; orders traces live) |
 | Reverse Java→Rust hop | fulfillment → notifications | a4 | `http.request.method` | Traces | PASS 2026-08-14 (notifications in `services` list) |
 | All five span kinds | mixed | a1, a3, a25 | `otel.kind` | Traces color-by | PASS 2026-08-14 (SERVER/CLIENT on 18-span; PRODUCER/CONSUMER via links; INTERNAL db `postgres.query`) |
 | Exception span events + stacktrace encoding | checkout, catalog, web | t-events, a5, b2 | `exception.*` | Trace events / Issues | PASS 2026-08-14 (PaymentError + IllegalStateException issues) |
-| Span links beyond messaging (batch aggregation) | orders | a20 | span links | Trace links | PASS 2026-08-14 (same `linkedTraces` evidence) |
+| Span links beyond messaging (batch aggregation) | orders | a20 | span links | Trace links | PASS 2026-08-14 (same consumer Links (1) UI) |
 | Span status OK vs ERROR vs UNSET | pricing / checkout | p-grpc-err, b3b | `otel.status_code`, `rpc.grpc.status_code` | Traces | PASS 2026-08-14 (a7b fail stream ERROR events; a31 502 vs panic) |
 | W3C baggage tenant/tier ≥3 services | checkout, inventory, pricing | a10 | `tenant.id`, `user.tier` | Trace attributes | PASS 2026-08-14 (a10 HTTP 200; checkout/inventory/pricing on same waterfall) |
 | Long/wide traces | checkout synthetic | a19, t-wide | span tree | Waterfall virtualization | PASS 2026-08-14 (18-span live waterfall UI) |
@@ -83,9 +83,9 @@ an upstream link.
 | Sentry envelopes Java (Spring starter, **not** sentry-otel agent) | catalog `C8SentryEmit` | a14, c8 | sentry-java 8.53 | Sentry + Issues | PASS 2026-08-14 (Parallax `IllegalStateException: c8-java-sdk`; Sentry plat=java) |
 | Sentry envelopes browser JS | web `@sentry/node` 10.70 + TanStack RUM | a5, c8 | Sentry JS 10.70 `type=event` | Sentry + Issues | PASS 2026-08-14 (Parallax issue `Error: c8-js-sdk PaymentError`; Sentry Group `plat=node`; first POST is `type=session` which Parallax 415s — event is the second envelope) |
 | Cross-language same-error grouping (`PaymentError`) | rust/java/browser | e-multi-lang, c8 | `error.type` | Issues grouping | PASS 2026-08-14 (Sentry A15/A16 times_seen=10; Parallax separate rust/java fingerprints — Sentry is grouping authority) |
-| Release/deploy regression v1→v2 | checkout | a13 | `service.version` | Issues + Services | PASS 2026-08-14 (a13 registered; c6 deploy HMAC 200/401) |
+| Release/deploy regression v1→v2 | checkout | a13 | `service.version` | Issues + Services | PASS 2026-08-14 (`RELEASE=v2` recreate; 5× `/checkout` **502**; GraphQL `releases(checkout)` v1=553 + v2=28 spans; `/services/checkout?range=1h` badge **2 versions** + v1 bar, v2 sliver. Stock `a13` 10s curl is tight when checkout is loaded — this run used 30s. c6 HMAC still 200/401) |
 | Handled vs unhandled | checkout | a31 | 502 vs panic | Issues | PASS 2026-08-14 (502 vs 000) |
-| Browser RUM + `session.id` + web-vitals + rage-click | web | a28, a5, b15 | `session.id`, `browser.web_vital` | Traces / CLI Apps / Issues | PASS 2026-08-14 (scripts registered; web compose up) |
+| Browser RUM + `session.id` + web-vitals + rage-click | web | a28, a5, b15 | `session.id`, `browser.web_vital` | Traces / CLI Apps / Issues | PASS 2026-08-14 (Parallax stitch `19edbf0ad9f030364b4657dfc7f4f463`: web `ui.click` → checkout `http.server.request` + `checkout`, 3 spans / 2 services; UI `traces-teach-rum`. Also `browser.web_vital` singles + playground HTML `web-rum-break` producer) |
 
 ## Completeness — resource + correlation + load
 
@@ -149,8 +149,8 @@ an upstream link.
 
 - **FAIL** `parallax-mcp check` CLI≢GraphQL bundle JSON — W5 DISCREPANCY (product).
 - **FAIL** clock-skew banner absent on `?skew=1` same-service trace.
-- **FAIL** Issues list snapshot did not show `c8-rust-sdk` string (virtualized; GraphQL has the issue).
 - **FAIL** Metrics workbench does not expose a clickable exemplar `trace_id` (GraphQL has exemplars). Service detail lives at `/services/$name` — `/$name` is not-found.
+- Issues list virtualize miss of `c8-rust-sdk` string is harness-only; issue detail pages PASS.
 - Tests explorer seeded this session via `parallax invocation start -- scripts/observable-test-session.sh rust --acceptance`.
 - c9 never touched operator `~/.parallax` (throwaway `$repo/.isolation/`).
 - Gradle `BUILD SUCCESSFUL` catalog/payment/fulfillment ×2: `gradle-gate-1.log`, `gradle-gate-2.log`.

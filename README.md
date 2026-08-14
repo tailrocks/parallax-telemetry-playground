@@ -96,7 +96,7 @@ run-session parent, complete identity/configuration/retry/failure payload,
 assertion and harness failures, version/revision resources, and application
 spans descended from a test span.
 
-**Verified locally (2026-08-14):** lockstep SDKs = OTel Rust 0.32 +
+**Verified locally (2026-08-14, teaching restamp 21:59Z):** lockstep SDKs = OTel Rust 0.32 +
 `tracing-opentelemetry` 0.33 + Sentry Rust 0.49.1 (`sentry-opentelemetry`
 adopted for shared `trace_id`); Java agent **2.30.0** + Sentry Spring
 **8.53.0** + Boot 4.1.0; OTel JS **2.10 / 0.221** +

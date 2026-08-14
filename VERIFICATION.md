@@ -140,9 +140,13 @@ Dual-emission 2026-08-14T14:35Z (real SDKs, not synthetic native envelopes):
 Rust `c8_sentry_emit`, Java `C8SentryEmit`, and `@sentry/node` 10.70 all
 land on Parallax Issues **and** Sentry 26.7.2 Groups (`plat=native` /
 `plat=java` / `plat=node`). Browser RUM click on `:5173` shows
-`intentional RUM error after backend 502`. JS 10 first envelope is
-`type=session` (Parallax 415 `NoEventItem`); the exception is the second
-`type=event` POST. OTLP waterfalls remain green on the 4-sink lab.
+`intentional RUM error after backend 502`; Parallax stitches the same
+journey as `ui.click` → checkout (`19edbf0ad9f030364b4657dfc7f4f463`).
+A13 this session: `RELEASE=v2` 5× `/checkout` 502; GraphQL
+`releases(checkout)` lists v1+v2; `/services/checkout` badge **2 versions**.
+JS 10 first envelope is `type=session` (Parallax 415 `NoEventItem`); the
+exception is the second `type=event` POST. OTLP waterfalls remain green on
+the 4-sink lab.
 
 ### Per-concept comparison arms (2026-08-14)
 
@@ -299,6 +303,12 @@ Verify: `bun run dev`, open the app in a browser with `VITE_SENTRY_DSN` set:
 - click "break" → a Sentry **error** with session **replay** (A5);
 - rapidly click "apply promo" → Sentry flags a **rage click** in the replay (B15);
 - confirm **web vitals** (LCP/CLS/INP) appear in Sentry Performance.
+
+Parallax arm (2026-08-14): same break path stitches in `/traces` as
+`ui.click` (web) parent of checkout `http.server.request` + `checkout`
+(`19edbf0ad9f030364b4657dfc7f4f463`, shot `traces-teach-rum-1440-dark.png`).
+Playground HTML `web-rum-break-1440-dark.png` is the producer, not the
+Parallax stitch.
 
 ### A15 / A16 — Sentry issue grouping + lifecycle
 Code: every service initializes Sentry from `SENTRY_DSN`; Rust `tracing::error!`

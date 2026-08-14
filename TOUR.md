@@ -52,8 +52,10 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 - Technology: Redpanda + orders producer/consumer.
 - Concept: span links across trace roots.
 - Scenario: `scenarios/run.sh a3`
-- See: `linkedTraces` on `963391462dd5c46b`. Shot:
-  `traces-teach-links-1440-dark.png`.
+- See: **consumer** `ff46e8d94be06b78` (`process orders`) inspector
+  **Links (1)** → producer `963391462dd5c46b` span `c1e6afa8585c40e0`.
+  Producer-only frame is `producer_without_consumer` (Links/events 0/7) —
+  that is not the teaching shot. Shot: `traces-teach-links-1440-dark.png`.
 - Why: sampling guilt — the discarded consumer root is the incident.
 
 ## 6. Exemplars: metric → the exact trace
@@ -61,8 +63,9 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 - Technology: catalog JVM `trace_based` exemplars.
 - Concept: a counter point carries `trace_id`.
 - Scenario: `scenarios/run.sh a2` (catalog traffic from a6 also seeds them)
-- See: Metrics `catalog.product.queries` → trace `9a3941a829b19628`. Shot:
-  `metrics-teach-exemplars-1440-dark.png`.
+- See: GraphQL `metricExemplars` → `9a3941a829b19628`. Shot:
+  `metrics-teach-exemplars-1440-dark.png`. Workbench chart has **no**
+  clickable trace id (W5 DISCREPANCY).
 - Why: a histogram bucket without a joinable trace is another eyeball hunt.
 
 ## 7. Errors that group — dual OTLP + Sentry
@@ -107,12 +110,27 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 
 ## 11. Deploy adjacency and isolated prune
 
-- Technology: GitHub HMAC fixture; CLI contexts; `--otlp-forward off`.
+- Technology: GitHub HMAC fixture; checkout `RELEASE=v2`; CLI contexts;
+  `--otlp-forward off`.
 - Concept: change-triggered outages; prune must not eat the operator HOME.
-- Scenario: `scenarios/run.sh c6` `c9`
-- See: c6 200/401. c9 throwaway `$repo/.isolation/` HOME, `context add c9lab`.
+- Scenario: `scenarios/run.sh a13` `c6` `c9`
+- See: a13 5× `/checkout` 502 under `RELEASE=v2`; `/services/checkout`
+  **2 versions** (v1 bar + v2 sliver). c6 200/401. c9 throwaway
+  `$repo/.isolation/` HOME, `context add c9lab`. Shot:
+  `services-checkout-v1v2-1440-dark.png`.
 - Why: ~70% of outages are change-triggered; silent quota drops are corpus
   root 1.
+
+## 11b. Browser RUM stitch
+
+- Technology: TanStack web `ui.click` + checkout axum.
+- Concept: browser click and backend spans share one trace id.
+- Scenario: `scenarios/run.sh a5` (break / RUM error)
+- See: Parallax `/traces/19edbf0ad9f030364b4657dfc7f4f463` — web `ui.click`
+  parent of checkout `http.server.request` + `checkout` (3 spans, 2
+  services). Shot: `traces-teach-rum-1440-dark.png`. The playground HTML
+  `web-rum-break-1440-dark.png` is the producer only.
+- Why: a RUM error that is not stitched to the 502 is another eyeball hunt.
 
 ## 12. Redaction canary
 
