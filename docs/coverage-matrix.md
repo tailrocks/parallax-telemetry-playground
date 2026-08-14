@@ -34,7 +34,7 @@ an upstream link.
 | W3C baggage tenant/tier ≥3 services | checkout, inventory, pricing | a10 | `tenant.id`, `user.tier` | Trace attributes | PASS 2026-08-14 (a10 HTTP 200; checkout/inventory/pricing on same waterfall) |
 | Long/wide traces | checkout synthetic | a19, t-wide | span tree | Waterfall virtualization | PASS 2026-08-14 (18-span live waterfall UI) |
 | Broken propagation (`nopropagate`) | web → checkout | a28 | `telemetry.propagation.disabled` | Two disconnected traces | PASS 2026-08-14 (a28 still in catalog; prior dual-path) |
-| Clock-skew demonstration | synthetic | t-skew, b-degradation | start/end timestamps | Clock-skew banner | FAIL 2026-08-14 (`?skew=1` trace `0cc30e4ca53bb7f0` has degrade events; snapshot has **no** "Clock skew suspected" banner — same-service child does not trip the detector) |
+| Clock-skew demonstration | synthetic | t-skew, b-degradation | start/end timestamps | Clock-skew banner | FAIL 2026-08-14T15:43Z (same-service `?skew=1` still has **no** "Clock skew suspected" banner — detector is cross-service only; W5 DISCREPANCY) |
 | Async fire-and-forget vs awaited | orders | a3 | producer vs server child | Trace compare | PASS 2026-08-14 (a3 + linkedTraces) |
 | db spans `db.query.text` | inventory | a25 | `db.system.name`, `db.query.text` | Traces + Runtime | PASS 2026-08-14 (`postgres.query@inventory` on 18-span trace) |
 | Cache hit/miss/stampede | recommendation | a26 | `cache.hit` | Metrics + Traces | PASS 2026-08-14 (a1 JSON `cache_hit` true/false; `cache_*` metricNames) |
@@ -53,7 +53,7 @@ an upstream link.
 | Explicit-bucket histogram | checkout RED | a1 | `http.server.request.duration` | Metrics workbench | PASS 2026-08-14 |
 | Exponential histogram (JVM W5) | catalog agent | a2 + compose env | exp histogram | Metrics + VERIFICATION W5 | DISPOSITION — Parallax drops exp histograms (`normalize_metrics`); probe env stays. VERIFICATION W5 CODE-CONFIRMED drop |
 | Summaries | — | — | OTel dropped Summary | Metrics | DISPOSITION — [OTEP 203](https://github.com/open-telemetry/oteps/blob/main/text/0203-more-metrics-data-model.md) |
-| Exemplars (JVM `trace_based`) | catalog | a2 | exemplar `trace_id` | Metrics → trace | PASS 2026-08-14 GraphQL `metricExemplars` → `9a3941a829b19628`. FAIL display: workbench chart has no clickable trace id (W5 DISCREPANCY) |
+| Exemplars (JVM `trace_based`) | catalog | a2 | exemplar `trace_id` | Metrics → trace | PASS 2026-08-14 GraphQL `metricExemplars` → `c9464650357d6f26`. FAIL display 15:43Z: `/metrics/catalog.product.queries` `hasTraceLink=false` (W5 DISCREPANCY) |
 | Exemplars (Rust) | Rust SDK | — | — | Metrics | DISPOSITION — [opentelemetry-rust#3369](https://github.com/open-telemetry/opentelemetry-rust/issues/3369) |
 | JVM runtime GC/memory/threads | catalog agent | b19 | `jvm.memory.used` | Services Runtime | PASS 2026-08-14 (metricNames `jvm.*`) |
 | Tokio + process metrics | checkout | a22 | `tokio.runtime.*` | Services Runtime | PASS 2026-08-14 |
@@ -108,7 +108,7 @@ an upstream link.
 | c4 alerting + webhook + Slack dest | checkout | c4 | error_rate; `slack_webhook` | Alerts | PASS 2026-08-14 (incident `inc-alr_18cbb162587af878`; slack `dst_18cbb1625301fc20`) |
 | c5 saved state | GraphQL | c5 | n/a metadata | Dashboards / Investigations | PASS 2026-08-14 |
 | c6 GitHub webhooks | fixtures | c6 | deploy HMAC | Services deploy | PASS 2026-08-14 |
-| c7 agent-session import + MCP | import-claude + parallax-mcp | c7 | agent session | Story / MCP | PASS 2026-08-14 import+GraphQL `agentSession`; FAIL product `parallax-mcp check` CLI≢GraphQL JSON (W5 DISCREPANCY) |
+| c7 agent-session import + MCP | import-claude + parallax-mcp | c7 | agent session | Story / MCP | PASS 2026-08-14T15:23Z import+GraphQL `agentSession` (c7 EXIT 0). FAIL product `parallax-mcp check` CLI≢GraphQL JSON (W5 DISCREPANCY) |
 | c8 Sentry-envelope parity per SDK | rust/java/js real SDKs | c8 | envelope ingest | Issues | PASS 2026-08-14 rust+java+js |
 | c9 isolated-HOME prune + contexts + `--otlp-forward` | parallax CLI | c9 | n/a | doctor / prune / contexts | PASS 2026-08-14 (HOME under repo `.isolation/`; prune `--execute --yes`; `context add c9lab`; `--otlp-forward off`) |
 | c10 redaction-egress canary | a18 tokens on egress | c10 | canary.* | bundle/CLI/MCP/UI/Sentry ack/webhook | PASS 2026-08-14 (no leak; webhook body empty this run) |
@@ -129,7 +129,7 @@ an upstream link.
 | Evidence bundles + `missing_evidence` + pins | GraphQL/CLI | c1 | bundle-v1/v2 | Issues handoff | PASS 2026-08-14 |
 | Redaction-lite-v3 20 detectors | egress | a18, c10 | canary.* | all egress | PASS 2026-08-14 |
 | Story timeline + agent-session + fixer outcomes | import-claude | c7, a27 | agent spans | Story | PASS 2026-08-14 (import) |
-| MCP `parallax_issue_context` + `parallax_agent_session_show` | parallax-mcp | c7 | bundle / agentSession | MCP stdio | FAIL 2026-08-14 `check` CLI≢HTTP JSON (W5 DISCREPANCY); tools exist; GraphQL `agentSession` callable |
+| MCP `parallax_issue_context` + `parallax_agent_session_show` | parallax-mcp | c7 | bundle / agentSession | MCP stdio | FAIL 2026-08-14T15:23Z `check` CLI≢HTTP JSON (W5 DISCREPANCY); tools exist; GraphQL `agentSession` callable |
 | CLI `serve`/`doctor`/`sql`/`metrics` | CLI | c9 | — | CLI | PASS 2026-08-14 (doctor on isolated HOME) |
 | CLI `logs`/`traces` `--follow --for` | CLI / SSE | c3 | — | CLI live | PASS 2026-08-14 (SSE bytes) |
 | CLI invocations `start/finish/inspect/bundle` | CLI | c2 | `cli.invocation.id` | CLI Apps | PASS 2026-08-14 |
@@ -147,9 +147,9 @@ an upstream link.
 
 ## Gap list / honesty
 
-- **FAIL** `parallax-mcp check` CLI≢GraphQL bundle JSON — W5 DISCREPANCY (product).
-- **FAIL** clock-skew banner absent on `?skew=1` same-service trace.
-- **FAIL** Metrics workbench does not expose a clickable exemplar `trace_id` (GraphQL has exemplars). Service detail lives at `/services/$name` — `/$name` is not-found.
+- **FAIL** `parallax-mcp check` CLI≢GraphQL bundle JSON — W5 DISCREPANCY (product). Restamped 2026-08-14T15:23Z this serve.
+- **FAIL** clock-skew banner absent on same-service `?skew=1` — W5 DISCREPANCY. Restamped 2026-08-14T15:43Z.
+- **FAIL** Metrics workbench `/metrics/catalog.product.queries` `hasTraceLink=false` (GraphQL has exemplars → `c9464650357d6f26`). W5 DISCREPANCY. Restamped 2026-08-14T15:43Z. Service detail lives at `/services/$name`.
 - Issues list virtualize miss of `c8-rust-sdk` string is harness-only; issue detail pages PASS.
 - Tests explorer seeded this session via `parallax invocation start -- scripts/observable-test-session.sh rust --acceptance`.
 - c9 never touched operator `~/.parallax` (throwaway `$repo/.isolation/`).
