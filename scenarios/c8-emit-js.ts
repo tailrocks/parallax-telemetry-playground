@@ -8,6 +8,14 @@ if (!dsn) {
   throw new Error("SENTRY_DSN required")
 }
 
+// Official JS SDK 10.70 puts sentry_key in the query string (CORS). Parallax
+// only accepts X-Sentry-Auth / Authorization (sentry_http.rs). Keep the real
+// SDK envelope; add the header the ingest already understands.
+const publicKey = new URL(dsn).username
+if (!publicKey) {
+  throw new Error("SENTRY_DSN missing public key")
+}
+
 Sentry.init({
   dsn,
   release: "c8-js-sdk",
@@ -17,6 +25,11 @@ Sentry.init({
   // type=event. Disable sessions so flush sends the exception item.
   autoSessionTracking: false,
   sendClientReports: false,
+  transportOptions: {
+    headers: {
+      "X-Sentry-Auth": `Sentry sentry_version=7, sentry_client=sentry.javascript.node/10.70.0, sentry_key=${publicKey}`,
+    },
+  },
 })
 
 Sentry.withScope((scope) => {

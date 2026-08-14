@@ -145,8 +145,11 @@ journey as `ui.click` → checkout (`19edbf0ad9f030364b4657dfc7f4f463`).
 A13 this session: `RELEASE=v2` 5× `/checkout` 502; GraphQL
 `releases(checkout)` lists v1+v2; `/services/checkout` badge **2 versions**.
 JS 10 first envelope is `type=session` (Parallax 415 `NoEventItem`); the
-exception is the second `type=event` POST. OTLP waterfalls remain green on
-the 4-sink lab.
+exception is the second `type=event` POST. Official JS SDK 10.70 puts
+`sentry_key` in the query string (CORS); Parallax ingest only accepts
+`X-Sentry-Auth` / `Authorization`. `c8-emit-js.ts` still emits a real
+`@sentry/node` envelope and adds that header so the event is accepted.
+OTLP waterfalls remain green on the 4-sink lab.
 
 ### Per-concept comparison arms (2026-08-14)
 
