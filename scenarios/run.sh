@@ -82,6 +82,17 @@ j-outside       corner-cases.sh j-outside      corner-case corpus (plan 161)    
 j-reattach      corner-cases.sh j-reattach     corner-case corpus (plan 161)             CLI Apps journey: three sessions chained via session.previous_id
 j-parallel      corner-cases.sh j-parallel     corner-case corpus (plan 161)             CLI Apps: three concurrent console invocations + the daemon (four correlation domains)
 eco-full        corner-cases.sh eco-full       corner-case corpus (plan 161)             Ecosystem: every edge with cli/browser/service node kinds present
+c1              c1-issue-context.sh            issue + evidence bundle + resolve         Issues: bundle hash via GraphQL matches issue context
+c2              c2-invocation-lifecycle.sh     invocation start/inspect/bundle           CLI Apps: wrapped invocation row
+c3              c3-live-tail.sh                SSE logs+traces streams                   Logs/Traces live tail
+c4              c4-alerting.sh                 rule + incident after error seed          Alerts: open incident
+c5              c5-saved-state.sh              dashboard + investigation save            Dashboards / Investigations
+c6              c6-github-ingest.sh            GitHub deploy webhook HMAC                Services deploy (needs github_* enabled)
+c7              c7-agent-session.sh            import-claude fixture                     Story / agent session
+c8              c8-sentry-envelope.sh          envelope POST /api/1/envelope             Issues from Sentry ingest (needs [sentry])
+c9              c9-lifecycle-ops.sh            doctor + prune dry-run                    doctor / prune
+c10             c10-redaction-egress.sh        canary tokens absent from bundle          Issues bundle redaction
+c11             c11-agent-browser.sh           snapshot / while /health green            Overview not blank
 TABLE
 }
 
@@ -163,6 +174,17 @@ scenario() {
     j-reattach) echo "corner-cases.sh j-reattach|CLI Apps journey: three sessions chained via session.previous_id" ;;
     j-parallel) echo "corner-cases.sh j-parallel|CLI Apps: three concurrent console invocations + the daemon (four correlation domains)" ;;
     eco-full) echo "corner-cases.sh eco-full|Ecosystem: every edge with cli/browser/service node kinds present" ;;
+    c1) echo "c1-issue-context.sh|Issues: bundle hash via GraphQL matches issue context" ;;
+    c2) echo "c2-invocation-lifecycle.sh|CLI Apps: wrapped invocation row" ;;
+    c3) echo "c3-live-tail.sh|Logs/Traces live tail streams" ;;
+    c4) echo "c4-alerting.sh|Alerts: open incident after error seed" ;;
+    c5) echo "c5-saved-state.sh|Dashboards / Investigations saved" ;;
+    c6) echo "c6-github-ingest.sh|GitHub deploy webhook HMAC" ;;
+    c7) echo "c7-agent-session.sh|Story / agent session import" ;;
+    c8) echo "c8-sentry-envelope.sh|Issues from Sentry envelope ingest" ;;
+    c9) echo "c9-lifecycle-ops.sh|doctor + prune dry-run" ;;
+    c10) echo "c10-redaction-egress.sh|Issues bundle has no canary tokens" ;;
+    c11) echo "c11-agent-browser.sh|Overview snapshot not blank" ;;
     *) return 1 ;;
   esac
 }

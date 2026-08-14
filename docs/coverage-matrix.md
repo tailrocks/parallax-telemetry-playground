@@ -102,17 +102,17 @@ an upstream link.
 
 | Concept | Services / tech | Scenario | Semconv | Parallax surface | Status |
 |---|---|---|---|---|---|
-| c1 issue-context / evidence bundle | checkout errors | c1 | issue fingerprint + bundle hash | Issues + `bundle` GraphQL | MISSING |
-| c2 invocation lifecycle | playground-cli | c2 | `cli.invocation.id` | CLI Apps hub | MISSING |
-| c3 live tail | checkout logs/spans | c3 | SSE `/v1/logs/stream` `/v1/traces/stream` | Logs/Traces live | MISSING |
-| c4 alerting end-to-end + webhook | checkout | c4 | error_rate / p95 | Alerts incidents | MISSING |
-| c5 saved state (dashboard/investigation/view/SQL) | GraphQL mutations | c5 | n/a metadata | Dashboards / Investigations / Logs views / SQL | MISSING |
-| c6 GitHub webhooks | fixtures | c6 | deploy + Actions | Services deploy / Tests CI | MISSING |
-| c7 agent-session import + MCP | `import-claude` + parallax-mcp | c7 | agent spans | Story / MCP | MISSING |
-| c8 Sentry-envelope parity per SDK | rust/java/web | c8 | envelope ingest | Issues from `/api/1/envelope/` | MISSING |
-| c9 lifecycle ops isolated-HOME prune | parallax CLI | c9 | n/a | doctor / prune | MISSING |
-| c10 redaction-egress canary | a18 corpus on every egress | c10 | canary.* | Issues/Logs/bundle/webhook | MISSING |
-| c11 agent-browser UI pass | all seeded surfaces | c11 | n/a | 21-route checklist | MISSING |
+| c1 issue-context / evidence bundle | checkout errors | c1 | issue fingerprint + bundle hash | Issues + `bundle` GraphQL | MAPPED |
+| c2 invocation lifecycle | playground-cli | c2 | `cli.invocation.id` | CLI Apps hub | MAPPED |
+| c3 live tail | checkout logs/spans | c3 | SSE `/v1/logs/stream` `/v1/traces/stream` | Logs/Traces live | MAPPED |
+| c4 alerting end-to-end + webhook | checkout | c4 | error_rate / p95 | Alerts incidents | MAPPED |
+| c5 saved state (dashboard/investigation/view/SQL) | GraphQL mutations | c5 | n/a metadata | Dashboards / Investigations / Logs views / SQL | MAPPED |
+| c6 GitHub webhooks | fixtures | c6 | deploy + Actions | Services deploy / Tests CI | MAPPED |
+| c7 agent-session import + MCP | `import-claude` + parallax-mcp | c7 | agent spans | Story / MCP | MAPPED |
+| c8 Sentry-envelope parity per SDK | rust/java/web | c8 | envelope ingest | Issues from `/api/1/envelope/` | MAPPED |
+| c9 lifecycle ops isolated-HOME prune | parallax CLI | c9 | n/a | doctor / prune | MAPPED |
+| c10 redaction-egress canary | a18 corpus on every egress | c10 | canary.* | Issues/Logs/bundle/webhook | MAPPED |
+| c11 agent-browser UI pass | all seeded surfaces | c11 | n/a | 21-route checklist | MAPPED |
 
 ## Inventory — ingest / storage / CLI / API / UI / ops
 
