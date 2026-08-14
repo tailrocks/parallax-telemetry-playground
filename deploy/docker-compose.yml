@@ -22,8 +22,10 @@ x-otlp: &otlp
   OTEL_METRICS_EXPORTER: "otlp"
   OTEL_LOGS_EXPORTER: "otlp"
   OTEL_PROPAGATORS: "tracecontext,baggage"
-  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
   PARALLAX_ENV: "${PLAYGROUND_ENV:-playground}"
+  # Required resource key. Set in deploy/.env or the host env (`git rev-parse HEAD`).
+  GIT_SHA: "${GIT_SHA}"
   # Dual emission: Sentry SDK envelopes in parallel with OTLP (Rust + Java).
   SENTRY_DSN: "${SENTRY_DSN:-}"
 
@@ -35,7 +37,6 @@ services:
       PRICING_ENDPOINT: "http://pricing:50051"
       CHECKOUT_ADDR: "0.0.0.0:8088"
       RELEASE: "${RELEASE:-v1}"
-      GIT_SHA: "${GIT_SHA:-}"
       PLAYGROUND_SAMPLE_RATIO: "${PLAYGROUND_SAMPLE_RATIO:-}"
       FLAGD_HOST: "flagd"
       FLAGD_CACHE: "disabled"
@@ -145,7 +146,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "catalog"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
       OTEL_INSTRUMENTATION_GRAPHQL_DATA_FETCHER_ENABLED: "true"
       OTEL_INSTRUMENTATION_GRAPHQL_OPERATION_NAME_IN_SPAN_NAME_ENABLED: "false"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
@@ -174,7 +175,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "payment"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
       OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_KEY_VALUE_PAIR_ATTRIBUTES: "true"
       OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_MDC_ATTRIBUTES: "*"
@@ -191,7 +192,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "fulfillment"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
       OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
       SENTRY_DSN: "${SENTRY_DSN:-}"
@@ -209,7 +210,11 @@ services:
 
   # --- Frontend (TanStack Start, Nitro server) ---
   web:
-    build: { context: .., dockerfile: deploy/Dockerfile.web }
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+      args:
+        VITE_GIT_SHA: "${GIT_SHA}"
     environment:
       # Server-side OTLP proxy target (browser → /v1/traces → Rotel HTTP).
       ROTEL_OTLP_HTTP_ENDPOINT: "http://host.docker.internal:4318"
@@ -218,6 +223,8 @@ services:
       VITE_ORDERS_URL: "http://localhost:8092"
       VITE_SENTRY_DSN: "${SENTRY_DSN:-}"
       VITE_RELEASE: "${RELEASE:-v1}"
+      VITE_GIT_SHA: "${GIT_SHA}"
+      GIT_SHA: "${GIT_SHA}"
       PORT: "3000"
     ports: ["5173:3000"]
     extra_hosts: ["host.docker.internal:host-gateway"]

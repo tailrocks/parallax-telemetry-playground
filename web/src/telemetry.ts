@@ -23,10 +23,6 @@ import {
   resourceFromAttributes,
 } from "@opentelemetry/resources";
 import {
-  ATTR_SERVICE_NAME,
-  ATTR_SERVICE_VERSION,
-} from "@opentelemetry/semantic-conventions";
-import {
   SpanStatusCode,
   context,
   propagation,
@@ -41,8 +37,6 @@ import { UserInteractionInstrumentation } from "@opentelemetry/instrumentation-u
 import {
   APP_SCREEN_NAME,
   BROWSER_WEB_VITAL,
-  DEFAULT_ENVIRONMENT,
-  DEPLOYMENT_ENVIRONMENT_NAME,
   ERROR_TYPE,
   EVENT_NAME,
   SESSION_ID,
@@ -54,6 +48,7 @@ import {
   WEB_VITAL_RATING,
   WEB_VITAL_VALUE,
 } from "./semconv";
+import { webResourceAttributes } from "./resource";
 
 export type RumAttributeValue = string | number | boolean;
 export type RumAttributes = Record<string, RumAttributeValue | undefined>;
@@ -75,13 +70,16 @@ export function initOtel() {
   // telemetry.sdk.language=webjs, the generic signal observability tools use
   // to classify this service as a browser.
   const resource = defaultResource().merge(
-    resourceFromAttributes({
-    [ATTR_SERVICE_NAME]: "web",
-    [ATTR_SERVICE_VERSION]: import.meta.env["VITE_RELEASE"] ?? "dev",
-    [DEPLOYMENT_ENVIRONMENT_NAME]:
-      import.meta.env["VITE_PARALLAX_ENV"] ?? DEFAULT_ENVIRONMENT,
-    [SESSION_ID]: sessionId,
-    })
+    resourceFromAttributes(
+      webResourceAttributes({
+        release: import.meta.env["VITE_RELEASE"],
+        environment: import.meta.env["VITE_PARALLAX_ENV"],
+        gitSha:
+          import.meta.env["VITE_GIT_SHA"] ??
+          (globalThis as { __PLAYGROUND_GIT_SHA__?: string }).__PLAYGROUND_GIT_SHA__,
+        sessionId,
+      }),
+    ),
   );
   const provider = new WebTracerProvider({
     resource,

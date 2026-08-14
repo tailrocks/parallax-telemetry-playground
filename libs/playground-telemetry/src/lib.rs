@@ -589,10 +589,33 @@ fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
     {
         attributes.push(KeyValue::new(semconv::CLI_INVOCATION_ID, invocation_id));
     }
-    if let Some(git_sha) = non_empty_env("GIT_SHA") {
+    if let Some(git_sha) = vcs_revision_from(
+        non_empty_env("GIT_SHA"),
+        otel_resource_attributes.as_deref(),
+    ) {
         attributes.push(KeyValue::new(semconv::VCS_REF_HEAD_REVISION, git_sha));
     }
     attributes
+}
+
+/// `GIT_SHA` wins; otherwise the `vcs.ref.head.revision` pair in
+/// `OTEL_RESOURCE_ATTRIBUTES` (the Java-agent path).
+fn vcs_revision_from(git_sha: Option<String>, otel_resource: Option<&str>) -> Option<String> {
+    if let Some(sha) = git_sha.filter(|value| !value.trim().is_empty()) {
+        return Some(sha);
+    }
+    resource_attr_value(otel_resource, semconv::VCS_REF_HEAD_REVISION)
+}
+
+fn resource_attr_value(value: Option<&str>, attr: &str) -> Option<String> {
+    value.and_then(|value| {
+        value.split(',').find_map(|pair| {
+            let (key, raw) = pair.split_once('=')?;
+            (key.trim() == attr)
+                .then(|| raw.trim().to_string())
+                .filter(|raw| !raw.is_empty())
+        })
+    })
 }
 
 fn service_instance_id(service: &str) -> String {
@@ -703,6 +726,36 @@ mod tests {
     }
 
     #[test]
+    fn git_sha_env_becomes_vcs_ref_head_revision() {
+        assert_eq!(
+            vcs_revision_from(Some("abc123def".into()), None).as_deref(),
+            Some("abc123def")
+        );
+        assert_eq!(vcs_revision_from(Some("  ".into()), None), None);
+        assert_eq!(
+            vcs_revision_from(
+                None,
+                Some(
+                    "service.version=v1,vcs.ref.head.revision=deadbeef,service.namespace=playground"
+                )
+            )
+            .as_deref(),
+            Some("deadbeef")
+        );
+        assert_eq!(
+            vcs_revision_from(
+                Some("from-env".into()),
+                Some("vcs.ref.head.revision=from-otel")
+            ),
+            Some("from-env".into())
+        );
+        assert_eq!(
+            vcs_revision_from(None, Some("service.version=v1,vcs.ref.head.revision=")),
+            None
+        );
+    }
+
+    #[test]
     fn resource_attr_list_detects_existing_invocation_id() {
         assert!(resource_attr_list_contains(
             Some("service.name=checkout, cli.invocation.id=inv-a"),
@@ -727,6 +780,7 @@ mod tests {
             semconv::DEPLOYMENT_ENVIRONMENT_NAME,
             "deployment.environment.name"
         );
+        assert_eq!(semconv::VCS_REF_HEAD_REVISION, "vcs.ref.head.revision");
         assert_eq!(semconv::EVENT_NAME, "event.name");
         assert_eq!(semconv::APP_SCREEN_NAME, "app.screen.name");
         assert_eq!(semconv::OTEL_KIND, "otel.kind");

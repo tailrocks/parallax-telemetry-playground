@@ -91,7 +91,7 @@ an upstream link.
 
 | Concept | Services / tech | Scenario | Semconv | Parallax surface | Status |
 |---|---|---|---|---|---|
-| Full required resource set every service | all | a1 + compose | `service.name`, `service.version`, `deployment.environment.name`, `vcs.ref.head.revision`, `cli.invocation.id` | Services / Traces | PASS 2026-08-14 (10 named services + `unknown_service:parallax`) |
+| Full required resource set every service | all | a1 + compose | `service.name`, `service.version`, `deployment.environment.name`, `vcs.ref.head.revision`, `cli.invocation.id` | Services / Traces | PASS 2026-08-14 (traces SQL column `resource_attributes.vcs.ref.head.revision=9fb282967a523be424bef4e1c006bfb82a850c37` non-null on catalog, checkout, fulfillment, inventory, notifications, orders, payment, playground-shapes, pricing, recommendation, storefront, web. Logs carry the same key inside `resource_attributes` JSON. Compose `GIT_SHA` + Java `OTEL_RESOURCE_ATTRIBUTES` + shapes `required_resource_kvs`) |
 | `cli.invocation.id` from CLI into tests | playground-cli + nextest | a12, test-verify | `cli.invocation.id`, `TRACEPARENT` | CLI Apps / Tests | PASS 2026-08-14 (invocation `2f617012-f2ae-4ea7-9bfc-9e27b37f1354` + testCases) |
 | Test-report bridge JUnit + flaky fail-then-pass | rust tests | test-verify `--acceptance` | `test.case.*` | Tests explorer | PASS 2026-08-14 (`w4_assertion_failure_passes_on_retry` + `w4_harness_error_passes_on_retry` rollup `FLAKY_PASS`; UI `tests-teach-flaky-1440-dark.png`) |
 | GitHub deploy/CI webhook fixtures same vcs | fixtures | c6 | `vcs.ref.head.revision` | Services deploy | PASS 2026-08-14 (c6 200/401) |

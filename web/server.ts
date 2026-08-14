@@ -31,6 +31,21 @@ if (!isHandlerModule(generatedHandler)) {
 const port = Number(process.env["PORT"] ?? 3000);
 const host = process.env["HOST"] ?? "0.0.0.0";
 const clientDir = new URL("./dist/client/", import.meta.url).pathname;
+const playgroundGitSha = (
+  process.env["VITE_GIT_SHA"] ??
+  process.env["GIT_SHA"] ??
+  ""
+).trim();
+
+function injectPlaygroundGitSha(html: string): string {
+  if (!playgroundGitSha) {
+    return html;
+  }
+  const tag = `<script>globalThis.__PLAYGROUND_GIT_SHA__=${JSON.stringify(playgroundGitSha)}</script>`;
+  return html.includes("</head>")
+    ? html.replace("</head>", `${tag}</head>`)
+    : `${tag}${html}`;
+}
 
 const contentTypes: Readonly<Record<string, string>> = {
   ".css": "text/css; charset=utf-8",
@@ -118,6 +133,17 @@ createServer((req, res) => {
         return;
       }
       const response = await generatedHandler.default.fetch(await toFetchRequest(req));
+      const contentType = response.headers.get("content-type") ?? "";
+      if (contentType.includes("text/html") && playgroundGitSha) {
+        const html = injectPlaygroundGitSha(await response.text());
+        const headers = new Headers(response.headers);
+        headers.delete("content-length");
+        await writeFetchResponse(
+          res,
+          new Response(html, { status: response.status, statusText: response.statusText, headers }),
+        );
+        return;
+      }
       await writeFetchResponse(res, response);
     } catch (error: unknown) {
       console.error(error);
