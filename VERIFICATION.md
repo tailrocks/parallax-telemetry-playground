@@ -107,6 +107,22 @@ Sentry envelopes share the OTel `trace_id`. Java still uses the upstream
 OTel javaagent + Spring Sentry starter — never `sentry-opentelemetry-agent`
 (that hijacks fan-out; see `deploy/Dockerfile.java`).
 
+### 4-sink dual-emission re-verify (2026-08-14)
+
+Live Rotel `v0.2.5` fan-out after `a1`/`b2`/`a6` on current-latest SDKs:
+
+| Sink | Result |
+| --- | --- |
+| OpenObserve v0.92.0 | `checkout=90 catalog=130 payment=76 inventory=19 recommendation=23 pricing=5` |
+| Maple v0.0.18 | `services --since 2h` lists the same six names |
+| Parallax host | GraphQL traces for checkout/catalog/payment/inventory; Java + Rust issues |
+| Sentry 26.7.2 | `verify.sh` A1 OTLP=200, A15/A16 `times_seen=10` |
+
+Java-agent **gRPC → Rotel retested PASS** (agent 2.30.0): catalog OO count
+56→96 after `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` + `a6`. Compose defaults Java
+to gRPC. Compose `SENTRY_DSN` for containers must use
+`host.docker.internal:9000` (not `localhost`).
+
 ## Needs a real host — exact steps to verify the last scenarios
 
 Prereqs: start the lab (`parallax` repo `bench/otlp-fanout`), then this app's

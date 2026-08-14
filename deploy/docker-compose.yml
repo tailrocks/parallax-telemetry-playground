@@ -24,6 +24,8 @@ x-otlp: &otlp
   OTEL_PROPAGATORS: "tracecontext,baggage"
   OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=${PLAYGROUND_ENV:-playground}"
   PARALLAX_ENV: "${PLAYGROUND_ENV:-playground}"
+  # Dual emission: Sentry SDK envelopes in parallel with OTLP (Rust + Java).
+  SENTRY_DSN: "${SENTRY_DSN:-}"
 
 services:
   checkout:
@@ -126,10 +128,11 @@ services:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: catalog } }
     environment:
       <<: *otlp
-      # Java tier exports OTLP/HTTP (the agent's okhttp gRPC sender fails to read
-      # Rotel's gRPC response; HTTP/protobuf to Rotel :4318 works).
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
-      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      # Java agent 2.30.0 + Rotel v0.2.5: gRPC to Rotel :4317 verified 2026-08-14
+      # (catalog span count rose under grpc after a6). HTTP/protobuf :4318 remains
+      # a fallback if a future agent/Rotel pair regresses.
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "catalog"
       OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
       OTEL_INSTRUMENTATION_GRAPHQL_DATA_FETCHER_ENABLED: "true"
@@ -157,8 +160,8 @@ services:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: payment } }
     environment:
       <<: *otlp
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
-      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "payment"
       OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
@@ -174,8 +177,8 @@ services:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: fulfillment } }
     environment:
       <<: *otlp
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
-      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "fulfillment"
       OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
@@ -200,6 +203,7 @@ services:
       VITE_CHECKOUT_URL: "http://localhost:8088"
       VITE_CHECKOUT_URL_NOPROP: "http://127.0.0.1:8088"
       VITE_ORDERS_URL: "http://localhost:8092"
+      VITE_SENTRY_DSN: "${SENTRY_DSN:-}"
       VITE_RELEASE: "${RELEASE:-v1}"
       PORT: "3000"
     ports: ["5173:3000"]
