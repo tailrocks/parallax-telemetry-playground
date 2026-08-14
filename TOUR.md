@@ -138,6 +138,8 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 - Concept: canary tokens never leave on bundle / CLI / MCP / UI GraphQL /
   Sentry ack.
 - Scenario: `scenarios/run.sh a18` `c10`
+- See: c10 canary absent on bundle / CLI / MCP / UI GraphQL / Sentry ack
+  (matrix: no leak; webhook body empty that run).
 - Why: LLM secret-leak fear (OWASP LLM02).
 
 ## 13. Clock skew — honest miss
@@ -156,6 +158,9 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 - Concept: every coverage-matrix Parallax surface, desktop + phone, light +
   dark where rendering differs.
 - Scenario: `scenarios/run.sh c11` plus `artifacts/ui/`.
+- See: Overview not blank; 21-route walk in `agent-browser.log`. Dated W5
+  display FAILs stay DISCREPANCY (MCP `check`, same-service clock-skew
+  banner, exemplar `hasTraceLink=false`).
 - Why: a green ingest API with a blank UI is how the local-dev gap returns.
 
 SigNoz is residue only (plan 162). Maple / OpenObserve / Sentry dispositions
