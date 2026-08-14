@@ -65,7 +65,11 @@ services:
 
   recommendation:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: recommendation } }
-    environment: { <<: *otlp, ADDR: "0.0.0.0:8090" }
+    environment:
+      <<: *otlp
+      ADDR: "0.0.0.0:8090"
+      FLAGD_HOST: "flagd"
+      FLAGD_CACHE: "disabled"
     ports: ["8090:8090"]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
@@ -78,8 +82,15 @@ services:
 
   orders:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: orders } }
-    environment: { <<: *otlp, ADDR: "0.0.0.0:8092" }
+    environment:
+      <<: *otlp
+      ADDR: "0.0.0.0:8092"
+      # feature_flag("poisonMessage") reads FLAGD_HOST; default localhost
+      # inside the container burns ~15s of RPC retries on every POST /order.
+      FLAGD_HOST: "flagd"
+      FLAGD_CACHE: "disabled"
     ports: ["8092:8092"]
+    depends_on: [flagd]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
@@ -185,7 +196,9 @@ services:
       OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       KAFKA_BROKERS: "broker:9092"
-      PAYMENT_GRPC_ADDRESS: "payment:9090"
+      # Boot 4.1: spring.grpc.client.channel.payment.target
+      PAYMENT_GRPC_ADDRESS: "static://payment:9090"
+      SPRING_GRPC_CLIENT_CHANNEL_PAYMENT_TARGET: "static://payment:9090"
       NOTIFICATIONS_URL: "http://notifications:8091"
     # POST /publish drives the cross-language async branch: Java produces to the
     # `orders` topic → consumes it → calls Rust `notifications` (reverse hop).

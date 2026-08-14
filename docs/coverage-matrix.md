@@ -11,32 +11,32 @@ an upstream link.
 - Status vocabulary: `PASS` / `FAIL` (dated live run), `DISPOSITION`
   (cannot emit or product gap; upstream/inventory cited). `MAPPED` is not
   a terminal cell.
-- Date: 2026-08-14 live restamp (c-series rerun, teach-seed, test-verify,
-  agent-browser teaching traces, dual-emission.log).
+- Date: 2026-08-14 live restamp (named-concept GraphQL/SQL after a2
+  `:8080` fix, FLAGD_HOST on orders, Boot 4.1 payment `channel.target`).
 
 ## Completeness — traces
 
 | Concept | Services / tech | Scenario | Semconv | Parallax surface | Status |
 |---|---|---|---|---|---|
-| Browser fetch → SSR `traceparent` meta → Rust axum HTTP | web TanStack + checkout axum | a28, a1 | `traceparent`, `http.request.method`, `http.route`, `url.path` | Traces waterfall | PASS 2026-08-14 (a1 18-span checkout waterfall `8cf58d291fb795ef02fb67acff2a3431`; a28 catalog still registered) |
+| Browser fetch → SSR `traceparent` meta → Rust axum HTTP | web TanStack + checkout axum | a28, a1 | `traceparent`, `http.request.method`, `http.route`, `url.path` | Traces waterfall | PASS 2026-08-14 (a1 18-span `8cf58d291fb795ef02fb67acff2a3431`; noprop pair below) |
 | tonic gRPC unary | checkout → pricing | a1 | `rpc.system=grpc`, `rpc.service`, `rpc.method` | Traces | PASS 2026-08-14 (`quote@pricing` + `pricing.attempt` on 18-span trace) |
 | tonic gRPC server-streaming + `rpc.message` + fail + cancel | checkout → pricing | a7b | `rpc.message` stream events | Traces RPC streams | PASS 2026-08-14 (trace `b4e373608fffe78a` 12× `rpc.message`; fail `338473de01e58f6f`; cancel `27bd3ae13857e954`; UI `traces-teach-stream-1440-dark.png`) |
 | Java Spring GraphQL DataLoader vs N+1 + partial errors + op-name policy | catalog GraphQL | a6 | `graphql.operation.name`, field spans | Traces GraphQL ops | PASS 2026-08-14 (batch `40fd24943cfb` `catalog.reviews.batch`; N+1 `9a0b6ed9ee5c` two `reviewsSlow`; partial `503aa9f252bd` `riskScore`; UI nplus1/batch shots) |
-| Spring gRPC Rust→Java | checkout → payment | a23 | `rpc.system=grpc` | Traces | PASS 2026-08-14 (payment in live `services` + prior a23/4-sink) |
+| Spring gRPC Rust→Java | checkout → payment | a23 | `rpc.system=grpc` | Traces | PASS 2026-08-14 (`73c7e8fa891d3a13009606726e222b1d` checkout `pricing.attempt` + payment `playground.pricing.v1.Pricing/Quote`; storefront same hop `d3ab99dd75c8ce6aace5f985120fd755` graphql.resolver + Quote. Needs xlang `PRICING_ENDPOINT=http://payment:9090`) |
 | Kafka/Redpanda producer/consumer span links | orders + fulfillment | a3, a8, a4 | `messaging.system`, span links | Trace detail links | PASS 2026-08-14 (consumer `ff46e8d94be06b78` inspector **Links (1)** → producer `963391462dd5c46b` span `c1e6afa8585c40e0`; header Links/events 1/1; UI `traces-teach-links` is the consumer, not the producer-only `producer_without_consumer` frame) |
-| Batch fan-in many links | orders | a20 | `messaging.batch.message_count` | Trace detail | PASS 2026-08-14 (a3 live linkedTraces; a20 registered same messaging path) |
-| Poison → dead-letter | orders / fulfillment | b-async-chaos, b21 | `messaging.destination.name` | Traces / Issues | PASS 2026-08-14 (scenarios registered; orders traces live) |
-| Reverse Java→Rust hop | fulfillment → notifications | a4 | `http.request.method` | Traces | PASS 2026-08-14 (notifications in `services` list) |
+| Batch fan-in many links | orders | a20 | `messaging.batch.message_count` | Trace detail | PASS 2026-08-14 (`270060880d4808a59c2023dda697f5e7` `process orders` `messaging.batch.message_count=8` + 8 span links to distinct producer traces). Prior 10s curl timeouts were FLAGD_HOST defaulting to localhost inside the orders container |
+| Poison → dead-letter | orders / fulfillment | b-async-chaos, b21 | `messaging.destination.name` | Traces / Issues | PASS 2026-08-14 (dead_letter `1399dd20dbcda9b24c2d42dfbc24c7cc`; poison_message ×3 `d1aa4387874a0baa67336d039f95c357` / `1480c71ac1e0078e3e748fb1068e2b72` / `c517f2d02afd970c4675a98ad01e2fcd`; dest=`orders`) |
+| Reverse Java→Rust hop | fulfillment → notifications | a4 | `http.request.method` | Traces | PASS 2026-08-14 (`17aa7512153d9c81e4aeda6fdc56143e` 8 spans: fulfillment POST /publish + orders publish/process + Quote GET, payment `Pricing/Quote`, notifications `handle` + `http.server.request`. Boot 4.1 needs `spring.grpc.client.channel.payment.target=static://payment:9090` — `channels.*.address` left the client on payment:80) |
 | All five span kinds | mixed | a1, a3, a25 | `otel.kind` | Traces color-by | PASS 2026-08-14 (SERVER/CLIENT on 18-span; PRODUCER/CONSUMER via links; INTERNAL db `postgres.query`) |
 | Exception span events + stacktrace encoding | checkout, catalog, web | t-events, a5, b2 | `exception.*` | Trace events / Issues | PASS 2026-08-14 (PaymentError + IllegalStateException issues) |
-| Span links beyond messaging (batch aggregation) | orders | a20 | span links | Trace links | PASS 2026-08-14 (same consumer Links (1) UI) |
+| Span links beyond messaging (batch aggregation) | orders | a20 | span links | Trace links | PASS 2026-08-14 (same `27006088` consume_batch 8 producer links; not the a3 1/1 teaching pair) |
 | Span status OK vs ERROR vs UNSET | pricing / checkout | p-grpc-err, b3b | `otel.status_code`, `rpc.grpc.status_code` | Traces | PASS 2026-08-14 (a7b fail stream ERROR events; a31 502 vs panic) |
 | W3C baggage tenant/tier ≥3 services | checkout, inventory, pricing | a10 | `tenant.id`, `user.tier` | Trace attributes | PASS 2026-08-14 (a10 HTTP 200; checkout/inventory/pricing on same waterfall) |
-| Long/wide traces | checkout synthetic | a19, t-wide | span tree | Waterfall virtualization | PASS 2026-08-14 (18-span live waterfall UI) |
-| Broken propagation (`nopropagate`) | web → checkout | a28 | `telemetry.propagation.disabled` | Two disconnected traces | PASS 2026-08-14 (a28 still in catalog; prior dual-path) |
+| Long/wide traces | checkout synthetic | a19, t-wide | span tree | Waterfall virtualization | PASS 2026-08-14 (a19 `f2015500887a2040faea1c537281952a` 240× `burst.l%`; t-wide `c1f0a7af7b734eb70000000000000002` spanCount=521 playground-shapes `fanout.root`. HTTP shapes must post to OTLP HTTP 14320 not gRPC 14319) |
+| Broken propagation (`nopropagate`) | web → checkout | a28 | `telemetry.propagation.disabled` | Two disconnected traces | PASS 2026-08-14 (web `6706f20754f109f43dd801c2fef4169b` `ui.submit` only, `telemetry.propagation.disabled=true` widget=`checkout-form-nopropagate`; checkout `3c9c88a8ae2279c2f2239822609e50d0` 18-span, different trace id; agent-browser submit 200) |
 | Clock-skew demonstration | synthetic | t-skew, b-degradation | start/end timestamps | Clock-skew banner | FAIL 2026-08-14T15:43Z (same-service `?skew=1` still has **no** "Clock skew suspected" banner — detector is cross-service only; W5 DISCREPANCY) |
 | Async fire-and-forget vs awaited | orders | a3 | producer vs server child | Trace compare | PASS 2026-08-14 (a3 + linkedTraces) |
-| db spans `db.query.text` | inventory | a25 | `db.system.name`, `db.query.text` | Traces + Runtime | PASS 2026-08-14 (`postgres.query@inventory` on 18-span trace) |
+| db spans `db.query.text` | inventory | a25 | `db.system.name`, `db.query.text` | Traces + Runtime | PASS 2026-08-14 (pg_sleep `b0c89695ffb318c19290dfd295845045` `db.query.text=SELECT pg_sleep($1::float / 1000)` 402ms; N+1 `417571a8f8125c21d62781a74bd624ab` 12× SELECT stock + 1× UPDATE; pool_exhausted `31d944f4f8bbc1497fb45f791a94c4dc` reserve 503 + `postgres.pool` ACQUIRE `error.type=pool_exhausted`; metricNames `db.client.connection.*`) |
 | Cache hit/miss/stampede | recommendation | a26 | `cache.hit` | Metrics + Traces | PASS 2026-08-14 (a1 JSON `cache_hit` true/false; `cache_*` metricNames) |
 | Retry storms + gRPC deadline | checkout → pricing | b3b, b-checkout-chaos | `rpc.grpc.status_code=4` | Traces | PASS 2026-08-14 (b3b driven this session) |
 | Feature-flag evaluation events | checkout + catalog flagd | a14 | `feature_flag.evaluation` | Trace events | PASS 2026-08-14 (events on 18-span; a14 driven) |
@@ -47,9 +47,9 @@ an upstream link.
 
 | Concept | Services / tech | Scenario | Semconv | Parallax surface | Status |
 |---|---|---|---|---|---|
-| Counter | catalog Micrometer + checkout RED | a2, a1 | `catalog.product.queries` | Metrics | PASS 2026-08-14 (`catalog.product.queries` exemplars + catalog) |
+| Counter | catalog Micrometer + checkout RED | a2, a1 | `catalog.product.queries` | Metrics | PASS 2026-08-14 (a2 default `CATALOG_URL` now `:8080` GraphQL; 12/12 queries this serve; exemplars `c9464650357d6f26`) |
 | Up-down counter | checkout middleware | a30 | `http.server.active_requests` | Metrics | PASS 2026-08-14 (`http_server_active_requests`) |
-| Gauge | tokio + db pool + cache | a22, a25, a26 | `tokio.runtime.*`, `db.client.connection.*`, `cache_size` | Services Runtime `/services/$name` | PASS 2026-08-14 (`/services/checkout` tokio lanes; `/services/catalog` jvm.*) |
+| Gauge | tokio + db pool + cache | a22, a25, a26 | `tokio.runtime.*`, `db.client.connection.*`, `cache_size` | Services Runtime `/services/$name` | PASS 2026-08-14 (`db.client.connection.count|idle|max|pending.requests|timeouts|wait.time.milliseconds` live metricNames; `/services/checkout` tokio; `/services/catalog` jvm.*) |
 | Explicit-bucket histogram | checkout RED | a1 | `http.server.request.duration` | Metrics workbench | PASS 2026-08-14 |
 | Exponential histogram (JVM W5) | catalog agent | a2 + compose env | exp histogram | Metrics + VERIFICATION W5 | DISPOSITION — Parallax drops exp histograms (`normalize_metrics`); probe env stays. VERIFICATION W5 CODE-CONFIRMED drop |
 | Summaries | — | — | OTel dropped Summary | Metrics | DISPOSITION — [OTEP 203](https://github.com/open-telemetry/oteps/blob/main/text/0203-more-metrics-data-model.md) |
@@ -95,7 +95,7 @@ an upstream link.
 | `cli.invocation.id` from CLI into tests | playground-cli + nextest | a12, test-verify | `cli.invocation.id`, `TRACEPARENT` | CLI Apps / Tests | PASS 2026-08-14 (invocation `2f617012-f2ae-4ea7-9bfc-9e27b37f1354` + testCases) |
 | Test-report bridge JUnit + flaky fail-then-pass | rust tests | test-verify `--acceptance` | `test.case.*` | Tests explorer | PASS 2026-08-14 (`w4_assertion_failure_passes_on_retry` + `w4_harness_error_passes_on_retry` rollup `FLAKY_PASS`; UI `tests-teach-flaky-1440-dark.png`) |
 | GitHub deploy/CI webhook fixtures same vcs | fixtures | c6 | `vcs.ref.head.revision` | Services deploy | PASS 2026-08-14 (c6 200/401) |
-| k6 ambient 24h mix | loadgen | b16 | RED + traces | Overview / Metrics | PASS 2026-08-14 (script registered; Overview live cards) |
+| k6 ambient 24h mix | loadgen | b16 | RED + traces | Overview / Metrics | PASS 2026-08-14 (k6 2.2.0 `loadgen/checkout.ts` `--vus 3 --duration 25s` EXIT 0: 3 http_reqs, 0 failed, avg 30.09s; checkout is slow under this lab) |
 | Burst + chaos via flagd | flagd | a14, a-breach-* | feature flags | Alerts / Issues | PASS 2026-08-14 (a14 + c4 incident) |
 
 ## Completeness — Parallax product surfaces (c-series)

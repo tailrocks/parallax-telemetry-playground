@@ -15,3 +15,7 @@ services:
     environment:
       PRICING_ENDPOINT: "http://payment:9090"
     depends_on: [payment]
+  storefront:
+    environment:
+      PRICING_ENDPOINT: "http://payment:9090"
+    depends_on: [payment]
