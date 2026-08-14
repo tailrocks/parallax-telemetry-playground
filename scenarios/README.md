@@ -68,6 +68,6 @@ Machine-asserted against a live Parallax (`PARALLAX_URL`, `PARALLAX_BIN`).
 | c8 | `c8-sentry-envelope.sh` | POST envelope to `/api/1/envelope/`. | Issues (needs `[sentry]`) |
 | c9 | `c9-lifecycle-ops.sh` | `doctor` + `prune` dry-run. Never `--execute` on real HOME. | doctor / prune |
 | c10 | `c10-redaction-egress.sh` | Bundle markdown/json must not contain canary tokens. | Issues bundle |
-| c11 | `c11-agent-browser.sh` | Snapshot `/` while `/health` green. | Overview |
+| c11 | `c11-agent-browser.sh` | Snapshot `/` while `/health` green. Full list-route check: `c11-ui-agent-verify.sh`. Screenshots: `artifacts/ui/`. | Overview + every primary/workspace route |
 | a30 | `a30-metric-shapes.sh` | Up-down `http.server.active_requests` + bounded `playground.cardinality.events{demo.bucket}`. | Metrics: teaching up-down + safe cardinality (16 buckets) |
 | a31 | `a31-handled-unhandled.sh` | `?fail=1` handled 502 vs `?unhandled=1` panic. | Issues: handled PaymentError vs unhandled 500 |

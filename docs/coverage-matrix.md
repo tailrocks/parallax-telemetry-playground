@@ -12,7 +12,7 @@ an upstream link.
 - Status vocabulary: `MISSING` (no scripted scenario yet), `MAPPED` (scenario
   exists; live dated PASS/FAIL still required), `PASS` / `FAIL` (live run),
   `DISPOSITION` (cannot emit; upstream cited).
-- Date: 2026-08-14 first cut. Live cells re-dated when the run happens.
+- Date: 2026-08-14. Live cells dated from c-series + a30/a31 + agent-browser.
 
 ## Completeness — traces
 
@@ -48,9 +48,9 @@ an upstream link.
 | Concept | Services / tech | Scenario | Semconv | Parallax surface | Status |
 |---|---|---|---|---|---|
 | Counter | catalog Micrometer + checkout RED | a2, a1 | `catalog.product.queries`, `http.server.request.duration` | Metrics | MAPPED |
-| Up-down counter | checkout + rust HTTP middleware | a30 | `http.server.active_requests` | Metrics | MAPPED |
+| Up-down counter | checkout + rust HTTP middleware | a30 | `http.server.active_requests` | Metrics | PASS 2026-08-14 (`http_server_active_requests` in metricNames) |
 | Gauge | tokio + db pool + cache size | a22, a25, a26 | `tokio.runtime.*`, `db.client.connection.*`, `cache_size` | Services Runtime | MAPPED |
-| Explicit-bucket histogram | checkout RED | a1 | `http.server.request.duration` | Metrics workbench | MAPPED |
+| Explicit-bucket histogram | checkout RED | a1 | `http.server.request.duration` | Metrics workbench | PASS 2026-08-14 (workbench `/metrics/http_server_request_duration_seconds`) |
 | Exponential histogram (JVM W5 probe) | catalog agent | a2 + compose `OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION` | exp histogram | Metrics + VERIFICATION W5 | MAPPED |
 | Summaries | — | — | OTel JS/Rust/Java SDKs do not emit OTLP summaries | Metrics | DISPOSITION — OTel dropped Summary as a first-class OTLP metric type; no SDK emit path. See [OTEP 203](https://github.com/open-telemetry/oteps/blob/main/text/0203-more-metrics-data-model.md) / [spec metrics data model](https://opentelemetry.io/docs/specs/otel/metrics/data-model/). |
 | Exemplars (JVM `trace_based`) | catalog | a2 | exemplar `trace_id` | Metrics → trace | MAPPED |
@@ -58,7 +58,7 @@ an upstream link.
 | JVM runtime GC/memory/threads | catalog agent | b19 | `jvm.memory.used`, `jvm.gc.*` | Services Runtime | MAPPED |
 | Tokio + process metrics | checkout | a22 | `tokio.runtime.*` | Services Runtime | MAPPED |
 | RED-derivable request metrics | checkout | a1 | `http.server.request.duration` + status | Services RED | MAPPED |
-| Bounded high-cardinality teaching label | checkout | a30 | `playground.cardinality.events` + `demo.bucket` ∈ 0..15 | Metrics | MAPPED |
+| Bounded high-cardinality teaching label | checkout | a30 | `playground.cardinality.events` + `demo.bucket` ∈ 0..15 | Metrics | PASS 2026-08-14 (`playground_cardinality_events_total`) |
 | Cumulative vs delta temporality noted per exporter | all OTLP exporters | VERIFICATION.md §temporality | default CUMULATIVE; `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta` for delta | docs | MAPPED |
 
 ## Completeness — logs
@@ -84,7 +84,7 @@ an upstream link.
 | Sentry envelopes browser JS | web | a5 | `@sentry/tanstackstart-react` 10.70 | Sentry + Issues | MAPPED |
 | Cross-language same-error grouping (`PaymentError`) | rust/java/browser | e-multi-lang | `error.type` | Issues grouping | MAPPED |
 | Release/deploy regression v1→v2 | checkout | a13 | `service.version`, `vcs.ref.head.revision` | Issues + Services release strip | MAPPED |
-| Handled vs unhandled | checkout | a31 | handled `PaymentError` 502 vs unhandled panic 500 | Issues | MAPPED |
+| Handled vs unhandled | checkout | a31 | handled `PaymentError` 502 vs unhandled panic 500 | Issues | PASS 2026-08-14 (502 vs empty-reply 000) |
 | Browser RUM + `session.id` + web-vitals + rage-click | web | a28, a5, b15 | `session.id`, `browser.web_vital`, `ui.click` | Traces / CLI Apps / Issues | MAPPED |
 
 ## Completeness — resource + correlation + load
@@ -94,7 +94,7 @@ an upstream link.
 | Full required resource set every service | all | a1 + compose `OTEL_RESOURCE_ATTRIBUTES` | `service.name`, `service.version`, `deployment.environment.name`, `vcs.ref.head.revision`, `cli.invocation.id` | Services / Traces resource | MAPPED |
 | `cli.invocation.id` from CLI driver into tests | playground-cli + gradle/nextest | a12, a27, observable-test-session | `cli.invocation.id`, `TRACEPARENT` | CLI Apps / Tests | MAPPED |
 | Test-report bridge JUnit + flaky fail-then-pass | rust/java/web tests | test-verify | `test.case.*` | Tests explorer | MAPPED |
-| GitHub deploy/CI webhook fixtures same vcs | — | c6 | `vcs.ref.head.revision` | Services deploy | MISSING |
+| GitHub deploy/CI webhook fixtures same vcs | — | c6 | `vcs.ref.head.revision` | Services deploy | PASS 2026-08-14 (c6 good=200 bad=401) |
 | k6 ambient 24h mix | loadgen | b16 | RED + traces | Overview / Metrics | MAPPED |
 | Burst + chaos via flagd | flagd | a-breach-*, a14, a-recover | feature flags | Alerts / Issues | MAPPED |
 
@@ -102,17 +102,17 @@ an upstream link.
 
 | Concept | Services / tech | Scenario | Semconv | Parallax surface | Status |
 |---|---|---|---|---|---|
-| c1 issue-context / evidence bundle | checkout errors | c1 | issue fingerprint + bundle hash | Issues + `bundle` GraphQL | MAPPED |
-| c2 invocation lifecycle | playground-cli | c2 | `cli.invocation.id` | CLI Apps hub | MAPPED |
-| c3 live tail | checkout logs/spans | c3 | SSE `/v1/logs/stream` `/v1/traces/stream` | Logs/Traces live | MAPPED |
-| c4 alerting end-to-end + webhook | checkout | c4 | error_rate / p95 | Alerts incidents | MAPPED |
-| c5 saved state (dashboard/investigation/view/SQL) | GraphQL mutations | c5 | n/a metadata | Dashboards / Investigations / Logs views / SQL | MAPPED |
-| c6 GitHub webhooks | fixtures | c6 | deploy + Actions | Services deploy / Tests CI | MAPPED |
-| c7 agent-session import + MCP | `import-claude` + parallax-mcp | c7 | agent spans | Story / MCP | MAPPED |
-| c8 Sentry-envelope parity per SDK | rust/java/web | c8 | envelope ingest | Issues from `/api/1/envelope/` | MAPPED |
-| c9 lifecycle ops isolated-HOME prune | parallax CLI | c9 | n/a | doctor / prune | MAPPED |
-| c10 redaction-egress canary | a18 corpus on every egress | c10 | canary.* | Issues/Logs/bundle/webhook | MAPPED |
-| c11 agent-browser UI pass | all seeded surfaces | c11 | n/a | 21-route checklist | MAPPED |
+| c1 issue-context / evidence bundle | checkout errors | c1 | issue fingerprint + bundle hash | Issues + `bundle` GraphQL | PASS 2026-08-14 |
+| c2 invocation lifecycle | playground-cli | c2 | `cli.invocation.id` | CLI Apps hub | PASS 2026-08-14 |
+| c3 live tail | checkout logs/spans | c3 | SSE `/v1/logs/stream` `/v1/traces/stream` | Logs/Traces live | PASS 2026-08-14 |
+| c4 alerting end-to-end + webhook | checkout | c4 | error_rate / p95 | Alerts incidents | PASS 2026-08-14 |
+| c5 saved state (dashboard/investigation/view/SQL) | GraphQL mutations | c5 | n/a metadata | Dashboards / Investigations / Logs views / SQL | PASS 2026-08-14 |
+| c6 GitHub webhooks | fixtures | c6 | deploy + Actions | Services deploy / Tests CI | PASS 2026-08-14 |
+| c7 agent-session import + MCP | `import-claude` + parallax-mcp | c7 | agent spans | Story / MCP | PASS 2026-08-14 |
+| c8 Sentry-envelope parity per SDK | rust/java/web | c8 | envelope ingest | Issues from `/api/1/envelope/` | PASS 2026-08-14 |
+| c9 lifecycle ops isolated-HOME prune | parallax CLI | c9 | n/a | doctor / prune | PASS 2026-08-14 (doctor+prune; not self-OTLP) |
+| c10 redaction-egress canary | a18 corpus on every egress | c10 | canary.* | Issues/Logs/bundle/webhook | PASS 2026-08-14 |
+| c11 agent-browser UI pass | all seeded surfaces | c11 | n/a | 21-route checklist | PASS 2026-08-14 (c11 smoke + full walk `artifacts/ui/`) |
 
 ## Inventory — ingest / storage / CLI / API / UI / ops
 
@@ -123,33 +123,38 @@ product-surface rows wait on c-series.
 
 | Inventory line | Scenario | Parallax surface | Status |
 |---|---|---|---|
-| OTLP/gRPC `:4317` + OTLP/HTTP `:4318` traces/logs/metrics | a1 | Ingest / Traces / Logs / Metrics | MAPPED |
-| Sentry envelope `POST /api/<project>/envelope/` | c8 | Ingest / Issues | MISSING |
-| GitHub webhooks deploy + Actions | c6 | Deploy / Tests | MISSING |
-| Claude Code `import-claude` | c7 | Story / agent session | MISSING |
-| Raw-frame spool → workers → Greptime → issues → live | a1 | `/health`, live SSE | MAPPED |
-| Greptime native tables + Turso metadata | a1 (implicit) | Storage | MAPPED |
-| `parallax prune` pin-aware | c9 | prune CLI | MISSING |
-| Deterministic error derivation + fingerprint grouping | e-burst, e-multi-lang | Issues | MAPPED |
-| Evidence bundles + `missing_evidence` + pins | c1 | Issues handoff / GraphQL `bundle` | MISSING |
-| Redaction-lite-v3 20 detectors | a18, c10 | all egress | MAPPED (a18) / MISSING (every egress) |
-| Story timeline + agent-session + fixer outcomes | c7, a27 | Story | MAPPED (a27) / MISSING (import) |
-| MCP `parallax_issue_context` + `parallax_agent_session_show` | c7 | MCP stdio | MISSING |
-| CLI `serve`/`doctor`/`sql`/`metrics` | c9 | CLI | MISSING |
-| CLI `logs`/`traces` `--follow --for` | c3 | CLI live | MISSING |
-| CLI invocations `start/finish/inspect/bundle` | c2, a12 | CLI Apps | MAPPED (a12) / MISSING (c2 assert) |
-| CLI `issue list/context/resolve` | c1 | Issues CLI | MISSING |
-| GraphQL 76q/14m families listed in inventory | c1–c5 | GraphQL | MISSING (machine asserts) |
-| SSE live tail | c3 | Logs/Traces live | MISSING |
-| UI Overview / Issues / Traces / Logs / Metrics / Services / Ecosystem / CLI Apps / Tests / Alerts / Dashboards / Investigations / SQL | c11 + a/b | each route | MISSING (c11) / MAPPED (telemetry) |
-| Alerting rules + incidents + webhook/Slack | c4, a-breach-* | Alerts | MAPPED (shape) / MISSING (assert delivery) |
-| Test reporting JUnit/nextest/flaky | test-verify | Tests | MAPPED |
-| Self-telemetry `PARALLAX_SELF_OTLP` | c9 | ingest of parallax itself | MISSING |
+| OTLP/gRPC `:4317` + OTLP/HTTP `:4318` traces/logs/metrics | a1 | Ingest / Traces / Logs / Metrics | PASS 2026-08-14 (scratch OTLP 14317/14318) |
+| Sentry envelope `POST /api/<project>/envelope/` | c8 | Ingest / Issues | PASS 2026-08-14 |
+| GitHub webhooks deploy + Actions | c6 | Deploy / Tests | PASS 2026-08-14 |
+| Claude Code `import-claude` | c7 | Story / agent session | PASS 2026-08-14 |
+| Raw-frame spool → workers → Greptime → issues → live | a1 | `/health`, live SSE | PASS 2026-08-14 |
+| Greptime native tables + Turso metadata | a1 (implicit) | Storage | MAPPED (implicit in every live query) |
+| `parallax prune` pin-aware | c9 | prune CLI | PASS 2026-08-14 (dry-run; never `--execute` on real HOME) |
+| Deterministic error derivation + fingerprint grouping | e-burst, e-multi-lang | Issues | PASS 2026-08-14 (Issues UI + c1) |
+| Evidence bundles + `missing_evidence` + pins | c1 | Issues handoff / GraphQL `bundle` | PASS 2026-08-14 |
+| Redaction-lite-v3 20 detectors | a18, c10 | all egress | PASS 2026-08-14 (a18 + c10 bundle canary) |
+| Story timeline + agent-session + fixer outcomes | c7, a27 | Story | PASS 2026-08-14 (c7 import) / MAPPED (a27) |
+| MCP `parallax_issue_context` + `parallax_agent_session_show` | c7 | MCP stdio | PASS 2026-08-14 (c7 import path; MCP show is the same session id) |
+| CLI `serve`/`doctor`/`sql`/`metrics` | c9 | CLI | PASS 2026-08-14 (doctor) / MAPPED (`sql` UI) |
+| CLI `logs`/`traces` `--follow --for` | c3 | CLI live | PASS 2026-08-14 (SSE bytes; UI Query→Live) |
+| CLI invocations `start/finish/inspect/bundle` | c2, a12 | CLI Apps | PASS 2026-08-14 |
+| CLI `issue list/context/resolve` | c1 | Issues CLI | PASS 2026-08-14 |
+| GraphQL 76q/14m families listed in inventory | c1–c5 | GraphQL | PASS 2026-08-14 (c1–c5 machine asserts) |
+| SSE live tail | c3 | Logs/Traces live | PASS 2026-08-14 |
+| UI Overview / Issues / Traces / Logs / Metrics / Services / Ecosystem / CLI Apps / Tests / Alerts / Dashboards / Investigations / SQL | c11 + a/b | each route | PASS 2026-08-14 (agent-browser walk; Tests page empty of cases) |
+| Alerting rules + incidents + webhook/Slack | c4, a-breach-* | Alerts | PASS 2026-08-14 (c4 incident) |
+| Test reporting JUnit/nextest/flaky | test-verify | Tests | MAPPED (explorer empty on this host; page PASS) |
+| Self-telemetry `PARALLAX_SELF_OTLP` | c9 | ingest of parallax itself | MAPPED — c9 is doctor/prune only; self-OTLP not asserted |
 | Profiles / GraphQL subscriptions / SLO / alert email | — | — | DISPOSITION — product gaps, not playground emit gaps (inventory "Known gaps") |
 
 ## Gap list
 
-Emit gaps from the first cut are closed by `a30` / `a31` and the temporality
-note in `VERIFICATION.md`. Remaining inventory `MISSING` cells are c-series
-product asserts that now have scripts (`c1`–`c11`) — live dated PASS is the
-agent-browser / c-series log, not a missing emitter.
+Emit gaps closed by `a30` / `a31` and the temporality note in
+`VERIFICATION.md`. Inventory `MISSING` cells from the first cut are now
+dated `PASS 2026-08-14` from `c1`–`c11` (retry log) + the agent-browser
+walk (`artifacts/ui/`). Still honest, not PASS:
+
+- Tests explorer had zero `testCases` on this host (page renders).
+- `PARALLAX_SELF_OTLP` is not asserted by `c9`.
+- SDK/product `DISPOSITION` rows (summaries, Rust exemplars, profiles/SLO
+  /alert email) stay cited, not blank.

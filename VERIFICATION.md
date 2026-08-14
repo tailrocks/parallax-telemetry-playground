@@ -132,6 +132,30 @@ Java-agent **gRPC → Rotel retested PASS** (agent 2.30.0): catalog OO count
 to gRPC. Compose `SENTRY_DSN` for containers must use
 `host.docker.internal:9000` (not `localhost`).
 
+Teaching metrics after checkout image rebuild (2026-08-14): a31 handled
+502 vs unhandled empty-reply `000`; metricNames include
+`http_server_active_requests` and `playground_cardinality_events_total`.
+
+### Per-concept comparison arms (2026-08-14)
+
+Same Rotel feed. Honest cells — Sentry/Maple/OO win where they do.
+SigNoz is residue (plan 162 Foundry-only), not a column.
+
+| Concept | Parallax | Maple v0.0.18 | OpenObserve v0.92.0 | Sentry 26.7.2 |
+| --- | --- | --- | --- | --- |
+| Multi-service traces | **PASS** GraphQL + `/traces` waterfall | **PASS** `services --since 2h` names the six | **PASS** search counts (checkout/catalog/payment/inventory/recommendation/pricing) | **PRODUCT-LIMITED** transactions exist; no OTel waterfall product |
+| Metrics RED / up-down / cardinality | **PASS** catalog + workbench; teaching names above | **PRODUCT-LIMITED** series, no workbench parity | **PASS** metric streams; explicit-bucket histograms land | **PRODUCT-LIMITED** no OTLP metrics |
+| Logs + live tail | **PASS** Query→`?live=true` + SSE c3 | **PRODUCT-LIMITED** no live SSE product | **PASS** log streams | **PRODUCT-LIMITED** breadcrumbs/events ≠ OTLP logs |
+| Issues / grouping | **PASS** fingerprints + `/issues` | **FAIL** no issue product | **FAIL** attributes only | **PASS** `verify.sh` A15/A16 `times_seen`; playground SDK envelope groups not listed at T+1m (honest) |
+| Dual OTLP+Sentry emit | **PASS** c8 ingest | n/a | n/a | **PASS** A1/A15/A16 |
+| Alerts / incidents | **PASS** c4 rule→incident | **PRODUCT-LIMITED** | **PRODUCT-LIMITED** | **PASS** as Sentry's own product, not this OTLP feed |
+| SQL | **PASS** `/sql` `SELECT 1` | **PRODUCT-LIMITED** maple CLI | **PASS** OO SQL search | **FAIL** |
+| CLI Apps / tests / story | **PASS** c2/c7 UI | **FAIL** | **FAIL** | **FAIL** |
+| Exponential histogram | **CODE-CONFIRMED drop** (see W5 table) | **PLUMBING PASS** | **LIVE** explicit-bucket | **PRODUCT-LIMITED** |
+
+Display walk of every Parallax surface: `artifacts/ui/` + coverage-matrix
+c11 row. Zero unexplained UI `FAIL`s; no new W5 `DISCREPANCY`.
+
 ## Needs a real host — exact steps to verify the last scenarios
 
 Prereqs: start the lab (`parallax` repo `bench/otlp-fanout`), then this app's
