@@ -117,6 +117,9 @@ struct CheckoutParams {
     /// B23: emit a detached log outside span context.
     #[serde(default, deserialize_with = "de_flag")]
     rogue_log: bool,
+    /// Teaching contrast: panic after no catch (vs `fail=1` handled PaymentError).
+    #[serde(default, deserialize_with = "de_flag")]
+    unhandled: bool,
 }
 
 fn default_tier() -> String {
@@ -157,6 +160,10 @@ async fn checkout(headers: HeaderMap, Query(p): Query<CheckoutParams>) -> impl I
 }
 
 async fn checkout_inner(p: CheckoutParams) -> impl IntoResponse {
+    playground_telemetry::record_cardinality_event(&p.sku);
+    if p.unhandled {
+        panic!("unhandled checkout panic (teaching: contrast with ?fail=1 handled PaymentError)");
+    }
     // An explicit scenario parameter must stay deterministic even when flagd is
     // unavailable: it is the direct B1 contract and should not wait on three
     // unrelated remote flag evaluations before returning its deliberate error.
@@ -832,6 +839,22 @@ mod tests {
                 .expect("UTF-8 response")
                 .contains("payment failed")
         );
+    }
+
+    #[test]
+    fn unhandled_flag_parses_distinct_from_fail() {
+        let unhandled =
+            Query::<CheckoutParams>::try_from_uri(&"/checkout?unhandled=1".parse().expect("uri"))
+                .expect("unhandled query")
+                .0;
+        assert!(unhandled.unhandled);
+        assert!(!unhandled.fail);
+        let handled =
+            Query::<CheckoutParams>::try_from_uri(&"/checkout?fail=1".parse().expect("uri"))
+                .expect("fail query")
+                .0;
+        assert!(handled.fail);
+        assert!(!handled.unhandled);
     }
 
     #[tokio::test]

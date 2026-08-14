@@ -9,7 +9,9 @@ Sentry) can be compared on identical data.
 
 Full design: the Parallax repo's
 `docs/research/validation/telemetry-playground-sample-project.md`.
-Guided Parallax demo: [`TOUR.md`](TOUR.md).
+Guided Parallax demo: [`TOUR.md`](TOUR.md). Coverage spine:
+[`docs/coverage-matrix.md`](docs/coverage-matrix.md). Display shots:
+`artifacts/ui/`.
 Apache-2.0 · Tailrocks.
 
 ## TypeScript policy
@@ -37,6 +39,11 @@ All services export OTLP to a host listener on `4317`/`4318`: local
 `parallax serve` or the fan-out lab's **Rotel**. They also export to Sentry
 via SDK/envelope paths. One distributed trace stitches browser -> Rust -> Java
 -> broker -> Java -> Rust via W3C trace context.
+
+Infra images in `deploy/docker-compose.yml` are pinned 2026-08-14 (plan 162):
+`postgres:18`, `redpandadata/redpanda:v26.2.1`, `ghcr.io/open-feature/flagd:v0.16.1`,
+`grafana/k6:2.2.0`. Existing `postgres` volumes must be dropped
+(`docker compose down -v`) when moving 17→18; schema is created fresh on `up`.
 
 ## Status
 
@@ -89,29 +96,33 @@ run-session parent, complete identity/configuration/retry/failure payload,
 assertion and harness failures, version/revision resources, and application
 spans descended from a test span.
 
-**Verified locally (2026-06-23):**
-- Rust workspace compiles (`cargo build`, fmt + clippy clean).
-- **Integrated end-to-end**: the four Rust services emit OTLP → the fan-out lab's
-  **Rotel** → **OpenObserve**; a trace search returns all four services
-  (`checkout=25, pricing=5, inventory=5, recommendation=5` spans). This is the
-  whole pipeline working, not just stdout.
-- `/checkout` orchestrates **pricing (gRPC) + inventory + recommendation (HTTP)**
-  in one request — `otel.kind` server/client spans, correct aggregation.
-- **A7 streaming**: gRPC server-streaming (`/quote-stream?quantity=4` → 4 quotes).
-- **A3 async**: orders PRODUCER→CONSUMER with a span LINK to the producer.
-- **A10 baggage**, **A18 canary** corpus in span/log.
-- **Chaos verified**: B1 fail→502, B2 inventory 503, B3 retry/timeout, B5 high-CPU,
-  B6 cache-leak, B7 consumer-lag, B8 poison→dead-letter, B9 N+1, B10 lock
-  contention, B11 latency, B17 cron (success/fail/stuck).
-- Java services use the upstream OTel agent for fan-out plus the Spring Sentry
-  SDK for envelopes; web builds and runs with Bun (`bun run build`, `bun start`).
-- **Cross-language gRPC verified**: Rust `checkout` (tonic client) → **Java
-  `payment`** (Spring gRPC server, Boot 4.1 + Spring gRPC 1.1, generated from the
-  shared proto) returns the Java-computed price (`3998`); the OTel Java agent
-  produces a proper `playground.pricing.v1.Pricing/Quote` SERVER span (rpc
-  semconv). *(Note: the Java agent's OTLP→Rotel→OpenObserve delivery has an
-  environment-specific snag still being chased — the Rust path into OpenObserve is
-  verified; Java instrumentation is verified via the logging exporter.)*
+**Verified locally (2026-08-14, teaching restamp 21:59Z):** lockstep SDKs = OTel Rust 0.32 +
+`tracing-opentelemetry` 0.33 + Sentry Rust 0.49.1 (`sentry-opentelemetry`
+adopted for shared `trace_id`); Java agent **2.30.0** + Sentry Spring
+**8.53.0** + Boot 4.1.0; OTel JS **2.10 / 0.221** +
+`@sentry/tanstackstart-react` 10.70. Fan-out = Rotel `v0.2.5` → OpenObserve
+`v0.92.0`, Maple `v0.0.18`, Sentry self-hosted `26.7.2`, host Parallax.
+SigNoz omitted (Foundry-only compose).
+- Rust workspace: `mise exec -- cargo clippy -D warnings` + nextest **90/90**.
+- **OTLP 4-sink live** after `a1` + `b2` + `a6`: OpenObserve
+  `checkout=90, catalog=130, payment=76, inventory=19, recommendation=23,
+  pricing=5`; Maple `services` API lists the same six names; Parallax
+  GraphQL traces include checkout/catalog/payment/inventory and issues
+  include Java `IllegalStateException` (GADGET-1) plus Rust inventory chaos.
+- `/checkout` still orchestrates pricing (gRPC) + inventory + recommendation
+  (HTTP) — `total_minor=3998` at quantity=2.
+- **Java agent → Rotel gRPC retested PASS** at agent 2.30.0 / Rotel v0.2.5
+  (catalog OO count 56→96 after flipping catalog to `grpc` `:4317` + `a6`).
+  Compose now defaults Java to gRPC; HTTP/protobuf `:4318` is the fallback.
+- **Sentry** (re-dated 2026-08-14T14:35Z): `verify.sh` A1 OTLP 200; A15/A16
+  `PaymentError` `times_seen=10`. Real SDK envelopes land on **both**
+  Parallax `/api/1/envelope/` and Sentry Groups: rust `plat=native
+  c8-rust-sdk`, java `plat=java c8-java-sdk`, js `plat=node
+  Error: c8-js-sdk PaymentError` (`c8 ok rust+java+js`). JS 10.70 first
+  POST is `type=session` (Parallax 415); the second POST is `type=event`.
+  Compose DSN must stay `host.docker.internal:9000`.
+- Java services: upstream OTel agent (never `sentry-opentelemetry-agent`) +
+  Spring Sentry starter. Web: `bun run build` + vitest 9/9.
 
 ## Run
 

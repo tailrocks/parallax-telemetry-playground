@@ -9,7 +9,7 @@
 # notifications, orders, storefront GraphQL) + Java (catalog GraphQL, payment gRPC, fulfillment
 # Kafka) + web (TanStack Start) all wired. Java uses the upstream OTel agent
 # plus the Spring Sentry SDK (deploy/Dockerfile.java); web is the Nitro server
-# (deploy/Dockerfile.web). Pin image tags at a real deploy.
+# (deploy/Dockerfile.web). Image tags pinned 2026-08-14 (plan 162).
 
 name: telemetry-playground
 
@@ -22,8 +22,12 @@ x-otlp: &otlp
   OTEL_METRICS_EXPORTER: "otlp"
   OTEL_LOGS_EXPORTER: "otlp"
   OTEL_PROPAGATORS: "tracecontext,baggage"
-  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
   PARALLAX_ENV: "${PLAYGROUND_ENV:-playground}"
+  # Required resource key. Set in deploy/.env or the host env (`git rev-parse HEAD`).
+  GIT_SHA: "${GIT_SHA}"
+  # Dual emission: Sentry SDK envelopes in parallel with OTLP (Rust + Java).
+  SENTRY_DSN: "${SENTRY_DSN:-}"
 
 services:
   checkout:
@@ -33,7 +37,6 @@ services:
       PRICING_ENDPOINT: "http://pricing:50051"
       CHECKOUT_ADDR: "0.0.0.0:8088"
       RELEASE: "${RELEASE:-v1}"
-      GIT_SHA: "${GIT_SHA:-}"
       PLAYGROUND_SAMPLE_RATIO: "${PLAYGROUND_SAMPLE_RATIO:-}"
       FLAGD_HOST: "flagd"
       FLAGD_CACHE: "disabled"
@@ -63,7 +66,11 @@ services:
 
   recommendation:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: recommendation } }
-    environment: { <<: *otlp, ADDR: "0.0.0.0:8090" }
+    environment:
+      <<: *otlp
+      ADDR: "0.0.0.0:8090"
+      FLAGD_HOST: "flagd"
+      FLAGD_CACHE: "disabled"
     ports: ["8090:8090"]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
@@ -76,8 +83,15 @@ services:
 
   orders:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: orders } }
-    environment: { <<: *otlp, ADDR: "0.0.0.0:8092" }
+    environment:
+      <<: *otlp
+      ADDR: "0.0.0.0:8092"
+      # feature_flag("poisonMessage") reads FLAGD_HOST; default localhost
+      # inside the container burns ~15s of RPC retries on every POST /order.
+      FLAGD_HOST: "flagd"
+      FLAGD_CACHE: "disabled"
     ports: ["8092:8092"]
+    depends_on: [flagd]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
@@ -94,7 +108,7 @@ services:
     networks: [pg]
 
   postgres:
-    image: postgres:17
+    image: postgres:18
     environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}", POSTGRES_DB: playground }
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d playground"]
@@ -105,7 +119,7 @@ services:
     networks: [pg]
 
   broker:
-    image: redpandadata/redpanda:latest # Kafka-API-compatible, light
+    image: redpandadata/redpanda:v26.2.1 # Kafka-API-compatible, light
     # Advertise the compose service name so clients in other containers reach the
     # broker via broker:9092 (default advertises 127.0.0.1:9092 → unreachable
     # cross-container, breaking the producer/consumer round-trip).
@@ -115,7 +129,7 @@ services:
     networks: [pg]
 
   flagd:
-    image: ghcr.io/open-feature/flagd:latest
+    image: ghcr.io/open-feature/flagd:v0.16.1
     command: ["start", "--uri", "file:/etc/flagd/flagd.json"]
     volumes: ["../flags/flagd.json:/etc/flagd/flagd.json:ro"]
     ports: ["8013:8013"]
@@ -126,12 +140,13 @@ services:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: catalog } }
     environment:
       <<: *otlp
-      # Java tier exports OTLP/HTTP (the agent's okhttp gRPC sender fails to read
-      # Rotel's gRPC response; HTTP/protobuf to Rotel :4318 works).
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
-      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      # Java agent 2.30.0 + Rotel v0.2.5: gRPC to Rotel :4317 verified 2026-08-14
+      # (catalog span count rose under grpc after a6). HTTP/protobuf :4318 remains
+      # a fallback if a future agent/Rotel pair regresses.
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "catalog"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
       OTEL_INSTRUMENTATION_GRAPHQL_DATA_FETCHER_ENABLED: "true"
       OTEL_INSTRUMENTATION_GRAPHQL_OPERATION_NAME_IN_SPAN_NAME_ENABLED: "false"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
@@ -157,10 +172,10 @@ services:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: payment } }
     environment:
       <<: *otlp
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
-      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "payment"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
       OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_KEY_VALUE_PAIR_ATTRIBUTES: "true"
       OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_MDC_ATTRIBUTES: "*"
@@ -174,15 +189,17 @@ services:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: fulfillment } }
     environment:
       <<: *otlp
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4318"
-      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "fulfillment"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
       OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
       SENTRY_DSN: "${SENTRY_DSN:-}"
       KAFKA_BROKERS: "broker:9092"
-      PAYMENT_GRPC_ADDRESS: "payment:9090"
+      # Boot 4.1: spring.grpc.client.channel.payment.target
+      PAYMENT_GRPC_ADDRESS: "static://payment:9090"
+      SPRING_GRPC_CLIENT_CHANNEL_PAYMENT_TARGET: "static://payment:9090"
       NOTIFICATIONS_URL: "http://notifications:8091"
     # POST /publish drives the cross-language async branch: Java produces to the
     # `orders` topic → consumes it → calls Rust `notifications` (reverse hop).
@@ -193,21 +210,28 @@ services:
 
   # --- Frontend (TanStack Start, Nitro server) ---
   web:
-    build: { context: .., dockerfile: deploy/Dockerfile.web }
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+      args:
+        VITE_GIT_SHA: "${GIT_SHA}"
     environment:
       # Server-side OTLP proxy target (browser → /v1/traces → Rotel HTTP).
       ROTEL_OTLP_HTTP_ENDPOINT: "http://host.docker.internal:4318"
       VITE_CHECKOUT_URL: "http://localhost:8088"
       VITE_CHECKOUT_URL_NOPROP: "http://127.0.0.1:8088"
       VITE_ORDERS_URL: "http://localhost:8092"
+      VITE_SENTRY_DSN: "${SENTRY_DSN:-}"
       VITE_RELEASE: "${RELEASE:-v1}"
+      VITE_GIT_SHA: "${GIT_SHA}"
+      GIT_SHA: "${GIT_SHA}"
       PORT: "3000"
     ports: ["5173:3000"]
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
   loadgen:
-    image: grafana/k6:latest
+    image: grafana/k6:2.2.0
     profiles: [demo]
     command: ["run", "/scripts/demo.ts"]
     environment:

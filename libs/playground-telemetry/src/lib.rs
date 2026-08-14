@@ -7,10 +7,12 @@
 //!   * OpenTelemetry meters  — OTLP **metrics** from explicit instruments,
 //!   * `OpenTelemetryTracingBridge` — `tracing` events → OTLP **logs**,
 //!     auto-stamped with the active trace/span id,
-//!   * `sentry-tracing`      — events → Sentry breadcrumbs/issues.
+//!   * `sentry-tracing`      — events → Sentry breadcrumbs/issues,
+//!   * `sentry-opentelemetry` — `SentrySpanProcessor` + `SentryPropagator`
+//!     so Sentry envelopes share the OTel `trace_id` (crate 0.49 pins OTel 0.32).
 //!
 //! All three OTLP signals share one `Resource` and target the standard
-//! `OTEL_EXPORTER_OTLP_ENDPOINT` (injected by `parallax run start` or the lab),
+//! `OTEL_EXPORTER_OTLP_ENDPOINT` (injected by `parallax invocation start` or the lab),
 //! so pointing the whole app at Rotel needs no code change.
 //!
 //! (Metric **exemplars** are intentionally absent — the Rust SDK doesn't
@@ -46,6 +48,7 @@ use opentelemetry_sdk::logs::{SdkLogger, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
+use sentry_opentelemetry::{SentryPropagator, SentrySpanProcessor};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
 use tracing::Instrument;
@@ -195,6 +198,19 @@ pub async fn http_server_observability(request: Request, next: Next) -> Response
     );
     set_parent_from_headers(&span, request.headers());
     let started = Instant::now();
+    let inflight_attrs = [
+        KeyValue::new(semconv::HTTP_REQUEST_METHOD, method.clone()),
+        KeyValue::new(semconv::HTTP_ROUTE, route.clone()),
+    ];
+    let inflight = global::meter("playground.http")
+        .i64_up_down_counter(HTTP_SERVER_ACTIVE_REQUESTS)
+        .with_description("In-flight HTTP server requests (up-down counter teaching case)")
+        .build();
+    inflight.add(1, &inflight_attrs);
+    let _inflight = InFlightGuard {
+        counter: inflight,
+        attrs: inflight_attrs,
+    };
     let response = next.run(request).instrument(span.clone()).await;
     let status = response.status().as_u16();
     span.record("http.response.status_code", i64::from(status));
@@ -215,6 +231,46 @@ pub async fn http_server_observability(request: Request, next: Next) -> Response
             ],
         );
     response
+}
+
+/// Teaching metric: up-down counter of in-flight HTTP requests.
+pub const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
+/// Teaching metric: bounded-cardinality counter (`demo.bucket` ∈ 0..15).
+pub const CARDINALITY_EVENTS: &str = "playground.cardinality.events";
+pub const CARDINALITY_BUCKET_ATTR: &str = "demo.bucket";
+pub const CARDINALITY_BUCKET_COUNT: u64 = 16;
+
+struct InFlightGuard {
+    counter: opentelemetry::metrics::UpDownCounter<i64>,
+    attrs: [KeyValue; 2],
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.counter.add(-1, &self.attrs);
+    }
+}
+
+/// Record one teaching-cardinality event. `demo.bucket` is always in `0..16`.
+pub fn record_cardinality_event(sku: &str) {
+    let bucket = cardinality_bucket(sku);
+    global::meter("playground.demo")
+        .u64_counter(CARDINALITY_EVENTS)
+        .with_description("Teaching counter: demo.bucket is deliberately bounded to 16 values")
+        .build()
+        .add(
+            1,
+            &[KeyValue::new(CARDINALITY_BUCKET_ATTR, bucket.to_string())],
+        );
+}
+
+pub fn cardinality_bucket(sku: &str) -> u64 {
+    let mut hash = 2_166_136_261u64;
+    for byte in sku.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    hash % CARDINALITY_BUCKET_COUNT
 }
 
 fn http_server_error_type(status: u16) -> Option<&'static str> {
@@ -298,15 +354,30 @@ pub async fn shutdown_signal() {
 /// Reads `OTEL_EXPORTER_OTLP_ENDPOINT` (default per the OTLP SDK) and
 /// `SENTRY_DSN` (Sentry disabled when unset). Honors `RUST_LOG`.
 pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
-    global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
-        Box::new(TraceContextPropagator::new()),
-        Box::new(BaggagePropagator::new()),
-    ]));
-
     let resource = Resource::builder()
         .with_attributes(resource_attributes(service))
         .build();
     let release = release();
+
+    // Sentry first so SentrySpanProcessor can attach to the client.
+    let mut sentry_options = sentry::ClientOptions::new()
+        .release(release)
+        .environment(environment_from(std::env::var("PARALLAX_ENV").ok()))
+        .traces_sample_rate(1.0)
+        .attach_stacktrace(true)
+        .send_default_pii(false);
+    if let Ok(dsn) = std::env::var("SENTRY_DSN")
+        && let Ok(parsed) = dsn.parse()
+    {
+        sentry_options.dsn = Some(parsed);
+    }
+    let sentry = sentry::init(sentry_options);
+
+    global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
+        Box::new(TraceContextPropagator::new()),
+        Box::new(BaggagePropagator::new()),
+        Box::new(SentryPropagator::new()),
+    ]));
 
     // --- Traces ---
     let span_exporter = opentelemetry_otlp::SpanExporter::builder()
@@ -315,6 +386,7 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
     let sample_ratio = sample_ratio_from(std::env::var("PLAYGROUND_SAMPLE_RATIO").ok().as_deref());
     let mut tracer_builder = SdkTracerProvider::builder()
         .with_resource(resource.clone())
+        .with_span_processor(SentrySpanProcessor::new())
         .with_batch_exporter(span_exporter);
     if let SampleRatioSetting::Ratio(ratio) = sample_ratio {
         tracer_builder = tracer_builder.with_sampler(Sampler::ParentBased(Box::new(
@@ -359,19 +431,6 @@ pub fn init(service: &'static str) -> anyhow::Result<Telemetry> {
                 || t.starts_with("opentelemetry")
                 || t.starts_with("tower"))
         }));
-
-    // Sentry rides alongside; DSN from env, disabled gracefully when absent.
-    let sentry = sentry::init(sentry::ClientOptions {
-        dsn: std::env::var("SENTRY_DSN")
-            .ok()
-            .and_then(|d| d.parse().ok()),
-        release: Some(release.into()),
-        environment: Some(environment_from(std::env::var("PARALLAX_ENV").ok()).into()),
-        traces_sample_rate: 1.0,
-        attach_stacktrace: true,
-        send_default_pii: false,
-        ..Default::default()
-    });
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
@@ -530,10 +589,33 @@ fn resource_attributes(service: &'static str) -> Vec<KeyValue> {
     {
         attributes.push(KeyValue::new(semconv::CLI_INVOCATION_ID, invocation_id));
     }
-    if let Some(git_sha) = non_empty_env("GIT_SHA") {
+    if let Some(git_sha) = vcs_revision_from(
+        non_empty_env("GIT_SHA"),
+        otel_resource_attributes.as_deref(),
+    ) {
         attributes.push(KeyValue::new(semconv::VCS_REF_HEAD_REVISION, git_sha));
     }
     attributes
+}
+
+/// `GIT_SHA` wins; otherwise the `vcs.ref.head.revision` pair in
+/// `OTEL_RESOURCE_ATTRIBUTES` (the Java-agent path).
+fn vcs_revision_from(git_sha: Option<String>, otel_resource: Option<&str>) -> Option<String> {
+    if let Some(sha) = git_sha.filter(|value| !value.trim().is_empty()) {
+        return Some(sha);
+    }
+    resource_attr_value(otel_resource, semconv::VCS_REF_HEAD_REVISION)
+}
+
+fn resource_attr_value(value: Option<&str>, attr: &str) -> Option<String> {
+    value.and_then(|value| {
+        value.split(',').find_map(|pair| {
+            let (key, raw) = pair.split_once('=')?;
+            (key.trim() == attr)
+                .then(|| raw.trim().to_string())
+                .filter(|raw| !raw.is_empty())
+        })
+    })
 }
 
 fn service_instance_id(service: &str) -> String {
@@ -644,6 +726,36 @@ mod tests {
     }
 
     #[test]
+    fn git_sha_env_becomes_vcs_ref_head_revision() {
+        assert_eq!(
+            vcs_revision_from(Some("abc123def".into()), None).as_deref(),
+            Some("abc123def")
+        );
+        assert_eq!(vcs_revision_from(Some("  ".into()), None), None);
+        assert_eq!(
+            vcs_revision_from(
+                None,
+                Some(
+                    "service.version=v1,vcs.ref.head.revision=deadbeef,service.namespace=playground"
+                )
+            )
+            .as_deref(),
+            Some("deadbeef")
+        );
+        assert_eq!(
+            vcs_revision_from(
+                Some("from-env".into()),
+                Some("vcs.ref.head.revision=from-otel")
+            ),
+            Some("from-env".into())
+        );
+        assert_eq!(
+            vcs_revision_from(None, Some("service.version=v1,vcs.ref.head.revision=")),
+            None
+        );
+    }
+
+    #[test]
     fn resource_attr_list_detects_existing_invocation_id() {
         assert!(resource_attr_list_contains(
             Some("service.name=checkout, cli.invocation.id=inv-a"),
@@ -668,6 +780,7 @@ mod tests {
             semconv::DEPLOYMENT_ENVIRONMENT_NAME,
             "deployment.environment.name"
         );
+        assert_eq!(semconv::VCS_REF_HEAD_REVISION, "vcs.ref.head.revision");
         assert_eq!(semconv::EVENT_NAME, "event.name");
         assert_eq!(semconv::APP_SCREEN_NAME, "app.screen.name");
         assert_eq!(semconv::OTEL_KIND, "otel.kind");
@@ -737,6 +850,19 @@ mod tests {
         assert!(!test_telemetry_enabled(None));
         assert!(!test_telemetry_enabled(Some("true")));
         assert!(test_telemetry_enabled(Some("1")));
+    }
+
+    #[test]
+    fn cardinality_bucket_is_bounded_and_stable() {
+        assert!(cardinality_bucket("WIDGET-1") < CARDINALITY_BUCKET_COUNT);
+        assert_eq!(
+            cardinality_bucket("WIDGET-1"),
+            cardinality_bucket("WIDGET-1")
+        );
+        assert_ne!(
+            cardinality_bucket("WIDGET-1"),
+            cardinality_bucket("GADGET-1")
+        );
     }
 
     #[test]

@@ -17,7 +17,7 @@ plugins {
     id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
     id("com.google.protobuf") version "0.9.4"
-    id("com.atkinsondev.opentelemetry-build") version "4.6.2"
+    id("com.atkinsondev.opentelemetry-build") version "4.7.0"
     id("org.gradle.test-retry") version "1.6.5"
 }
 group = "dev.tailrocks"; version = "0.1.0"
@@ -43,13 +43,13 @@ dependencies {
     compileOnly("org.apache.tomcat:annotations-api:6.0.53")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation("io.sentry:sentry-spring-boot-4-starter:8.46.0")
+    implementation("io.sentry:sentry-spring-boot-4-starter:8.53.0")
     implementation("io.opentelemetry:opentelemetry-api")
     compileOnly("org.junit.jupiter:junit-jupiter-api")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("io.grpc:grpc-inprocess")
     // Keep test traces on the same upstream agent path as the deployed JVM.
-    add(otelJavaAgent.name, "io.opentelemetry.javaagent:opentelemetry-javaagent:2.29.0")
+    add(otelJavaAgent.name, "io.opentelemetry.javaagent:opentelemetry-javaagent:2.30.0")
 }
 openTelemetryBuild {
     endpoint = System.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") ?: "http://rotel:4317"
