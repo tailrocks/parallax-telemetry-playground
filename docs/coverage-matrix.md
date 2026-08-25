@@ -138,7 +138,7 @@ an upstream link.
 | CLI `issue list/context/resolve` | CLI | c1 | fingerprint | Issues CLI | PASS 2026-08-14 |
 | GraphQL 76q/14m families | API | c1–c5 | — | GraphQL | PASS 2026-08-14 |
 | SSE live tail | API | c3 | — | Logs/Traces live | PASS 2026-08-14 |
-| UI Overview / Issues / Traces / Logs / Metrics / Services / Ecosystem / CLI Apps / Tests / Alerts / Dashboards / Investigations / SQL | SPA | c11 + teach walk | — | each route | PASS 2026-08-15 c11-ui headings on Overview/Issues/Traces/Logs/Metrics/Services/Alerts/Dashboards/Investigations/SQL/Tests. FAIL display 2026-08-15: default `/ecosystem` 24h `serviceMap` INTERNAL (`?range=1h` GraphQL nodes OK); `/invocations` unbounded `observedInvocations` INTERNAL (`limit:3` OK). W5 DISCREPANCY |
+| UI Overview / Issues / Traces / Logs / Metrics / Services / Ecosystem / CLI Apps / Tests / Alerts / Dashboards / Investigations / SQL | SPA | c11 + teach walk | — | each route | PASS 2026-08-15 c11-ui headings on Overview/Issues/Traces/Logs/Metrics/Services/Alerts/Dashboards/Investigations/SQL/Tests. FAIL display 2026-08-15: default `/ecosystem` 24h `serviceMap` INTERNAL (`?range=1h` GraphQL nodes OK); historical `/invocations` unbounded `observedInvocations` INTERNAL (`limit:3` OK), requires revalidation because current UI uses `observedInvocations(limit:50)`. W5 DISCREPANCY |
 | Alerting rules + incidents + webhook | alerting | c4 | error_rate | Alerts | PASS 2026-08-14 |
 | Alerting Slack webhook destination | alerting | c4 | `slack_webhook` | Alerts dest | PASS 2026-08-14 |
 | Test reporting JUnit/nextest/flaky | test-verify | test-verify | `test.case.*` | Tests | PASS 2026-08-14 |
@@ -151,7 +151,7 @@ an upstream link.
 - **FAIL** clock-skew banner absent on same-service `?skew=1` — W5 DISCREPANCY. Restamped 2026-08-14T15:43Z.
 - **FAIL** Metrics workbench `/metrics/catalog.product.queries` `hasTraceLink=false` (GraphQL has exemplars → `c9464650357d6f26`). W5 DISCREPANCY. Restamped 2026-08-14T15:43Z. Service detail lives at `/services/$name`.
 - **FAIL** default `/ecosystem` (24h) `serviceMap` INTERNAL; `?range=1h` renders 10 services · 6 edges. W5 DISCREPANCY. 2026-08-15T01:40Z.
-- **FAIL** `/invocations` `observedInvocations` without `limit` INTERNAL; `limit:3` OK. W5 DISCREPANCY. 2026-08-15T01:40Z.
+- **HISTORICAL / REQUIRES REVALIDATION** `/invocations` `observedInvocations` without `limit` was INTERNAL; `limit:3` OK. W5 DISCREPANCY observed 2026-08-15T01:40Z. Current UI uses `observedInvocations(limit:50)`; retain this gap until revalidated.
 - Issues list virtualize miss of `c8-rust-sdk` string is harness-only; issue detail pages PASS.
 - Tests explorer seeded this session via `parallax invocation start -- scripts/observable-test-session.sh rust --acceptance`.
 - c9 never touched operator `~/.parallax` (throwaway `$repo/.isolation/`).
