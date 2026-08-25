@@ -21,11 +21,11 @@ the logback appender key-value and MDC capture flags so app log rows carry
 `event.name` plus business fields. The local OpenTelemetry API jar exposes
 `LogRecordBuilder.setEventName`.
 
-Web emits `web.checkout.submitted` through `@opentelemetry/sdk-logs@0.220.0`
-and `@opentelemetry/exporter-logs-otlp-proto@0.220.0`, matching the existing
+Web emits `web.checkout.submitted` through `@opentelemetry/sdk-logs@0.221.0`
+and `@opentelemetry/exporter-logs-otlp-proto@0.221.0`, matching the existing
 OTLP/protobuf trace exporter line. Browser logs remain experimental upstream,
-but the package versions are compatible with the current OTel JS 0.220/2.8
-dependency set.
+but the package versions are compatible with the current OTel JS 0.221/2.10
+dependency set in `web/package.json`.
 
 Parallax reads typed events from GreptimeDB's native `opentelemetry_logs`
 table. GreptimeDB does not currently expose OTel `LogRecord.event_name` as a

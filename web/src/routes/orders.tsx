@@ -3,6 +3,17 @@ import { useState } from "react";
 import { runTracedStep, tracedFetch, trackStep } from "../rum";
 import { APP_SCREEN_NAME, APP_WIDGET_NAME, UI_CLICK, UI_SUBMIT } from "../semconv";
 
+type SubmissionStatus =
+  | { readonly kind: "ready"; readonly message: "ready" }
+  | { readonly kind: "submitting"; readonly message: "submitting..." }
+  | { readonly kind: "success"; readonly message: string }
+  | { readonly kind: "http-error"; readonly message: string }
+  | { readonly kind: "network-error"; readonly message: string };
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export const Route = createFileRoute("/orders")({
   component: OrdersPage,
 });
@@ -10,7 +21,10 @@ export const Route = createFileRoute("/orders")({
 function OrdersPage() {
   const [lagMs, setLagMs] = useState(250);
   const [batch, setBatch] = useState(false);
-  const [status, setStatus] = useState("ready");
+  const [status, setStatus] = useState<SubmissionStatus>({
+    kind: "ready",
+    message: "ready",
+  });
 
   async function submit() {
     const base = import.meta.env["VITE_ORDERS_URL"] ?? "http://localhost:8092";
@@ -19,7 +33,7 @@ function OrdersPage() {
       batch: batch ? "1" : "0",
     });
 
-    setStatus("submitting...");
+    setStatus({ kind: "submitting", message: "submitting..." });
     try {
       await runTracedStep(
         UI_SUBMIT,
@@ -29,11 +43,15 @@ function OrdersPage() {
         },
         async () => {
           const res = await tracedFetch(`${base}/order?${query}`, { method: "POST" });
-          setStatus(`${res.status}: ${await res.text()}`);
+          const body = await res.text();
+          setStatus({
+            kind: res.ok ? "success" : "http-error",
+            message: `${res.ok ? "Success" : "HTTP error"}: ${res.status}: ${body}`,
+          });
         },
       );
     } catch (err) {
-      setStatus(`error: ${String(err)}`);
+      setStatus({ kind: "network-error", message: `Network error: ${errorMessage(err)}` });
     }
   }
 
@@ -77,7 +95,9 @@ function OrdersPage() {
         </label>
         <button type="submit">submit order</button>
       </form>
-      <pre>{status}</pre>
+      <div aria-atomic="true" aria-live="polite" role="status">
+        {status.message}
+      </div>
     </main>
   );
 }

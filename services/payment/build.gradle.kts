@@ -4,7 +4,7 @@ import com.google.protobuf.gradle.proto
 // ../../proto/pricing.proto and serves the Pricing gRPC contract — the
 // cross-language counterpart to the Rust pricing service.
 //
-// Version note (latest-stable, 2026-06-23): Spring Boot 4.1.0 + the graduated
+// Version note (current compatibility snapshot, 2026-06-23): Spring Boot 4.1.0 + the graduated
 // Spring gRPC 1.1.0 (Boot-owned `spring-boot-starter-grpc-server`). The earlier
 // 4.0.0 hold is gone: Boot 4.1 absorbed Spring gRPC, so its Gradle plugin now
 // registers the protobuf `grpc` locator and wires the generate tasks itself —

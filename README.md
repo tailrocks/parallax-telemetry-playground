@@ -1,11 +1,17 @@
 # Parallax Telemetry Playground
 
-A maximum-fidelity **OpenTelemetry + Sentry** polyglot sample app — the
-comparison *payload* for the [Parallax](https://github.com/tailrocks/parallax)
+> This repository is a telemetry-producing workload and verification harness,
+> not an observability backend or console.
+
+A **polyglot OpenTelemetry + Sentry sample workload**, with claims bounded by
+the checked-in evidence — the comparison *payload* for the
+[Parallax](https://github.com/tailrocks/parallax)
 OTLP fan-out lab. Distinct services in **Rust** and **Java** cross-communicating,
 with a **TanStack Start** frontend and a **Rust CLI** driver, instrumented to
-exercise every signal so each backend (Parallax, Maple, SigNoz, OpenObserve,
-Sentry) can be compared on identical data.
+exercise a common workload and stimulus for each backend (Parallax, Maple,
+SigNoz, OpenObserve, Sentry). The workload is the same, but signal and
+protocol coverage differs by backend—especially Sentry's metrics coverage—so
+the comparison is not of identical data in every backend.
 
 Full design: the Parallax repo's
 `docs/research/validation/telemetry-playground-sample-project.md`.
@@ -114,13 +120,14 @@ SigNoz omitted (Foundry-only compose).
 - **Java agent → Rotel gRPC retested PASS** at agent 2.30.0 / Rotel v0.2.5
   (catalog OO count 56→96 after flipping catalog to `grpc` `:4317` + `a6`).
   Compose now defaults Java to gRPC; HTTP/protobuf `:4318` is the fallback.
-- **Sentry** (re-dated 2026-08-14T14:35Z): `verify.sh` A1 OTLP 200; A15/A16
-  `PaymentError` `times_seen=10`. Real SDK envelopes land on **both**
-  Parallax `/api/1/envelope/` and Sentry Groups: rust `plat=native
+- **Historical Sentry probe** (re-dated 2026-08-14T14:35Z): `verify.sh` A1
+  OTLP 200; A15/A16 `PaymentError` `times_seen=10`. Real SDK envelopes landed
+  on **both** Parallax `/api/1/envelope/` and Sentry Groups: rust `plat=native
   c8-rust-sdk`, java `plat=java c8-java-sdk`, js `plat=node
-  Error: c8-js-sdk PaymentError` (`c8 ok rust+java+js`). JS 10.70 first
-  POST is `type=session` (Parallax 415); the second POST is `type=event`.
-  Compose DSN must stay `host.docker.internal:9000`.
+  Error: c8-js-sdk PaymentError` (`c8 ok rust+java+js`). This is historical
+  emission/group evidence, not current-preview Sentry UI or flamegraph
+  verification. JS 10.70 first POST is `type=session` (Parallax 415); the
+  second POST is `type=event`. Compose DSN must stay `host.docker.internal:9000`.
 - Java services: upstream OTel agent (never `sentry-opentelemetry-agent`) +
   Spring Sentry starter. Web: `bun run build` + vitest 9/9.
 
@@ -128,7 +135,10 @@ SigNoz omitted (Foundry-only compose).
 
 ```bash
 # Demo against Parallax (primary)
-# 1. In the Parallax repo:
+# 1. In the Parallax repo, resolve the latest preview (never stable):
+brew update
+brew upgrade parallax@preview
+parallax --version   # must contain "preview"
 parallax serve
 
 # 2. In this repo:

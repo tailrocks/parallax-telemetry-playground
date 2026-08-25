@@ -10,8 +10,14 @@ test("home to checkout journey preserves the user-facing flow", async ({ page })
 
 test("propagation-break journey explains its intentional disconnected trace", async ({ page }) => {
   await page.goto("/checkout?nopropagate=1");
+  await expect(
+    page.getByRole("heading", { name: "Checkout — propagation-break test" }),
+  ).toBeVisible();
+  await expect(page.getByRole("note", { name: "Intentional propagation-break test" })).toBeVisible();
   await expect(page.getByText("Propagation break mode:")).toBeVisible();
-  await expect(page.getByRole("link", { name: "open propagation-break variant" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "open intentional propagation-break test" }),
+  ).toBeVisible();
 });
 
 test("rage-click journey records repeated promo interactions", async ({ page }) => {
@@ -54,7 +60,7 @@ test("home to orders journey submits a batched order [batch]", async ({ page }) 
   await expect(page.getByRole("heading", { name: "Orders" })).toBeVisible();
   await page.getByRole("checkbox", { name: "batch consumer" }).check();
   await page.getByRole("button", { name: "submit order" }).click();
-  await expect(page.getByText('202: {"status":"queued"}')).toBeVisible();
+  await expect(page.getByRole("status")).toContainText('Success: 202: {"status":"queued"}');
 });
 
 test("forced RUM error preserves its backend failure", async ({ page }) => {

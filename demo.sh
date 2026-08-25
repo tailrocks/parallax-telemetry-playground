@@ -2,9 +2,16 @@
 set -euo pipefail
 
 # One-command demo: playground stack + baseline traffic -> local parallax serve.
+PARALLAX_VERSION="$(parallax --version 2>/dev/null || true)"
+if [[ "$PARALLAX_VERSION" != *preview* ]]; then
+  echo "Preview Parallax is required; stable binaries are not supported by this demo."
+  echo "Install/update it first: brew update && brew upgrade parallax@preview"
+  exit 1
+fi
+
 if ! nc -z 127.0.0.1 4317 2>/dev/null; then
   echo "No OTLP listener on 127.0.0.1:4317."
-  echo "Start Parallax first (in the parallax repo):  parallax serve"
+  echo "Start the latest preview Parallax first (in the parallax repo):  parallax serve"
   echo "(or the fan-out lab if you are comparing backends)"
   exit 1
 fi
