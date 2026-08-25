@@ -16,10 +16,24 @@ export const Route = createFileRoute("/checkout")({
 
 const SKUS = ["WIDGET-1", "WIDGET-2", "RUM-DEMO"];
 
+type SubmissionStatus =
+  | { readonly kind: "ready"; readonly message: "ready" }
+  | { readonly kind: "submitting"; readonly message: "submitting..." }
+  | { readonly kind: "success"; readonly message: string }
+  | { readonly kind: "http-error"; readonly message: string }
+  | { readonly kind: "network-error"; readonly message: string };
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function CheckoutPage() {
   const [sku, setSku] = useState("WIDGET-1");
   const [quantity, setQuantity] = useState(2);
-  const [status, setStatus] = useState("ready");
+  const [status, setStatus] = useState<SubmissionStatus>({
+    kind: "ready",
+    message: "ready",
+  });
   const [nopropagate, setNopropagate] = useState(false);
 
   useEffect(() => {
@@ -33,7 +47,7 @@ function CheckoutPage() {
     const base = nopropagate ? noPropBase : normalBase;
     const query = new URLSearchParams({ sku, quantity: String(quantity) });
 
-    setStatus("submitting...");
+    setStatus({ kind: "submitting", message: "submitting..." });
     try {
       await runTracedStep(
         UI_SUBMIT,
@@ -53,11 +67,14 @@ function CheckoutPage() {
             ? await fetch(`${base}/checkout?${query}`)
             : await tracedFetch(`${base}/checkout?${query}`);
           const body = await res.text();
-          setStatus(`${res.status}: ${body}`);
+          setStatus({
+            kind: res.ok ? "success" : "http-error",
+            message: `${res.ok ? "Success" : "HTTP error"}: ${res.status}: ${body}`,
+          });
         },
       );
     } catch (err) {
-      setStatus(`error: ${String(err)}`);
+      setStatus({ kind: "network-error", message: `Network error: ${errorMessage(err)}` });
     }
   }
 
@@ -67,12 +84,15 @@ function CheckoutPage() {
         <Link to="/">home</Link>
         <Link to="/orders">orders</Link>
       </nav>
-      <h1>Checkout</h1>
+      <h1>{nopropagate ? "Checkout — propagation-break test" : "Checkout"}</h1>
       {nopropagate ? (
-        <p>
-          Propagation break mode: browser spans still emit, but checkout uses a
-          backend origin outside the propagation allowlist.
-        </p>
+        <aside aria-label="Intentional propagation-break test" role="note">
+          <h2>Intentional propagation-break test</h2>
+          <p>
+            Propagation break mode: browser spans still emit, but checkout uses a
+            backend origin outside the propagation allowlist.
+          </p>
+        </aside>
       ) : null}
       <form
         onSubmit={(event) => {
@@ -114,10 +134,12 @@ function CheckoutPage() {
           submit checkout
         </button>
       </form>
-      <pre>{status}</pre>
+      <div aria-atomic="true" aria-live="polite" role="status">
+        {status.message}
+      </div>
       <p>
         <Link to="/checkout" search={{ nopropagate: "1" }}>
-          open propagation-break variant
+          open intentional propagation-break test
         </Link>
       </p>
     </main>
