@@ -7,8 +7,10 @@ A maximum-fidelity **OpenTelemetry + Sentry** polyglot sample app — the
 comparison *payload* for the [Parallax](https://github.com/tailrocks/parallax)
 OTLP fan-out lab. Distinct services in **Rust** and **Java** cross-communicating,
 with a **TanStack Start** frontend and a **Rust CLI** driver, instrumented to
-exercise every signal so each backend (Parallax, Maple, SigNoz, OpenObserve,
-Sentry) can be compared on identical data.
+exercise a common workload and stimulus for each backend (Parallax, Maple,
+SigNoz, OpenObserve, Sentry). The workload is the same, but signal and
+protocol coverage differs by backend—especially Sentry's metrics coverage—so
+the comparison is not of identical data in every backend.
 
 Full design: the Parallax repo's
 `docs/research/validation/telemetry-playground-sample-project.md`.
