@@ -135,7 +135,10 @@ SigNoz omitted (Foundry-only compose).
 
 ```bash
 # Demo against Parallax (primary)
-# 1. In the Parallax repo:
+# 1. In the Parallax repo, resolve the latest preview (never stable):
+brew update
+brew upgrade parallax@preview
+parallax --version   # must contain "preview"
 parallax serve
 
 # 2. In this repo:

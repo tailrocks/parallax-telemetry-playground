@@ -149,7 +149,7 @@ an upstream link.
 
 - **FAIL** `parallax-mcp check` CLI≢GraphQL bundle JSON — W5 DISCREPANCY (product). Restamped 2026-08-14T15:23Z this serve.
 - **FAIL** clock-skew banner absent on same-service `?skew=1` — W5 DISCREPANCY. Restamped 2026-08-14T15:43Z.
-- **PASS, fresh agent-browser verification (2026-08-25)** Metrics workbench `/metrics/catalog.product.queries` links to the associated exemplar trace, and default `/ecosystem` (24h) renders its service map. This supersedes only the two earlier display observations; it does not close the remaining gaps below.
+- **PASS, fresh agent-browser verification (2026-08-25)** Metrics workbench `/metrics/catalog.product.queries` links to the associated exemplar trace, default `/ecosystem` (24h) renders its service map, and a clean compose restart brought all demo services up. Normal checkout and the intentional propagation-break checkout both returned visible accessible success status. This supersedes only the two earlier display observations; it does not close the remaining gaps below.
 - **HISTORICAL / REQUIRES REVALIDATION** `/invocations` `observedInvocations` without `limit` was INTERNAL; `limit:3` OK. W5 DISCREPANCY observed 2026-08-15T01:40Z. Current UI uses `observedInvocations(limit:50)`; retain this gap until revalidated.
 - Issues list virtualize miss of `c8-rust-sdk` string is harness-only; issue detail pages PASS.
 - Tests explorer seeded this session via `parallax invocation start -- scripts/observable-test-session.sh rust --acceptance`.
