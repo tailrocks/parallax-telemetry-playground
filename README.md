@@ -3,8 +3,9 @@
 > This repository is a telemetry-producing workload and verification harness,
 > not an observability backend or console.
 
-A maximum-fidelity **OpenTelemetry + Sentry** polyglot sample app — the
-comparison *payload* for the [Parallax](https://github.com/tailrocks/parallax)
+A **polyglot OpenTelemetry + Sentry sample workload**, with claims bounded by
+the checked-in evidence — the comparison *payload* for the
+[Parallax](https://github.com/tailrocks/parallax)
 OTLP fan-out lab. Distinct services in **Rust** and **Java** cross-communicating,
 with a **TanStack Start** frontend and a **Rust CLI** driver, instrumented to
 exercise a common workload and stimulus for each backend (Parallax, Maple,
