@@ -64,8 +64,8 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 - Concept: a counter point carries `trace_id`.
 - Scenario: `scenarios/run.sh a2` (catalog traffic from a6 also seeds them)
 - See: GraphQL `metricExemplars` → `9a3941a829b19628`. Shot:
-  `metrics-teach-exemplars-1440-dark.png`. Workbench chart has **no**
-  clickable trace id (W5 DISCREPANCY).
+  `metrics-teach-exemplars-1440-dark.png`. Fresh agent-browser verification
+  confirms the workbench exemplar link opens the associated trace.
 - Why: a histogram bucket without a joinable trace is another eyeball hunt.
 
 ## 7. Errors that group — dual OTLP + Sentry
@@ -88,8 +88,7 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 - Scenario: that wrapper, then Tests explorer.
 - See: `w4_assertion_failure_passes_on_retry` rollup `FLAKY_PASS`. Shot:
   `tests-teach-flaky-1440-dark.png`.
-- Why: test-flakiness blindness is a differentiator none of the researched
-  competitors have.
+- Why: test-flakiness blindness is not demonstrated in this comparison.
 
 ## 9. Logs: correlated, spiked, orphan
 
@@ -158,9 +157,10 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 - Concept: every coverage-matrix Parallax surface, desktop + phone, light +
   dark where rendering differs.
 - Scenario: `scenarios/run.sh c11` plus `artifacts/ui/`.
-- See: Overview not blank; 21-route walk in `agent-browser.log`. Dated W5
-  display FAILs stay DISCREPANCY (MCP `check`, same-service clock-skew
-  banner, exemplar `hasTraceLink=false`).
+- See: Overview not blank; 21-route walk in `agent-browser.log`. Fresh
+  agent-browser verification confirms metric exemplar links and the default
+  `/ecosystem` graph. Remaining known display discrepancies are MCP `check`
+  and the same-service clock-skew banner.
 - Why: a green ingest API with a blank UI is how the local-dev gap returns.
 
 SigNoz is residue only (plan 162). Maple / OpenObserve / Sentry dispositions

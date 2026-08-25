@@ -93,7 +93,8 @@ at least one application descendant below a test span.
   issue (`message:"payment failure (chaos)", logger:"checkout"`, A15/A16 emit)
   **and** a `type:"transaction"` performance envelope
   (`transaction:"checkout", release:"0.1.0", environment:"playground", sdk:
-  sentry.rust 0.48.2`). So the playground's Sentry path — errors → issues, spans
+  sentry.rust 0.48.2`; historical dependency snapshot from that run). So the
+  playground's Sentry path — errors → issues, spans
   → transactions, correct release/env metadata — emits correctly. Issue
   *grouping/lifecycle rendering* (A15/A16) and the *flamegraph view* (A17) are
   Sentry-server product behavior, viewed in a live Sentry UI (the deferred
