@@ -24,7 +24,8 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 - Concept: W3C `traceparent` stitches SERVER/CLIENT/INTERNAL across languages.
 - Scenario: `scenarios/run.sh a1`
 - See: an **18-span** checkout waterfall, not a 1-span health scheduler.
-  Live teaching id `8cf58d291fb795ef02fb67acff2a3431`. Shot:
+  The ID in the captured shot is historical; rerun the scenario and select the
+  current checkout trace before presenting. Shot:
   `artifacts/ui/traces-teach-waterfall-1440-dark.png`.
 - Why: fragmented pillars hide the hop that actually failed.
 
@@ -63,7 +64,8 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 - Technology: catalog JVM `trace_based` exemplars.
 - Concept: a counter point carries `trace_id`.
 - Scenario: `scenarios/run.sh a2` (catalog traffic from a6 also seeds them)
-- See: GraphQL `metricExemplars` → `9a3941a829b19628`. Shot:
+- See: GraphQL `metricExemplars` → a current trace ID from the workbench. The
+  ID in the captured shot is historical. Shot:
   `metrics-teach-exemplars-1440-dark.png`. Fresh agent-browser verification
   confirms the workbench exemplar link opens the associated trace.
 - Why: a histogram bucket without a joinable trace is another eyeball hunt.
@@ -77,7 +79,9 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 - See: Issues `error: c8-rust-sdk PaymentError`,
   `IllegalStateException: c8-java-sdk PaymentError`,
   `Error: c8-js-sdk PaymentError`. Sentry Groups: `plat=native`, `plat=java`,
-  `plat=node`. Handled 502 vs unhandled panic is a31.
+  `plat=node`. These are historical envelope/group observations; current Sentry
+  UI grouping and flamegraph behavior remain unverified. Handled 502 vs
+  unhandled panic is a31.
 - Why: grouping opacity is a named corpus pain; Sentry is the grouping
   authority for the cross-language PaymentError probe.
 
@@ -102,9 +106,11 @@ Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 ## 10. Alerts that can be proven, including Slack dest
 
 - Technology: error_rate rule + webhook + `slack_webhook`.
-- Concept: rule → open incident.
+- Concept: rule and destination setup; incident opening requires current-preview
+  revalidation.
 - Scenario: `scenarios/run.sh c4`
-- See: Alerts incident + dest kinds. Shot: `alerts-teach-incident-1440-dark.png`.
+- See: alert rule + destination kinds. The incident shot is historical; rerun
+  sustained breach traffic before presenting incident lifecycle as current.
 - Why: alert fatigue is #1 in two Grafana surveys.
 
 ## 11. Deploy adjacency and isolated prune
