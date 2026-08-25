@@ -1,5 +1,8 @@
 # Parallax Telemetry Playground
 
+> This repository is a telemetry-producing workload and verification harness,
+> not an observability backend or console.
+
 A maximum-fidelity **OpenTelemetry + Sentry** polyglot sample app — the
 comparison *payload* for the [Parallax](https://github.com/tailrocks/parallax)
 OTLP fan-out lab. Distinct services in **Rust** and **Java** cross-communicating,
