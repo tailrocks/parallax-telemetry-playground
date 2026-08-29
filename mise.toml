@@ -12,8 +12,13 @@ java = "oracle-graalvm-25.0.4"
 [settings]
 lockfile = true
 
-[tasks.ci]
-run = "cargo check --locked --workspace --all-targets --all-features"
+[tasks.install]
+description = "Provision every pinned tool from mise.lock"
+run = "mise install --locked"
+
+[tasks.build]
+description = "Compile every workspace target with a real codegen build"
+run = "cargo build --locked --workspace --all-targets --all-features"
 
 [tasks.test]
 run = "cargo nextest run --locked --workspace --profile ci --no-tests=fail"
@@ -23,3 +28,7 @@ run = "cargo clippy --locked --workspace --all-targets --all-features -- -D warn
 
 [tasks.fmt]
 run = "cargo fmt --all -- --check"
+
+[tasks.ci]
+description = "Human aggregate: every gate the CI lane runs"
+depends = ["install", "build", "test", "lint", "fmt"]
