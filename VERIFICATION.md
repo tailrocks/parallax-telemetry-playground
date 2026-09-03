@@ -13,13 +13,13 @@ with a short flush) that this sandbox cannot provision.
 
 ## Current live run (2026-09-04)
 
-This run used playground `5f37ea32e1d68d1cb0a0df79c9e48e12a51bfd06` and Parallax
-`6b3a92bc32178e6f651e06f54009b3a9646d1954`. Fresh Compose boot passed after
+This run used playground `bc3d771a386a99387fab6989ac98992d978965cc` and Parallax
+`3c4b68d3acf8fb435102ae2beb8f184bf40b617c`. Fresh Compose boot passed after
 catalog was changed to wait for healthy Postgres. A1, A2, B2, A3, A8, A25, A26,
 A30, and c1–c11 passed against the current Parallax server. c3 was re-run with
 the SSE receiver open before the event and returned `294` bytes. c7 passed
 Claude import plus MCP projection equivalence. Current competitor evidence is
-in the [dated Parallax report](https://github.com/tailrocks/parallax/blob/6b3a92bc32178e6f651e06f54009b3a9646d1954/docs/research/validation/2026-09-04-parallax-main-competitor-verification.md).
+in the [dated Parallax report](https://github.com/tailrocks/parallax/blob/92c78b0387b65acde5ff18c21ce9e93b25a39280/docs/research/validation/2026-09-04-parallax-main-competitor-verification.md).
 
 The detailed rows below retain their original dates and are historical unless
 the row is explicitly restamped.
