@@ -9,6 +9,9 @@ exists), and why it matters (pain corpus:
 Spine: [`docs/coverage-matrix.md`](docs/coverage-matrix.md). Machine asserts:
 `scenarios/run.sh c1` … `c11`. Display shots live in `artifacts/ui/`.
 
+Current live restamp: 2026-09-04, playground `5f37ea32e1d68d1cb0a0df79c9e48e12a51bfd06`;
+current backend evidence is in the [canonical Parallax report](https://github.com/tailrocks/parallax/blob/6b3a92bc32178e6f651e06f54009b3a9646d1954/docs/research/validation/2026-09-04-parallax-main-competitor-verification.md).
+
 ## 1. Whole-system ingest
 
 - Technology: Rotel fan-out + Rust axum/tonic, Java Spring, TanStack web.

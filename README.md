@@ -46,7 +46,7 @@ All services export OTLP to a host listener on `4317`/`4318`: local
 via SDK/envelope paths. One distributed trace stitches browser -> Rust -> Java
 -> broker -> Java -> Rust via W3C trace context.
 
-Infra images in `deploy/docker-compose.yml` are pinned 2026-08-14 (plan 162):
+Infra images in `deploy/docker-compose.yml` are pinned 2026-09-04:
 `postgres:18`, `redpandadata/redpanda:v26.2.1`, `ghcr.io/open-feature/flagd:v0.16.1`,
 `grafana/k6:2.2.0`. Existing `postgres` volumes must be dropped
 (`docker compose down -v`) when moving 17→18; schema is created fresh on `up`.
@@ -69,6 +69,18 @@ Infra images in `deploy/docker-compose.yml` are pinned 2026-08-14 (plan 162):
 | `services/fulfillment` | Java Spring (Kafka) | ✅ **real Kafka producer + consumer** round-trip + reverse Java→Rust hop — consumer handoff and JUnit tests pass locally |
 | `web` | TanStack Start / TS | ✅ real TanStack Start app (file routing + Nitro): same-origin `/v1/traces` OTLP proxy, SSR `<meta traceparent>`, OTel browser + Sentry RUM — **builds + type-checks** (`bun run build`) |
 | `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd, k6, scenarios, compose (all services incl. Java + web; `Dockerfile.java`/`Dockerfile.web`) |
+
+## Current live verification (2026-09-04)
+
+Source: `5f37ea32e1d68d1cb0a0df79c9e48e12a51bfd06`, compared against Parallax
+`6b3a92bc32178e6f651e06f54009b3a9646d1954`. Fresh Compose boot passed after
+catalog was gated on healthy Postgres; `/actuator/health` reached `UP`. A1, A2,
+B2, A3, A8, A25, A26, A30, and c1–c11 passed against the current Parallax
+server. c3 required opening the SSE receiver before stimulus; the warm rerun
+returned `294` bytes. c7 proved Claude import plus MCP projection equivalence.
+
+Current backend matrix, exact pins, digests, blockers, and screenshots are in
+the [canonical Parallax report](https://github.com/tailrocks/parallax/blob/6b3a92bc32178e6f651e06f54009b3a9646d1954/docs/research/validation/2026-09-04-parallax-main-competitor-verification.md).
 
 ## Test-telemetry conventions
 
@@ -102,7 +114,7 @@ run-session parent, complete identity/configuration/retry/failure payload,
 assertion and harness failures, version/revision resources, and application
 spans descended from a test span.
 
-**Verified locally (2026-08-14, teaching restamp 21:59Z):** lockstep SDKs = OTel Rust 0.32 +
+**Historical verification (2026-08-14, teaching restamp 21:59Z):** lockstep SDKs = OTel Rust 0.32 +
 `tracing-opentelemetry` 0.33 + Sentry Rust 0.49.1 (`sentry-opentelemetry`
 adopted for shared `trace_id`); Java agent **2.30.0** + Sentry Spring
 **8.53.0** + Boot 4.1.0; OTel JS **2.10 / 0.221** +

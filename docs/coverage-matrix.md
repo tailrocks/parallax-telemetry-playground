@@ -11,8 +11,12 @@ an upstream link.
 - Status vocabulary: `PASS` / `FAIL` (dated live run), `DISPOSITION`
   (cannot emit or product gap; upstream/inventory cited). `MAPPED` is not
   a terminal cell.
-- Date: 2026-08-14 live restamp (named-concept GraphQL/SQL after a2
+- Date: 2026-08-14 historical live restamp (named-concept GraphQL/SQL after a2
   `:8080` fix, FLAGD_HOST on orders, Boot 4.1 payment `channel.target`).
+- Current product-surface restamp: 2026-09-04. See the
+  [canonical Parallax report](https://github.com/tailrocks/parallax/blob/6b3a92bc32178e6f651e06f54009b3a9646d1954/docs/research/validation/2026-09-04-parallax-main-competitor-verification.md)
+  for the current c1–c11 evidence IDs and backend matrix. Existing rows retain
+  their original dates unless explicitly restamped.
 
 ## Completeness — traces
 
