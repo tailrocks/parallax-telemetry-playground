@@ -7,7 +7,9 @@
     "dev": "bunx --bun --no-install vite dev",
     "build": "bunx --bun --no-install vite build && bun run typecheck",
     "test": "bunx --bun --no-install vitest run",
-    "e2e": "bunx --bun --no-install playwright test",
+    "e2e": "bun run e2e:compose",
+    "e2e:mock": "PLAYGROUND_MOCK_E2E=1 bunx --bun --no-install playwright test e2e/journey.spec.ts",
+    "e2e:compose": "PLAYGROUND_COMPOSE_E2E=1 bunx --bun --no-install playwright test e2e/compose.smoke.spec.ts",
     "preview": "bunx --bun --no-install vite preview",
     "typecheck": "bunx --bun --no-install tsc --noEmit",
     "start": "bun server.ts"
@@ -25,6 +27,7 @@
     "@opentelemetry/instrumentation-user-interaction": "^0.65.0",
     "@opentelemetry/resources": "^2.10.0",
     "@opentelemetry/sdk-logs": "0.221.0",
+    "@opentelemetry/sdk-trace-node": "2.10.0",
     "@opentelemetry/sdk-trace-web": "^2.10.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "@sentry/tanstackstart-react": "^10.70.0",

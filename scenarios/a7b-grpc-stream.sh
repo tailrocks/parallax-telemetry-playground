@@ -6,14 +6,22 @@ BASE="${CHECKOUT_URL:-http://localhost:8088}"
 request() {
   local label="$1"
   local query="$2"
+  local expected="$3"
   local body
-  body="$(curl --max-time 15 -sS "$BASE/quote-stream$query")"
-  printf "%-18s %s\n" "$label" "$body"
+  local code
+  body="$(mktemp "${TMPDIR:-/tmp}/a7b.XXXXXX")"
+  code="$(curl --max-time 15 -sS "$BASE/quote-stream$query" -o "$body" -w "%{http_code}" || true)"
+  printf "%-18s http %s: %s\n" "$label" "$code" "$(<"$body")"
+  rm -f "$body"
+  [[ "$code" == "$expected" ]] || {
+    echo "$label: expected HTTP $expected, got $code" >&2
+    return 1
+  }
 }
 
 echo "A7b gRPC stream events"
-request "clean stream" "?sku=WIDGET-1&quantity=6"
-request "fail at 4" "?sku=WIDGET-1&quantity=6&fail_at=4"
-request "cancel at 180ms" "?sku=WIDGET-1&quantity=10&cancel_ms=180"
+request "clean stream" "?tenant_id=tenant-acme&customer_id=customer-acme-ava&sku=WIDGET-1&quantity=1" 200
+request "unknown product" "?tenant_id=tenant-acme&customer_id=customer-acme-ava&sku=NO-SUCH-SKU&quantity=1" 404
+request "client cancellation" "?tenant_id=tenant-acme&customer_id=customer-acme-ava&sku=WIDGET-1&quantity=1&delay_ms=1" 200
 
-echo "Check in Parallax: pricing stream span has SENT events, checkout span has RECEIVED events; fail_at run records stream_failed; cancel run records server-side cancellation."
+echo "Check in Parallax: pricing stream span has SENT/RECEIVED events; unknown-product run records the current pricing rejection; delay_ms exercises the current client-cancellation path."

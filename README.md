@@ -1,198 +1,188 @@
 # Parallax Telemetry Playground
 
-> This repository is a telemetry-producing workload and verification harness,
-> not an observability backend or console.
-
-A **polyglot OpenTelemetry + Sentry sample workload**, with claims bounded by
-the checked-in evidence — the comparison *payload* for the
-[Parallax](https://github.com/tailrocks/parallax)
-OTLP fan-out lab. Distinct services in **Rust** and **Java** cross-communicating,
-with a **TanStack Start** frontend and a **Rust CLI** driver, instrumented to
-exercise a common workload and stimulus for each backend (Parallax, Maple,
-SigNoz, OpenObserve, Sentry). The workload is the same, but signal and
-protocol coverage differs by backend—especially Sentry's metrics coverage—so
-the comparison is not of identical data in every backend.
-
-Full design: the Parallax repo's
-`docs/research/validation/telemetry-playground-sample-project.md`.
-Guided Parallax demo: [`TOUR.md`](TOUR.md). Coverage spine:
-[`docs/coverage-matrix.md`](docs/coverage-matrix.md). Display shots:
-`artifacts/ui/`.
-Apache-2.0 · Tailrocks.
-
-## TypeScript policy
-
-All tracked web, server, configuration, and k6 load-generator source uses
-ordinary `.ts`/`.tsx`. Tracked `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts`, and
-`.cts` source/configuration is forbidden. The single web compiler project
-checks the application, Bun production server, and both k6 programs with
-`strict: true`, `allowJs: false`, `checkJs: false`, and the repository's
-additional strict flags; `scripts/check-typescript-policy.sh` fails closed on
-file or configuration drift.
+Polyglot commerce workload for exercising OpenTelemetry traces, logs, metrics,
+Sentry envelopes, and browser RUM through one real business flow. Research
+software; breaking changes are expected.
 
 ## Architecture
 
-```
-web (TanStack/TS) ─HTTP─► checkout (Rust axum) ─gRPC─► pricing (Rust tonic)
-                                  │                ├─gRPC─► payment   (Java Spring gRPC)
-                                  │                ├─GraphQL─► catalog (Java Spring GraphQL)
-                                  │                ├─HTTP─► inventory / recommendation (Rust)
-                                  │                └─publish─► broker ─► fulfillment (Java) ─HTTP─► notifications (Rust)
-cli (Rust) ─HTTP─► checkout            flagd (OpenFeature)   loadgen (k6, demo profile)   Postgres (catalog + inventory)
-```
+```text
+TanStack web
+    │ HTTP / GraphQL
+    ▼
+Rust storefront ── GraphQL ──► Java catalog ── JDBC ──► PostgreSQL
+    │             └─ Pricing gRPC ──► Rust pricing ── Postgres + Redis
+    │             └─ checkout HTTP ──► Rust checkout
+    ▼
+Rust checkout ── Payment gRPC ──► Java payment ── JDBC ──► PostgreSQL
+       ├─ Inventory HTTP ──► Rust inventory ── PostgreSQL row locks
+       ├─ Recommendation HTTP ──► Rust recommendation ── Catalog GraphQL
+       └─ transactional outbox ──► RabbitMQ ──► Java fulfillment
+                                             ├─ PostgreSQL shipment/idempotency state
+                                             ├─ ClickHouse analytics
+                                             └─ Rust notifications
 
-All services export OTLP to a host listener on `4317`/`4318`: local
-`parallax serve` or the fan-out lab's **Rotel**. They also export to Sentry
-via SDK/envelope paths. One distributed trace stitches browser -> Rust -> Java
--> broker -> Java -> Rust via W3C trace context.
-
-Infra images in `deploy/docker-compose.yml` are pinned 2026-09-04:
-`postgres:18`, `redpandadata/redpanda:v26.2.1`, `ghcr.io/open-feature/flagd:v0.16.1`,
-`grafana/k6:2.2.0`. Existing `postgres` volumes must be dropped
-(`docker compose down -v`) when moving 17→18; schema is created fresh on `up`.
-
-## Status
-
-| Component | Lang | State |
-|---|---|---|
-| `libs/playground-telemetry` | Rust | ✅ OTel traces + tracing + Sentry init — **builds** |
-| `proto` | Rust | ✅ pricing gRPC contract — **builds** |
-| `services/checkout` | Rust axum | ✅ HTTP→gRPC orchestrator — **builds + runs** (verified) |
-| `services/pricing` | Rust tonic | ✅ gRPC server — **builds + runs** (verified) |
-| `services/inventory` `recommendation` | Rust | ✅ HTTP services in the checkout trace — **build + run** (verified) |
-| `services/orders` | Rust | ✅ async branch: producer/consumer spans + **span link** — **builds + runs** (verified) |
-| `services/storefront` | Rust Juniper / Axum | ✅ GraphQL→catalog and GraphQL→gRPC gateway with WebSocket subscriptions — **builds** |
-| `services/notifications` | Rust | ✅ reverse-hop target — **builds** |
-| `cli` | Rust | ✅ run driver — **builds** |
-| `services/catalog` | Java Spring GraphQL | ✅ **A6 DataLoader** (`@BatchMapping`) + **A14 OpenFeature/flagd** flag eval + Postgres/JDBC path — GraphQL slice and JUnit tests pass locally |
-| `services/payment` | Java Spring **gRPC** | ✅ real Spring gRPC server from the shared proto — Rust→Java gRPC verified; in-process transport and JUnit tests pass locally |
-| `services/fulfillment` | Java Spring (Kafka) | ✅ **real Kafka producer + consumer** round-trip + reverse Java→Rust hop — consumer handoff and JUnit tests pass locally |
-| `web` | TanStack Start / TS | ✅ real TanStack Start app (file routing + Nitro): same-origin `/v1/traces` OTLP proxy, SSR `<meta traceparent>`, OTel browser + Sentry RUM — **builds + type-checks** (`bun run build`) |
-| `flags` `loadgen` `scenarios` `deploy` | — | ✅ flagd, k6, scenarios, compose (all services incl. Java + web; `Dockerfile.java`/`Dockerfile.web`) |
-
-## Current live verification (2026-09-04)
-
-Source: `bc3d771a386a99387fab6989ac98992d978965cc`, compared against Parallax
-`3c4b68d3acf8fb435102ae2beb8f184bf40b617c`. Fresh Compose boot passed after
-catalog was gated on healthy Postgres; `/actuator/health` reached `UP`. A1, A2,
-B2, A3, A8, A25, A26, A30, and c1–c11 passed against the current Parallax
-server. c3 required opening the SSE receiver before stimulus; the warm rerun
-returned `294` bytes. c7 proved Claude import plus MCP projection equivalence.
-
-Current backend matrix, exact pins, digests, blockers, and screenshots are in
-the [canonical Parallax report](https://github.com/tailrocks/parallax/blob/92c78b0387b65acde5ff18c21ce9e93b25a39280/docs/research/validation/2026-09-04-parallax-main-competitor-verification.md).
-
-## Test-telemetry conventions
-
-The checked-in generated semantic-convention files are the sole source for test
-run telemetry across the playground. Do not hand-copy these wire names:
-
-| Stack | Generated source |
-|---|---|
-| Rust | `libs/playground-telemetry/src/semconv.rs` |
-| Java | `services/semconv/src/main/java/io/tailrocks/semconv/Semconv.java` |
-| Web | `web/src/semconv.ts` |
-
-The shared test payload uses `test.case.name`, `test.case.result.status`,
-`test.suite.name`, `test.suite.run.status`, `cicd.pipeline.run.id`,
-`cicd.pipeline.task.type`, and `parallax.test.id` when an explicit stable test
-identity is available. Regenerate them only from Parallax with
-`cargo xtask semconv --playground-root ../parallax-telemetry-playground generate`.
-
-The acceptance run is executable and machine-checked against Parallax rather
-than accepted from screenshots:
-
-```bash
-parallax invocation start -- scripts/observable-test-session.sh web --acceptance
-mise exec -- cargo run --locked -p playground-cli -- \
-  test-verify <run-id-printed-above> web
+flagd/OpenFeature controls bounded explicit variants and chaos cases.
+Rust CLI and k6 loadgen are additional real clients.
 ```
 
-Use `rust`, `java`, or `web` consistently in both commands. The verifier polls
-the GraphQL API for the finished run and fails unless it finds the exported
-run-session parent, complete identity/configuration/retry/failure payload,
-assertion and harness failures, version/revision resources, and application
-spans descended from a test span.
-
-**Historical verification (2026-08-14, teaching restamp 21:59Z):** lockstep SDKs = OTel Rust 0.32 +
-`tracing-opentelemetry` 0.33 + Sentry Rust 0.49.1 (`sentry-opentelemetry`
-adopted for shared `trace_id`); Java agent **2.30.0** + Sentry Spring
-**8.53.0** + Boot 4.1.0; OTel JS **2.10 / 0.221** +
-`@sentry/tanstackstart-react` 10.70. Fan-out = Rotel `v0.2.5` → OpenObserve
-`v0.92.0`, Maple `v0.0.18`, Sentry self-hosted `26.7.2`, host Parallax.
-SigNoz omitted (Foundry-only compose).
-- Rust workspace: `mise exec -- cargo clippy -D warnings` + nextest **90/90**.
-- **OTLP 4-sink live** after `a1` + `b2` + `a6`: OpenObserve
-  `checkout=90, catalog=130, payment=76, inventory=19, recommendation=23,
-  pricing=5`; Maple `services` API lists the same six names; Parallax
-  GraphQL traces include checkout/catalog/payment/inventory and issues
-  include Java `IllegalStateException` (GADGET-1) plus Rust inventory chaos.
-- `/checkout` still orchestrates pricing (gRPC) + inventory + recommendation
-  (HTTP) — `total_minor=3998` at quantity=2.
-- **Java agent → Rotel gRPC retested PASS** at agent 2.30.0 / Rotel v0.2.5
-  (catalog OO count 56→96 after flipping catalog to `grpc` `:4317` + `a6`).
-  Compose now defaults Java to gRPC; HTTP/protobuf `:4318` is the fallback.
-- **Historical Sentry probe** (re-dated 2026-08-14T14:35Z): `verify.sh` A1
-  OTLP 200; A15/A16 `PaymentError` `times_seen=10`. Real SDK envelopes landed
-  on **both** Parallax `/api/1/envelope/` and Sentry Groups: rust `plat=native
-  c8-rust-sdk`, java `plat=java c8-java-sdk`, js `plat=node
-  Error: c8-js-sdk PaymentError` (`c8 ok rust+java+js`). This is historical
-  emission/group evidence, not current-preview Sentry UI or flamegraph
-  verification. JS 10.70 first POST is `type=session` (Parallax 415); the
-  second POST is `type=event`. Compose DSN must stay `host.docker.internal:9000`.
-- Java services: upstream OTel agent (never `sentry-opentelemetry-agent`) +
-  Spring Sentry starter. Web: `bun run build` + vitest 9/9.
+Normal product data, prices, inventory, customers, orders, payments, and
+shipments are seeded by the versioned PostgreSQL migrations in
+[`deploy/postgres/migrations/`](deploy/postgres/migrations/), starting with
+  [`001-commerce.sql`](deploy/postgres/migrations/001-commerce.sql), plus
+  additive durable checkout and compensation migrations.
+[`deploy/postgres/migrate.sh`](deploy/postgres/migrate.sh) applies each
+migration once, verifies the required schema, and records it in
+`public.schema_migrations` before database clients start.
+ClickHouse tables are initialized by [`deploy/clickhouse/init.sql`](deploy/clickhouse/init.sql).
+Redis is a catalog/pricing cache, not a source of truth. RabbitMQ is durable;
+publisher confirms, manual acknowledgements, retries, dead-letter queues,
+W3C `traceparent`/`tracestate`/`baggage`, and consumer idempotency are part of
+the application path.
 
 ## Run
 
-```bash
-# Demo against Parallax (primary)
-# 1. In the Parallax repo, resolve the latest preview (never stable):
-brew update
-brew upgrade parallax@preview
-parallax --version   # must contain "preview"
-parallax serve
-
-# 2. In this repo:
-./demo.sh
-
-# 3. Drive one story and open http://localhost:4000:
-scenarios/run.sh a1
-
-# Fan-out lab comparison (kept working)
-# 1. Start the lab (parallax repo: bench/otlp-fanout) so Rotel is on :4317
-# 2. docker compose -f deploy/docker-compose.yml up --build
-# 3. scenarios/a1-checkout.sh
-```
-
-CLI scenarios need the Rust binary first:
+Start the telemetry receiver first (`parallax serve`, or another OTLP listener
+on host ports 4317/4318), then boot the complete stack:
 
 ```bash
-cargo build
-./target/debug/playground
-./target/debug/playground cron
-# Convert cargo-nextest's JUnit XML into run-parented test telemetry.
-./target/debug/playground test-report target/nextest/ci/junit.xml
+docker compose -f deploy/docker-compose.yml up --build
 ```
 
-Generate that durable report locally with the same profile used by the test
-telemetry bridge:
+Compose gates services that depend on the PostgreSQL migration job. The
+verification runner waits for ClickHouse initialization before asserting
+analytics state; a plain `up` is not itself an analytics-readiness proof.
+
+Useful surfaces:
+
+- Web: <http://localhost:5173>
+- Storefront GraphQL/GraphiQL: <http://localhost:8094/graphiql>
+- Catalog GraphQL: <http://localhost:8080/graphiql>
+- Checkout: <http://localhost:8088>
+- Inventory: <http://localhost:8089>
+- Recommendation: <http://localhost:8090>
+- Orders synthetic RabbitMQ publisher: <http://localhost:8092/order>
+- Fulfillment authenticated seeded-order replay: <http://localhost:8093/publish>
+- RabbitMQ management: <http://localhost:15672>
+- ClickHouse HTTP: <http://localhost:8123>
+
+`/order` is an isolated synthetic orders-service publisher on the private
+`orders.synthetic` exchange. It does not prove checkout outbox delivery. The
+real async proof submits `/checkout`, then verifies the returned order through
+fulfillment with `Authorization: Bearer $FULFILLMENT_INTERNAL_TOKEN` and
+`X-Tenant-Id`.
+
+Run a real checkout:
 
 ```bash
-cargo nextest run --workspace --profile ci --no-tests=fail
-./target/debug/playground test-report target/nextest/ci/junit.xml
+curl --fail-with-body -X POST http://localhost:8088/checkout \
+  -H 'content-type: application/json' \
+  --data '{"tenant_id":"tenant-acme","customer_id":"customer-acme-ava","items":[{"sku":"WIDGET-1","quantity":1}],"currency_code":"USD","payment_method_token":"tok_visa","payment_method_type":"card","request_id":"readme-1"}'
 ```
 
-## Roadmap
+For clean-volume bootstrap, use an isolated Compose project that has not been
+used before. The second runner invocation proves the named-volume path without
+resetting or deleting the volume:
 
-Java (catalog/payment/fulfillment) + web wiring, then the async/broker, chaos
-(flagd), deploy-regression, and canary-redaction scenarios — per the design doc's
-phasing. Comparison is manual (open each backend's UI); a scored harness is out
-of scope for now.
+```bash
+project=telemetry-playground-clean-$(date +%s)
+docker compose -p "$project" -f deploy/docker-compose.yml \
+  up -d postgres postgres-migrate redis rabbitmq clickhouse clickhouse-init
+docker compose -p "$project" -f deploy/docker-compose.yml exec -T postgres \
+  psql -U postgres -d playground -Atqc \
+  "SELECT version, count(*) FROM public.schema_migrations GROUP BY version;"
+before="$(docker compose -p "$project" -f deploy/docker-compose.yml exec -T postgres \
+  psql -U postgres -d playground -Atqc \
+  "SELECT string_agg(version || '=' || applied_at::text, ',' ORDER BY version) FROM public.schema_migrations;")"
+docker compose -p "$project" -f deploy/docker-compose.yml run --rm postgres-migrate
+after="$(docker compose -p "$project" -f deploy/docker-compose.yml exec -T postgres \
+  psql -U postgres -d playground -Atqc \
+  "SELECT string_agg(version || '=' || applied_at::text, ',' ORDER BY version) FROM public.schema_migrations;")"
+test "$before" = "$after"
+docker compose -p "$project" -f deploy/docker-compose.yml down
+```
 
-## Corner-case corpus
+## Verification
 
-`docs/corner-case-matrix.md` maps every UI rendering risk to a stable
-scenario id (`scenarios/run.sh <id>`); run the whole corpus with
-`scenarios/corner-cases.sh --all-corner-cases`. Synthetic shapes export as
-`service.name=playground-shapes`; journey cases ride `playground console`.
+Rust gates:
+
+```bash
+rtk cargo fmt --all -- --check
+rtk cargo check --workspace --all-targets --locked
+rtk cargo test --workspace --all-targets --locked
+```
+
+Java gates:
+
+```bash
+(cd services/catalog && rtk proxy ./gradlew --no-daemon clean test)
+(cd services/payment && rtk proxy ./gradlew --no-daemon clean test)
+(cd services/fulfillment && rtk proxy ./gradlew --no-daemon clean test)
+```
+
+Web gates:
+
+```bash
+(cd web && rtk bun run build)
+(cd web && rtk bun run test)
+```
+
+Then run `rtk git diff --check` and
+`rtk proxy docker compose -f deploy/docker-compose.yml config --quiet`.
+
+For the current verification contract, see [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
+
+For an automated Parallax topology assertion over one real checkout:
+
+```bash
+parallax invocation start -- scripts/verify-commerce-trace.sh
+```
+
+It checks the collected service, RabbitMQ, and analytics evidence through
+`playground commerce-verify`. Inspect trace parent/link fields separately when
+causal topology is required; service and queue co-presence is not proof of a
+causal span edge.
+
+## Journeys and scenarios
+
+```bash
+./scenarios/run.sh a1                 # checkout saga
+./scenarios/run.sh a6                 # GraphQL batch/N+1/partial error
+./scenarios/run.sh a7                 # Postgres NOTIFY price subscription
+./scenarios/run.sh a7b                # pricing stream/failure/cancel
+./scenarios/run.sh a23                # storefront → pricing gRPC
+./scenarios/run.sh a24                # storefront → catalog GraphQL
+./scenarios/run.sh a25                # Postgres slow/N+1/pool pressure
+./scenarios/run.sh a26                # Catalog-backed recommendation
+./scenarios/run.sh a14                # live checkoutFlow variant flip
+./scenarios/run.sh a3                 # checkout → transactional outbox → fulfillment
+./scenarios/run.sh a4                 # authenticated seeded-order replay → RabbitMQ → Rust
+./scenarios/run.sh b-chaos            # provider decline and delay
+./scenarios/run.sh b2                 # inventory failure
+./scenarios/run.sh c11                # browser smoke, when the Parallax CLI is available
+```
+
+`./scenarios/run.sh` prints the complete catalog. The corner-case corpus is
+documented in [`docs/corner-case-matrix.md`](docs/corner-case-matrix.md).
+Ambient k6 traffic uses the optional Compose `demo` profile:
+
+```bash
+docker compose -f deploy/docker-compose.yml --profile demo up loadgen
+```
+
+## Contracts
+
+- [`proto/pricing.proto`](proto/pricing.proto): versioned itemized quote and
+  server stream.
+- [`proto/payment.proto`](proto/payment.proto): separate authorize, capture,
+  void, refund, and status lifecycle.
+- Catalog GraphQL schema: [`services/catalog/src/main/resources/graphql/schema.graphqls`](services/catalog/src/main/resources/graphql/schema.graphqls).
+- Shared propagation and semantic conventions: `libs/playground-telemetry`.
+- Storefront GraphQL also exposes the durable Checkout-backed `cart` query and
+  `addCartItem` mutation; browser cart changes remain explicit session state and
+  checkout writes the authoritative cart/order transaction.
+- Browser routes: `/`, `/catalog`, `/products/:sku`, `/cart`, `/checkout`,
+  `/orders`, `/orders/:orderId`, and `/analytics`.
+
+The docs describe the current source tree. No historical live-run counts or
+retired broker/API claims are acceptance evidence.

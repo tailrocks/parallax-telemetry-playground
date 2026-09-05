@@ -24,13 +24,17 @@ pub mod invocation;
 pub mod propagation;
 pub mod semconv;
 
-pub use feature_flags::feature_flag;
+pub use feature_flags::{feature_flag, feature_variant};
 pub use propagation::{
-    context_env, current_context, current_context_env, extract_context, extract_context_from_env,
-    extract_grpc_context, inject_context_headers, inject_grpc_metadata, inject_headers,
-    mark_span_error, set_parent_from, set_parent_from_env, set_parent_from_grpc,
-    set_parent_from_grpc_metadata, set_parent_from_headers, stamp_business_baggage, traced_get,
-    with_business_baggage,
+    TenantIdentityError, context_env, current_context, current_context_env, extend_baggage,
+    extract_context, extract_context_from_env, extract_durable_context, extract_grpc_context,
+    inject_context_headers, inject_durable_context_headers, inject_grpc_metadata,
+    inject_grpc_metadata_with_context, inject_headers, mark_span_error,
+    resolve_grpc_tenant_identity, resolve_http_tenant_identity, sanitize_context, set_parent_from,
+    set_parent_from_env, set_parent_from_grpc, set_parent_from_grpc_metadata,
+    set_parent_from_headers, stamp_business_baggage, traced_get, traced_get_with_context,
+    validate_durable_context, with_business_baggage, with_business_context,
+    with_business_context_from_parent, with_safe_parent_baggage,
 };
 
 use axum::{
@@ -38,6 +42,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use opentelemetry::context::FutureExt as _;
 use opentelemetry::logs::{AnyValue, LogRecord, Logger, LoggerProvider as _, Severity};
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::{Span as _, SpanBuilder, Status, TracerProvider as _};
@@ -49,6 +54,7 @@ use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
 use sentry_opentelemetry::{SentryPropagator, SentrySpanProcessor};
+use std::future::Future;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
 use tracing::Instrument;
@@ -61,6 +67,30 @@ use tracing_subscriber::util::SubscriberInitExt;
 pub use semconv::TOKIO_RUNTIME_METRIC_NAMES;
 
 static EVENT_LOGGER: OnceLock<SdkLogger> = OnceLock::new();
+
+/// Sanitized inbound W3C context retained on an HTTP request by the shared
+/// server middleware. A tracing span parent alone cannot carry baggage across
+/// an awaited handler, so the context remains available to boundary code.
+#[derive(Clone)]
+pub struct InboundRequestContext(opentelemetry::Context);
+
+impl InboundRequestContext {
+    fn new(context: opentelemetry::Context) -> Self {
+        Self(context)
+    }
+
+    /// Return the sanitized context extracted from the request headers.
+    #[must_use]
+    pub fn context(&self) -> &opentelemetry::Context {
+        &self.0
+    }
+
+    /// Clone the sanitized context for an outbound boundary.
+    #[must_use]
+    pub fn cloned_context(&self) -> opentelemetry::Context {
+        self.0.clone()
+    }
+}
 
 /// Opt-in telemetry for one nextest test process.
 ///
@@ -180,13 +210,10 @@ pub fn db_span(
 /// Apply with `Router::layer(axum::middleware::from_fn(http_server_observability))`
 /// after declaring routes, so `MatchedPath` resolves to the stable route rather
 /// than a cardinality-unbounded request URI.
-pub async fn http_server_observability(request: Request, next: Next) -> Response {
+pub async fn http_server_observability(mut request: Request, next: Next) -> Response {
     let method = request.method().as_str().to_owned();
     let path = request.uri().path().to_owned();
-    let route = request
-        .extensions()
-        .get::<MatchedPath>()
-        .map_or_else(|| path.clone(), |matched| matched.as_str().to_owned());
+    let route = stable_http_route(&request);
     let span = tracing::info_span!(
         "http.server.request",
         otel.kind = semconv::SPAN_KIND_SERVER,
@@ -196,6 +223,13 @@ pub async fn http_server_observability(request: Request, next: Next) -> Response
         http.response.status_code = tracing::field::Empty,
         error.type = tracing::field::Empty,
     );
+    let parent = extract_context(request.headers());
+    // Preserve the sanitized context for handlers that need to derive
+    // outbound HTTP/gRPC headers. `set_parent` only carries the trace parent;
+    // it does not make baggage available through the async task context.
+    request
+        .extensions_mut()
+        .insert(InboundRequestContext::new(parent.clone()));
     set_parent_from_headers(&span, request.headers());
     let started = Instant::now();
     let inflight_attrs = [
@@ -211,7 +245,15 @@ pub async fn http_server_observability(request: Request, next: Next) -> Response
         counter: inflight,
         attrs: inflight_attrs,
     };
-    let response = next.run(request).instrument(span.clone()).await;
+    // Attach the sanitized parent while the handler future is polled. The
+    // tracing span parent alone carries trace ids, not baggage; this keeps all
+    // inherited safe baggage available to `current_context` and outbound
+    // boundary helpers after awaits.
+    let response = next
+        .run(request)
+        .instrument(span.clone())
+        .with_context(parent)
+        .await;
     let status = response.status().as_u16();
     span.record("http.response.status_code", i64::from(status));
     if let Some(error_type) = http_server_error_type(status) {
@@ -231,6 +273,17 @@ pub async fn http_server_observability(request: Request, next: Next) -> Response
             ],
         );
     response
+}
+
+/// Route label used when Axum has not installed `MatchedPath` yet. The raw
+/// URI remains a span attribute for debugging, never a metric dimension.
+pub const HTTP_UNMATCHED_ROUTE: &str = "<unmatched>";
+
+fn stable_http_route(request: &Request) -> String {
+    request.extensions().get::<MatchedPath>().map_or_else(
+        || HTTP_UNMATCHED_ROUTE.to_owned(),
+        |matched| matched.as_str().to_owned(),
+    )
 }
 
 /// Teaching metric: up-down counter of in-flight HTTP requests.
@@ -343,8 +396,55 @@ impl Telemetry {
 }
 
 pub async fn shutdown_signal() {
-    if let Err(err) = tokio::signal::ctrl_c().await {
-        tracing::warn!(error = %err, "failed to install Ctrl-C shutdown signal");
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                let reason = wait_for_shutdown_signal(tokio::signal::ctrl_c(), async move {
+                    terminate.recv().await
+                })
+                .await;
+                if matches!(reason, ShutdownSignal::Terminate) {
+                    tracing::info!("received SIGTERM shutdown signal");
+                }
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "failed to install SIGTERM shutdown signal");
+                if let Err(error) = tokio::signal::ctrl_c().await {
+                    tracing::warn!(error = %error, "failed to install Ctrl-C shutdown signal");
+                }
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        tracing::warn!(error = %error, "failed to install Ctrl-C shutdown signal");
+    }
+}
+
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+enum ShutdownSignal {
+    CtrlC,
+    Terminate,
+}
+
+#[cfg(unix)]
+async fn wait_for_shutdown_signal(
+    ctrl_c: impl Future<Output = std::io::Result<()>>,
+    terminate: impl Future<Output = Option<()>>,
+) -> ShutdownSignal {
+    tokio::select! {
+        result = ctrl_c => {
+            if let Err(error) = result {
+                tracing::warn!(error = %error, "failed to receive Ctrl-C shutdown signal");
+            }
+            ShutdownSignal::CtrlC
+        }
+        _ = terminate => ShutdownSignal::Terminate,
     }
 }
 
@@ -678,6 +778,11 @@ mod tests {
         assert_eq!(http_server_error_type(599), Some("http.server.error"));
     }
 
+    #[test]
+    fn unmatched_http_metrics_use_one_bounded_route_label() {
+        assert_eq!(HTTP_UNMATCHED_ROUTE, "<unmatched>");
+    }
+
     #[derive(Debug, Clone, Default)]
     struct CaptureLogExporter {
         records: Arc<Mutex<Vec<SdkLogRecord>>>,
@@ -931,5 +1036,43 @@ mod tests {
                 .any(|(key, value)| key == semconv::EVENT_NAME
                     && value.contains("checkout.completed"))
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_waiter_accepts_sigterm() {
+        let (ctrl_sender, ctrl_receiver) = tokio::sync::oneshot::channel();
+        let (terminate_sender, terminate_receiver) = tokio::sync::oneshot::channel();
+        let waiter = wait_for_shutdown_signal(
+            async move {
+                ctrl_receiver
+                    .await
+                    .map_err(|_| std::io::Error::other("test Ctrl-C sender dropped"))
+            },
+            async move { terminate_receiver.await.ok() },
+        );
+
+        assert!(terminate_sender.send(()).is_ok());
+        assert_eq!(waiter.await, ShutdownSignal::Terminate);
+        drop(ctrl_sender);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_waiter_accepts_ctrl_c() {
+        let (ctrl_sender, ctrl_receiver) = tokio::sync::oneshot::channel();
+        let (terminate_sender, terminate_receiver) = tokio::sync::oneshot::channel();
+        let waiter = wait_for_shutdown_signal(
+            async move {
+                ctrl_receiver
+                    .await
+                    .map_err(|_| std::io::Error::other("test Ctrl-C sender dropped"))
+            },
+            async move { terminate_receiver.await.ok() },
+        );
+
+        assert!(ctrl_sender.send(()).is_ok());
+        assert_eq!(waiter.await, ShutdownSignal::CtrlC);
+        drop(terminate_sender);
     }
 }

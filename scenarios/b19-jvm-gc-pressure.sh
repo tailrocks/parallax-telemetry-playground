@@ -1,22 +1,17 @@
 #!/usr/bin/env bash
-# B19: bounded JVM heap pressure in catalog while GraphQL products queries run.
+# B19: bounded catalog GraphQL workload using the current products resolver.
 set -euo pipefail
 
 BASE="${CATALOG_URL:-http://localhost:8080}"
-MB="${MB:-96}"
-HOLD_MS="${HOLD_MS:-5000}"
 ROUNDS="${ROUNDS:-4}"
-QUERY='{"query":"{ products { sku name priceMinor } }"}'
+QUERY='{"query":"{ products(tenantId: \"tenant-acme\", page: 0, size: 20, segment: \"standard\") { items { sku name priceMinor reviewsSlow { stars } } } }"}'
 
 echo "baseline products query:"
 curl -fsS -H 'content-type: application/json' --data "$QUERY" "$BASE/graphql" >/dev/null
 
 for i in $(seq 1 "$ROUNDS"); do
-  echo "heap pressure round $i: mb=$MB holdMs=$HOLD_MS"
-  curl -fsS "$BASE/chaos/heap?mb=$MB&holdMs=$HOLD_MS" >/dev/null &
-  sleep 0.3
+  echo "products workload round $i"
   curl -fsS -H 'content-type: application/json' --data "$QUERY" "$BASE/graphql" -o /dev/null -w "  products %{time_total}s [%{http_code}]\n"
 done
-wait
 
-echo "B19 done. Check in Parallax: Services -> catalog -> Runtime lane: jvm.memory.used / jvm.gc.* rise; Traces: slower GraphQL spans in the same window."
+echo "B19 done. Check in Parallax: catalog GraphQL resolver spans and request latency in the same window."

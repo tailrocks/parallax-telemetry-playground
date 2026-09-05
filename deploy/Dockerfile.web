@@ -1,21 +1,32 @@
 # web (TanStack Start). Build with Bun (repo policy: Bun-only for JS/TS), run the
 # TanStack Start server output. The same-origin /v1/traces proxy forwards browser
 # OTLP to Rotel server-side (ROTEL_OTLP_HTTP_ENDPOINT).
-FROM oven/bun:1 AS build
+FROM oven/bun:1@sha256:9e123d5fc069e29d519fd4c981afb61b8542ac80274771961136db1e4538d53e AS build
 WORKDIR /app
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY web/ ./
-ARG VITE_GIT_SHA
-ENV VITE_GIT_SHA=$VITE_GIT_SHA
+ARG VITE_STOREFRONT_URL=/__storefront/graphql
+ARG VITE_SENTRY_DSN=
+ARG VITE_RELEASE=dev
+ARG VITE_PARALLAX_ENV=playground
+ARG VITE_GIT_SHA=local
+ENV VITE_STOREFRONT_URL=$VITE_STOREFRONT_URL \
+    VITE_SENTRY_DSN=$VITE_SENTRY_DSN \
+    VITE_RELEASE=$VITE_RELEASE \
+    VITE_PARALLAX_ENV=$VITE_PARALLAX_ENV \
+    VITE_GIT_SHA=$VITE_GIT_SHA
 RUN bun run build
 
-FROM oven/bun:1 AS run
+FROM oven/bun:1@sha256:9e123d5fc069e29d519fd4c981afb61b8542ac80274771961136db1e4538d53e AS run
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules ./node_modules
 COPY web/server.ts ./server.ts
+# The custom Bun adapter imports server-side telemetry and safe-error modules
+# from source at runtime; keep that import graph in the run image.
+COPY web/src ./src
 EXPOSE 3000
 CMD ["bun", "server.ts"]

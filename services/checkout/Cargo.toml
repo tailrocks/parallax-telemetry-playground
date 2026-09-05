@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
+tonic-health = { workspace = true }
 tokio-stream = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -19,6 +20,12 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
+open-feature = { workspace = true }
+deadpool-postgres = { workspace = true }
+tokio-postgres = { workspace = true }
+lapin = { workspace = true }
+uuid = { workspace = true }
+sha2 = "0.10"
 
 [dev-dependencies]
 tower = { workspace = true }

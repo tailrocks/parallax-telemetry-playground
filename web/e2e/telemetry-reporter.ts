@@ -2,11 +2,16 @@ import type { FullResult, Reporter, TestCase, TestResult } from "@playwright/tes
 import { mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { ROOT_CONTEXT, SpanStatusCode, type Context, type Span } from "@opentelemetry/api";
-import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import {
+  CompositePropagator,
+  W3CBaggagePropagator,
+  W3CTraceContextPropagator,
+} from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { SimpleSpanProcessor, WebTracerProvider } from "@opentelemetry/sdk-trace-web";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
+import { sanitizePropagationHeaders } from "../src/traceparent";
 import {
   CICD_PIPELINE_RUN_ID,
   CICD_PIPELINE_TASK_TYPE,
@@ -33,6 +38,12 @@ import {
 import { testTraceparentDirectory, testTraceparentPath } from "./test-trace-context";
 
 const TEST_TRACER = "playground.web.test";
+const DEFAULT_TRACESTATE = "playground=browser";
+const DEFAULT_BAGGAGE =
+  "tenant.id=tenant-acme,user.tier=standard,customer.segment=standard,region=us-east-1,request.priority=normal";
+const RUN_PROPAGATOR = new CompositePropagator({
+  propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()],
+});
 
 /**
  * Opt-in Playwright-to-OTLP bridge. The reporter deliberately has no browser
@@ -156,15 +167,18 @@ function parametersForTitle(title: string): string {
   return match?.[1] ?? "";
 }
 
-function parentContextFromTraceparent(traceparent: string): Context {
-  return new W3CTraceContextPropagator().extract(
-    ROOT_CONTEXT,
-    { traceparent },
-    { get: (carrier, key) => carrier[key] },
-  );
-}
-
 function runParentContext(): Context {
-  const traceparent = process.env.TRACEPARENT;
-  return traceparent ? parentContextFromTraceparent(traceparent) : ROOT_CONTEXT;
+  const headers = sanitizePropagationHeaders({
+    traceparent: process.env["TRACEPARENT"]?.trim(),
+    tracestate: process.env["TRACESTATE"]?.trim() || DEFAULT_TRACESTATE,
+    baggage: process.env["BAGGAGE"]?.trim() || DEFAULT_BAGGAGE,
+  });
+  const carrier: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (value !== undefined) carrier[key] = value;
+  }
+  return RUN_PROPAGATOR.extract(ROOT_CONTEXT, carrier, {
+    get: (current, key) => current[key.toLowerCase()],
+    keys: (current) => Object.keys(current),
+  });
 }

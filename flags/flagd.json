@@ -1,14 +1,6 @@
 {
   "$schema": "https://flagd.dev/schema/v0/flags.json",
   "flags": {
-    "paymentFailure": {
-      "state": "ENABLED",
-      "variants": {
-        "on": true,
-        "off": false
-      },
-      "defaultVariant": "off"
-    },
     "slowQuery": {
       "state": "ENABLED",
       "variants": {
@@ -48,6 +40,55 @@
         "off": false
       },
       "defaultVariant": "off"
+    },
+    "catalogExperience": {
+      "state": "ENABLED",
+      "variants": {
+        "standard": "standard",
+        "featured": "featured",
+        "newest": "newest"
+      },
+      "defaultVariant": "standard"
+    },
+    "checkoutFlow": {
+      "state": "ENABLED",
+      "variants": {
+        "control": "control",
+        "orchestrated": "orchestrated"
+      },
+      "defaultVariant": "orchestrated"
+    },
+    "pricingStrategy": {
+      "state": "ENABLED",
+      "variants": {
+        "database": "database",
+        "cached": "cached"
+      },
+      "defaultVariant": "cached"
+    },
+    "recommendationStrategy": {
+      "state": "ENABLED",
+      "variants": {
+        "popular": "popular",
+        "personalized": "personalized"
+      },
+      "defaultVariant": "personalized"
+    },
+    "fulfillmentStrategy": {
+      "state": "ENABLED",
+      "variants": {
+        "async": "async",
+        "priority": "priority"
+      },
+      "defaultVariant": "async"
+    },
+    "analyticsMode": {
+      "state": "ENABLED",
+      "variants": {
+        "clickhouse": "clickhouse",
+        "disabled": "disabled"
+      },
+      "defaultVariant": "clickhouse"
     }
   }
 }

@@ -1,6 +1,26 @@
 spring:
   application:
     name: payment
+  grpc:
+    server:
+      health:
+        service:
+          "[playground.payment.v1.Payment]":
+            include:
+              - db
+  datasource:
+    url: ${PAYMENT_DATABASE_URL:${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres:5432/playground}}
+    username: ${SPRING_DATASOURCE_USERNAME:${POSTGRES_USER:postgres}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${POSTGRES_PASSWORD:playground}}
+  sql:
+    init:
+      mode: never
+payment:
+  provider: ${PAYMENT_PROVIDER:playground}
+  reconciliation:
+    fixed-delay-ms: ${PAYMENT_RECONCILIATION_FIXED_DELAY_MS:250}
+    initial-delay-ms: ${PAYMENT_RECONCILIATION_INITIAL_DELAY_MS:100}
+    batch-size: ${PAYMENT_RECONCILIATION_BATCH_SIZE:32}
 sentry:
   dsn: ${SENTRY_DSN:}
   environment: ${PARALLAX_ENV:playground}

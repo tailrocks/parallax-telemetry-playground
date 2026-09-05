@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# c10: a18 canary must not appear on bundle, MCP, webhook, Sentry ack, or UI GraphQL.
+# c10: the A18 canary must not appear on bundle, MCP, webhook, Sentry ack, or UI GraphQL.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib-c.sh
@@ -36,9 +36,8 @@ dest="$(c_gql "mutation { alertDestinationSave(name: \"c10-hook\", kind: \"webho
 dest_id="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['alertDestinationSave']['id'])" "$dest")"
 echo "c10 dest=$dest_id hook=$hook_port"
 
-# Plant the real a18 canary via checkout.
-curl -sS -o /dev/null -w "canary http %{http_code}\n" \
-  "${CHECKOUT_URL:-http://127.0.0.1:8088}/checkout?canary=1" || true
+# Plant the real A18 canary through the current Sentry envelope route.
+PARALLAX_URL="$PARALLAX_URL" "$SCRIPT_DIR/a18-canary.sh"
 
 # Wait for an issue we can bundle.
 fp=""

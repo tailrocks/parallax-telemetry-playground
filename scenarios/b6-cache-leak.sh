@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE="${RECOMMENDATION_URL:-http://localhost:8091}"
+BASE="${RECOMMENDATION_URL:-http://localhost:8090}"
 REQUESTS="${B6_REQUESTS:-10}"
 SETTLE_SECONDS="${B6_FLAG_SETTLE_SECONDS:-12}"
 FLAG_FILE="$ROOT/flags/flagd.json"
@@ -40,7 +40,7 @@ set_cache_leak_flag on
 sleep "$SETTLE_SECONDS"
 
 for i in $(seq 1 "$REQUESTS"); do
-  curl --fail-with-body --max-time 20 -sS "$BASE/recommend?sku=LEAK-$i" >/dev/null
+  curl --fail-with-body --max-time 20 -sS "$BASE/recommend?tenant_id=tenant-acme&sku=WIDGET-1&leak=512" >/dev/null
   printf 'leak request %s/%s\n' "$i" "$REQUESTS"
 done
 

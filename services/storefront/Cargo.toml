@@ -11,14 +11,21 @@ futures = { workspace = true }
 juniper = { workspace = true }
 juniper_axum = { workspace = true }
 juniper_graphql_ws = { workspace = true }
+opentelemetry = { workspace = true }
 playground-proto = { workspace = true }
 playground-telemetry = { workspace = true }
 reqwest = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = "0.10"
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
+tokio-postgres = { workspace = true }
 tonic = { workspace = true }
+tonic-health = { workspace = true }
 tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }

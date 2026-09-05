@@ -19,7 +19,7 @@ C_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Throwaway homes live under the repo, never scratch / never the operator HOME.
 C_ISOLATION="${C_ROOT}/.isolation"
 
-# Tokens planted by checkout ?canary=1 (a18). Must stay off every egress.
+# Tokens planted by the A18 Sentry envelope. Must stay off every egress.
 C_CANARY_EMAIL="alice@example.com"
 C_CANARY_TOKEN="sk-live-CANARY1234567890"
 C_CANARY_CARD="4111111111111111"

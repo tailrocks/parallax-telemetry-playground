@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# B15: browser rage-click journey (the test drives the promo button repeatedly).
+# B15: current browser order and analytics journeys.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/web"
-exec bun x playwright test e2e/journey.spec.ts --grep 'rage-click journey' "$@"
+exec bun x playwright test e2e/journey.spec.ts --grep 'orders reads durable status|analytics reads ClickHouse' "$@"

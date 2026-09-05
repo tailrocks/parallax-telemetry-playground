@@ -9,7 +9,8 @@ playground-telemetry = { workspace = true }
 anyhow = { workspace = true }
 axum = { workspace = true }
 opentelemetry = { workspace = true }
-sqlx = { workspace = true }
+deadpool-postgres = { workspace = true }
+tokio-postgres = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

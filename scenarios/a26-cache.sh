@@ -1,44 +1,31 @@
 #!/usr/bin/env bash
-# A26: recommendation in-process cache hit/miss, bypass, and stampede demo.
+# A26: Catalog-backed recommendation reads plus bounded stampede/slow/leak
+# chaos. Normal recommendations have no process-local cache.
 set -euo pipefail
 
 BASE="${RECOMMENDATION_URL:-http://localhost:8090}"
-TTL_MS="${TTL_MS:-300000}"
-SKU="${SKU:-A26-WIDGET-$$}"
+SKU="${SKU:-WIDGET-1}"
 
 request() {
   local url="$1"
   curl -fsS "$url"
 }
 
-hit_count=0
-miss_count=0
-echo "cold+warm phase: 10 same-sku requests (expect 1 miss, 9 hits)"
+echo "catalog phase: 10 same-SKU requests"
 for i in $(seq 1 10); do
-  body="$(request "$BASE/recommend?sku=$SKU&ttl_ms=$TTL_MS")"
-  if [[ "$body" == *'"cache_hit":true'* ]]; then
-    hit_count=$((hit_count + 1))
-  else
-    miss_count=$((miss_count + 1))
-  fi
-  echo "  same-$i $body"
+  body="$(request "$BASE/recommend?tenant_id=tenant-acme&sku=$SKU&limit=8")"
+  printf '%s\n' "  same-${i} ${body:0:500}"
 done
-echo "observed same-sku hits=$hit_count misses=$miss_count"
 
-echo "cache bypass baseline:"
-request "$BASE/recommend?sku=$SKU&cache=0&ttl_ms=$TTL_MS"
-echo
-
-echo "ratio phase: 20 requests across 5 bounded demo SKUs"
-for i in $(seq 1 20); do
-  idx=$(( (i - 1) % 5 ))
-  request "$BASE/recommend?sku=A26-RATIO-$idx-$$&ttl_ms=$TTL_MS" >/dev/null
+echo "catalog phase: multiple seeded SKUs"
+for sku in WIDGET-1 WIDGET-2 GADGET-1 GADGET-2; do
+  request "$BASE/recommend?tenant_id=tenant-acme&sku=$sku&limit=8" >/dev/null
 done
-echo "ratio phase done"
+echo "multiple-SKU phase done"
 
-echo "stampede phase: invalidate one SKU and spawn 10 unprotected workers"
-request "$BASE/recommend?sku=$SKU&ttl_ms=$TTL_MS&stampede=10"
+echo "stampede phase: 10 bounded parallel Catalog requests"
+request "$BASE/recommend?tenant_id=tenant-acme&sku=$SKU&stampede=10"
 echo
 
 echo "A26 done."
-echo "Check in Parallax: Dashboards -> metric cache_hits_total/cache_misses_total (rate agg) and cache_size; trace detail -> parallel compute_recommendations spans; Logs document fields -> cache.hit."
+echo "Check in Parallax: recommendation spans show Catalog GraphQL fan-out; chaos attributes show stampede_workers, and normal results contain source=catalog-graphql."

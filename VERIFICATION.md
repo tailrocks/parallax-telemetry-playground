@@ -1,399 +1,158 @@
-# Verification runbook
+# Verification contract
 
-For the guided Parallax demo path see [`TOUR.md`](TOUR.md); for the quick
-traffic generator see `./demo.sh`. This file remains the full cross-backend
-verification runbook.
+This document is an executable-source checklist, not a historical pass report.
+Run it against the current checkout and a clean dependency stack.
 
-What's verified in CI/sandbox vs what needs a real host. The **code/config for
-every scenario is implemented**; Rust, web build/Vitest, the three Java test
-suites, and Playwright browser journeys run locally. Java uses a temporary
-Gradle cache outside the container's native library mount; the scenarios below
-still need a live multi-runtime environment (Sentry self-hosted and a collector
-with a short flush) that this sandbox cannot provision.
-
-## Current live run (2026-09-04)
-
-This run used playground `bc3d771a386a99387fab6989ac98992d978965cc` and Parallax
-`3c4b68d3acf8fb435102ae2beb8f184bf40b617c`. Fresh Compose boot passed after
-catalog was changed to wait for healthy Postgres. A1, A2, B2, A3, A8, A25, A26,
-A30, and c1–c11 passed against the current Parallax server. c3 was re-run with
-the SSE receiver open before the event and returned `294` bytes. c7 passed
-Claude import plus MCP projection equivalence. Current competitor evidence is
-in the [dated Parallax report](https://github.com/tailrocks/parallax/blob/92c78b0387b65acde5ff18c21ce9e93b25a39280/docs/research/validation/2026-09-04-parallax-main-competitor-verification.md).
-
-The detailed rows below retain their original dates and are historical unless
-the row is explicitly restamped.
-
-Every local stack test session has one fail-closed run-parent entrypoint. It
-refuses to run without the identity and W3C carrier supplied by Parallax:
+## Static gates
 
 ```bash
-parallax invocation start -- scripts/observable-test-session.sh rust
-parallax invocation start -- scripts/observable-test-session.sh java
-parallax invocation start -- scripts/observable-test-session.sh web
+rtk cargo fmt --all -- --check
+rtk cargo check --workspace --all-targets --locked
+rtk cargo test --workspace --all-targets --locked
+rtk cargo clippy --workspace --all-targets --locked -- -D warnings
+rtk bash scripts/check-scenarios.sh
+rtk git diff --check
+rtk proxy docker compose -f deploy/docker-compose.yml config --quiet
 ```
-
-The Rust mode runs nextest and converts its durable JUnit in the same session;
-Java preserves the carrier across all three Gradle suites; web runs Bun Vitest
-and Playwright beneath the same run parent.
-
-Append `--acceptance` to include each stack's bounded pass-after-fail fixtures.
-After the wrapper prints its finished run ID, verify the indexed payload through
-Parallax's GraphQL API:
 
 ```bash
-parallax invocation start -- scripts/observable-test-session.sh rust --acceptance
-mise exec -- cargo run --locked -p playground-cli -- test-verify <run-id> rust
-
-parallax invocation start -- scripts/observable-test-session.sh java --acceptance
-mise exec -- cargo run --locked -p playground-cli -- test-verify <run-id> java
-
-parallax invocation start -- scripts/observable-test-session.sh web --acceptance
-mise exec -- cargo run --locked -p playground-cli -- test-verify <run-id> web
+(cd services/catalog && rtk proxy ./gradlew --no-daemon clean test)
+(cd services/payment && rtk proxy ./gradlew --no-daemon clean test)
+(cd services/fulfillment && rtk proxy ./gradlew --no-daemon clean test)
+(cd web && rtk bun run build)
+(cd web && rtk bun run typecheck)
+(cd web && rtk bun run test)
+(cd web && rtk bun run e2e)
 ```
 
-Pass a third `http://host:port` argument to `test-verify` for a non-default
-Parallax API. The verifier polls boundedly for indexing and then checks the
-real span graph and payload: exported run parent, run identity, explicit and
-code-reference test identity, parameter/configuration separation, retries,
-failed-versus-broken taxonomy, revision/version resources, ERROR status, and
-at least one application descendant below a test span.
+The Rust code uses `tokio-postgres`/`deadpool-postgres`; Java uses JDBC. The
+tests may use stubs at unit boundaries, but deployed journeys require the
+shared PostgreSQL, Redis, RabbitMQ, ClickHouse, flagd, and service containers.
 
-## Verified here (build/run/execute)
-- `scripts/check-scenarios.sh` proves all 45 catalog IDs have dispatcher
-  mappings and README rows, resolves them to present executable drivers, and
-  syntax-checks every shell driver.
-- Rust workspace builds (fmt + clippy clean); web builds (`bun run build`: Vite
-  client + SSR + Nitro server) and type-checks (`tsc --noEmit`); routes `/` and
-  `/v1/traces` register. Catalog, payment, and fulfillment clean Gradle suites
-  pass on this Linux arm64 host with `GRADLE_USER_HOME=/tmp/parallax-gradle`
-  and `-Dorg.gradle.native=false`; this avoids the home-mounted native cache
-  that cannot load Gradle/Jansi libraries.
-- Chromium browser execution is locally proven on 2026-07-15. The arm64
-  sandbox lacks system browser libraries, so the test command uses a
-  user-owned extracted runtime and Fontconfig configuration outside the
-  repository: the default Playwright suite passes five journeys with two W4
-  retry fixtures skipped, and the W4 opt-in run intentionally records one
-  assertion failure and one harness timeout before both pass on retry. This
-  proves the browser UI contracts and failure taxonomy; collector-backed trace
-  inspection remains a live-stack gate.
-- The complete Rust nextest `ci` profile passes 57 tests across 11 binaries;
-  its generated JUnit XML is accepted by `playground test-report` as 57 passed
-  cases with no implicit localhost exporter.
-- `parallax run start` compare-mode forward (Parallax repo, 11 tests).
-- Lab fan-out: trace → Rotel → OpenObserve (queried back by service).
-- Multi-service Rust distributed trace (checkout → pricing/inventory/recommendation).
-- **Cross-language gRPC**: Rust checkout → Java payment (Spring gRPC) returns the
-  Java-computed price; Java OTel agent emits the `Pricing/Quote` SERVER span.
-- Scenarios A1, A3, A6, A7, A8, A9, A10, A12, A13, A14, A18 and B1–B13, B16–B18;
-  real Kafka producer/consumer round-trip.
-- **Live multi-service trace re-verified on the upgraded deps (2026-06-23):**
-  the four Rust services (checkout/pricing/inventory/recommendation, now on
-  otel 0.32 / tonic 0.14) run against a live Dockerized lab (Rotel +
-  OpenObserve); `/checkout` drives gRPC + HTTP fan-out, and an OpenObserve trace
-  search returns `checkout=30, pricing=6, inventory=6, recommendation=6` spans.
-  (The OO search path is `/api/{org}/_search` with the stream in the SQL FROM +
-  from/size — the lab's `smoke.sh` was fixed to match.)
-- **Rust tier emits all three OTLP signals** (traces + metrics + logs) — was
-  traces-only; `cargo build` + fmt + clippy clean.
-- **A7 GraphQL subscription** resolver (`catalog`, WebSocket transport) is
-  source-covered; catalog's GraphQL slice runs locally.
-- **A17 profiling** wired on the JVM services (Sentry continuous profiling
-  config); flamegraph view needs a live Sentry (below).
-- **Sentry envelope emit path verified (2026-06-23)** — ran `checkout` with
-  `SENTRY_DSN` pointed at a mock receiver and triggered the B1 error
-  (`/checkout?fail=1`). The mock captured real Sentry envelopes: a `type:"event"`
-  issue (`message:"payment failure (chaos)", logger:"checkout"`, A15/A16 emit)
-  **and** a `type:"transaction"` performance envelope
-  (`transaction:"checkout", release:"0.1.0", environment:"playground", sdk:
-  sentry.rust 0.48.2`; historical dependency snapshot from that run). So the
-  playground's Sentry path — errors → issues, spans
-  → transactions, correct release/env metadata — emits correctly. Issue
-  *grouping/lifecycle rendering* (A15/A16) and the *flamegraph view* (A17) are
-  Sentry-server product behavior, viewed in a live Sentry UI (the deferred
-  ~72-service self-hosted stack — see below).
+## Canonical executable verifier
 
-### Rust `sentry-opentelemetry` (shared trace_id) — adopted 2026-08-14
-`sentry-opentelemetry` **0.49.1** pins `opentelemetry` **^0.32.0** /
-`opentelemetry_sdk` **^0.32.1**. `playground-telemetry` now installs
-`SentrySpanProcessor` + `SentryPropagator` beside the OTLP batch exporter so
-Sentry envelopes share the OTel `trace_id`. Java still uses the upstream
-OTel javaagent + Spring Sentry starter — never `sentry-opentelemetry-agent`
-(that hijacks fan-out; see `deploy/Dockerfile.java`).
-
-### Metric temporality (teaching note)
-
-Playground OTLP exporters use **CUMULATIVE** temporality by default (OTel Rust
-SDK 0.32 PeriodicReader, Java agent 2.30.0). To reproduce backend conversion
-bugs of the Uptrace-5× class, set
-`OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta` on one emitter and
-compare the same `http.server.request.duration` series. Do not change the
-default: cumulative is what most OTLP backends assume.
-
-### 4-sink dual-emission re-verify (2026-08-14)
-
-Live Rotel `v0.2.5` fan-out after `a1`/`b2`/`a6` on current-latest SDKs:
-
-| Sink | Result |
-| --- | --- |
-| OpenObserve v0.92.0 | `checkout=90 catalog=130 payment=76 inventory=19 recommendation=23 pricing=5` |
-| Maple v0.0.18 | `services --since 2h` lists the same six names |
-| Parallax host | GraphQL traces for checkout/catalog/payment/inventory; Java + Rust issues |
-| Sentry 26.7.2 | `verify.sh` A1 OTLP=200, A15/A16 `times_seen=10` |
-
-Java-agent **gRPC → Rotel retested PASS** (agent 2.30.0): catalog OO count
-56→96 after `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` + `a6`. Compose defaults Java
-to gRPC. Compose `SENTRY_DSN` for containers must use
-`host.docker.internal:9000` (not `localhost`).
-
-Teaching metrics after checkout image rebuild (2026-08-14): a31 handled
-502 vs unhandled empty-reply `000`; metricNames include
-`http_server_active_requests` and `playground_cardinality_events_total`.
-
-Dual-emission 2026-08-14T14:35Z (real SDKs, not synthetic native envelopes):
-Rust `c8_sentry_emit`, Java `C8SentryEmit`, and `@sentry/node` 10.70 all
-land on Parallax Issues **and** Sentry 26.7.2 Groups (`plat=native` /
-`plat=java` / `plat=node`). Browser RUM click on `:5173` shows
-`intentional RUM error after backend 502`; Parallax stitches the same
-journey as `ui.click` → checkout (`19edbf0ad9f030364b4657dfc7f4f463`).
-A13 this session: `RELEASE=v2` 5× `/checkout` 502; GraphQL
-`releases(checkout)` lists v1+v2; `/services/checkout` badge **2 versions**.
-JS 10 first envelope is `type=session` (Parallax 415 `NoEventItem`); the
-exception is the second `type=event` POST. Official JS SDK 10.70 puts
-`sentry_key` in the query string (CORS); Parallax ingest only accepts
-`X-Sentry-Auth` / `Authorization`. `c8-emit-js.ts` still emits a real
-`@sentry/node` envelope and adds that header so the event is accepted.
-OTLP waterfalls remain green on the 4-sink lab.
-
-### Per-concept comparison arms (2026-08-14)
-
-Same Rotel feed. Honest cells — Sentry/Maple/OO win where they do.
-SigNoz is residue (plan 162 Foundry-only), not a column.
-
-| Concept | Parallax | Maple v0.0.18 | OpenObserve v0.92.0 | Sentry 26.7.2 |
-| --- | --- | --- | --- | --- |
-| Multi-service traces | **PASS** GraphQL + `/traces` waterfall | **PASS** `services --since 2h` names the six | **PASS** search counts (checkout/catalog/payment/inventory/recommendation/pricing) | **PRODUCT-LIMITED** transactions exist; no OTel waterfall product |
-| Metrics RED / up-down / cardinality | **PASS** catalog + workbench; teaching names above | **PRODUCT-LIMITED** series, no workbench parity | **PASS** metric streams; explicit-bucket histograms land | **PRODUCT-LIMITED** no OTLP metrics |
-| Logs + live tail | **PASS** Query→`?live=true` + SSE c3 | **PRODUCT-LIMITED** no live SSE product | **PASS** log streams | **PRODUCT-LIMITED** breadcrumbs/events ≠ OTLP logs |
-| Issues / grouping | **PASS** fingerprints + `/issues` | **FAIL** no issue product | **FAIL** attributes only | **PASS** `verify.sh` A15/A16 `times_seen`; playground SDK envelope groups not listed at T+1m (honest) |
-| Dual OTLP+Sentry emit | **PASS** c8 ingest | n/a | n/a | **PASS** A1/A15/A16 |
-| Alerts / incidents | **PASS** c4 rule→incident | **PRODUCT-LIMITED** | **PRODUCT-LIMITED** | **PASS** as Sentry's own product, not this OTLP feed |
-| SQL | **PASS** `/sql` `SELECT 1` | **PRODUCT-LIMITED** maple CLI | **PASS** OO SQL search | **FAIL** |
-| CLI Apps / tests / story | **PASS** c2/c7 UI | **FAIL** | **FAIL** | **FAIL** |
-| Exponential histogram | **CODE-CONFIRMED drop** (see W5 table) | **PLUMBING PASS** | **LIVE** explicit-bucket | **PRODUCT-LIMITED** |
-
-Display walk of every Parallax surface: `artifacts/ui/` + coverage-matrix
-c11 row. Zero unexplained UI `FAIL`s; no new W5 `DISCREPANCY`.
-
-## Needs a real host — exact steps to verify the last scenarios
-
-Prereqs: start the lab (`parallax` repo `bench/otlp-fanout`), then this app's
-`deploy/docker-compose.yml`. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to Rotel and
-`SENTRY_DSN` to a Sentry project. Lower OpenObserve's flush for fast feedback:
-`ZO_FILE_PUSH_INTERVAL=10`.
-
-### A2 — exemplars (JVM)
-Code: `catalog` exports the `catalog.product.queries` Micrometer counter with
-the Java agent exemplar filter set by `OTEL_METRICS_EXEMPLAR_FILTER=trace_based`
-in compose.
-Verify: drive `products` queries; query GreptimeDB's native metric table for
-the counter and inspect exemplar columns/metadata for a `trace_id` that links
-to the trace. (Rust tier has no exemplars — issue #3369 — so use the JVM
-counter.)
-
-### W5 — exponential-histogram conformance probe (JVM)
-
-Code: the `catalog` Java-agent service sets
-`OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION=base2_exponential_bucket_histogram`.
-Drive catalog GraphQL/HTTP traffic after the fan-out stack starts, then inspect
-the exported histogram's aggregation shape rather than assuming a backend
-conversion is lossless.
-
-| Backend | Expected recording evidence | Result |
-| --- | --- | --- |
-| Parallax | Native ingest disposition (currently expected to drop unsupported exponential histograms) | **CODE-CONFIRMED drop** (2026-07-17): `parallax-ingest` `normalize_metrics` keeps explicit-bucket histograms only; exponential histograms / summaries hit the `_ => {}` arm and store nothing (`crates/parallax-ingest/src/metrics.rs`). Live JVM probe still useful as regression guard; product claim is drop-until-modeled. |
-| Maple | Histogram type/buckets visible or documented conversion | **PLUMBING PASS** (2026-07-17 multi-backend): OTLP metrics fan-out accepted on Maple arm with traces green; Maple's product UI treats OTLP histograms as metric series (no separate exp-hist product claim). |
-| SigNoz | Histogram type/buckets visible or documented conversion | **PLUMBING PASS** (2026-07-17): SigNoz CH ingest green for traces; metrics path uses ClickHouse histogram columns when present — exponential conversion is vendor-side, not Parallax-owned. |
-| OpenObserve | Histogram type/buckets visible or documented conversion | **LIVE** (2026-07-17): OO metrics stream registry shows `metric_type=Histogram` for `jvm_gc_duration` (+ `_bucket` companion) on the lab stack (`GET /api/default/streams?type=metrics`). Explicit-bucket histograms land; exp-hist conversion is vendor-owned. |
-| Sentry | Metrics rendering/disposition recorded | **PRODUCT-LIMITED** (2026-07-17): Sentry self-hosted arm verified for OTLP/error envelopes; metrics are not a first-class Sentry OTLP product surface in this lab — disposition = traces/logs/errors only (A15/A16 PASS). |
-
-### W4 — Java test telemetry
-
-Code: catalog, payment, and fulfillment attach the pinned upstream
-`opentelemetry-javaagent` to every Gradle `Test` JVM. The existing
-OpenTelemetry Gradle plugin supplies task/per-test spans and forwards the run
-identity plus parent context; the agent instruments integration-test client
-work beneath those test executions. JUnit XML keeps `mergeReruns=true` as the
-authoritative retry record.
-
-Verify: run each service's Gradle tests with `TRACEPARENT`, `CLI_INVOCATION_ID`,
-and `OTEL_EXPORTER_OTLP_ENDPOINT` set, then inspect the test root, failure
-payload, and any HTTP/gRPC/Kafka/JDBC child spans in the same trace. With no
-endpoint, local tests explicitly set the Java agent's trace/metric/log
-exporters to `none`, preventing false connection-refused errors; a supplied
-endpoint preserves the live-export path. On this host use
-`GRADLE_USER_HOME=/tmp/parallax-gradle` plus `-Dorg.gradle.native=false` to
-avoid the home-mounted native cache.
-
-Payment also owns two opt-in acceptance fixtures that produce genuine
-assertion-failure and harness-error attempts followed by passes in fresh test
-JVMs. Use a unique token per run so concurrent or interrupted rehearsals cannot
-share attempt state:
+Run the clean disposable-stack gate from the repository root:
 
 ```bash
-PLAYGROUND_TEST_FLAKY_FIXTURE=1 \
-PLAYGROUND_TEST_ATTEMPT_TOKEN="$(git rev-parse HEAD)-$(date +%s)" \
-GRADLE_USER_HOME=/tmp/parallax-gradle \
-mise exec -- ./gradlew --no-daemon test \
-  --tests dev.tailrocks.payment.TestTelemetryAcceptanceTest \
-  -Dorg.gradle.native=false
+rtk bash scripts/verify-commerce-stack.sh
 ```
 
-The Gradle-owned retry plugin executes one retry, merged JUnit XML retains both
-outcomes, and the shared JUnit extension emits `test.attempt.ordinal` plus the
-failure taxonomy on the corresponding OTLP spans.
+It creates a unique Compose project, builds the stack, applies PostgreSQL
+migrations, reruns them unchanged, and removes only that project's containers,
+volumes, and temporary files on exit. It then proves catalog cold/warm GraphQL,
+Storefront pricing GraphQL, W3C-header checkout, async fulfillment and
+notification delivery, direct Payment gRPC authorize/capture replay and
+changed-fingerprint rejection, PostgreSQL/Redis/RabbitMQ/ClickHouse state, a
+live checkout feature flip with behavior change without restart, the real
+Compose-backed Playwright browser journey, and checkout readiness failure/
+recovery.
+Managed mode runs PostgreSQL and Redis assertions through the Compose service
+containers; host `psql` and `redis-cli` are only required in external mode.
 
-### W4 — Rust in-process test telemetry
-
-Code: setting `PLAYGROUND_TEST_TELEMETRY=1` activates the shared Rust helper
-inside the real notifications loopback test. It extracts the supplied W3C
-`TRACEPARENT`, installs the test dispatcher and parent context as one scope,
-then explicitly shuts down the simple OTLP exporter after the test body.
-Default nextest runs remain exporter-free; the JUnit converter remains the
-complete result bridge for every Rust test.
-
-The shared deterministic unit fixture separately proves that this scope makes
-the propagated remote trace ID the active OpenTelemetry parent, without a
-collector or network dependency.
-
-Verify: set `PLAYGROUND_TEST_TELEMETRY=1`, `TRACEPARENT`, and
-`OTEL_EXPORTER_OTLP_ENDPOINT` for a focused notifications nextest run. Inspect
-the test-run parent plus the HTTP server/client work below it in the collector.
-
-Rust also has a bounded acceptance profile for the retry/failure taxonomy. It
-records a real assertion panic and a SIGABRT harness failure on attempt 1, then
-passes both tests in fresh processes on attempt 2. The JUnit converter expands
-nextest's `flakyFailure` elements into four OTLP test-attempt spans instead of
-collapsing them into two final passes:
+For an already-running external stack, skip lifecycle mutations and provide
+its endpoints:
 
 ```bash
-PLAYGROUND_TEST_FLAKY_FIXTURE=1 mise exec -- \
-  cargo nextest run --locked -p playground-cli --profile w4-acceptance \
-  -E 'test(/w4_.*_passes_on_retry/)' --no-tests=fail
-mise exec -- cargo run --locked -p playground-cli -- \
-  test-report target/nextest/w4-acceptance/junit.xml
+VERIFY_MANAGE_STACK=0 \
+  VERIFY_EXTERNAL_ALLOW_MUTATION=1 \
+  VERIFY_TENANT_ID=tenant-verification \
+  VERIFY_CUSTOMER_ID=customer-verification \
+  VERIFY_SKU=WIDGET-1 \
+  CATALOG_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
+  STOREFRONT_GRAPHQL_URL=http://127.0.0.1:8094/graphql \
+  CHECKOUT_URL=http://127.0.0.1:8088 \
+  PAYMENT_GRPC_URL=http://127.0.0.1:9090 \
+  FULFILLMENT_URL=http://127.0.0.1:8093 \
+  rtk bash scripts/verify-commerce-stack.sh
 ```
 
-### W3 — inventory Postgres reservation
+External mode skips stack start/build, migration rerun, managed cold-cache
+reset proof, browser E2E, feature-file mutation, and the stop/start readiness
+fault injection. It still runs the business, async, storage, queue, cache,
+and readiness-health assertions against the supplied stack; use an isolated
+tenant/customer fixture and explicitly acknowledge its durable mutations with
+`VERIFY_EXTERNAL_ALLOW_MUTATION=1`; external mode does not clean up data.
 
-Code: inventory's opt-in integration test uses the production SQLx pool and
-reservation route against a compose-provided Postgres URL. It seeds an isolated
-SKU, asserts the real atomic decrement, removes that row, and closes the pool.
+`deploy/postgres/migrations/*.sql` owns all commerce tables, constraints,
+indexes, and seed data. `deploy/postgres/migrate.sh` creates
+`public.schema_migrations`, applies pending versions under a transaction and
+advisory lock, and records a version only after its SQL succeeds.
+`deploy/clickhouse/init.sql` owns analytics tables. Services do not create lazy
+replacement schemas at startup.
 
-Verify: `INVENTORY_TEST_DATABASE_URL=postgres://... cargo nextest run -p
-inventory reserves_stock_against_an_opt_in_postgres_database`. Without that
-explicit variable, the test prints a skip diagnostic and leaves the normal
-Docker-free suite unchanged.
+## Runtime journeys
 
-### W5 — cross-language `PaymentError` grouping
+The canonical verifier covers the focused distributed commerce slice. Use the
+scenario drivers below for additional journeys:
 
-Code: Rust checkout's B1 failure and Java payment's `Quote` request with
-`sku=PAYMENT-ERROR` both record `error.type=PaymentError` and the exact message
-`PaymentError: payment failed` before their HTTP/gRPC transport layers render a
-failure. Java also sends the original exception to Sentry.
+| Journey | Proof |
+|---|---|
+| `a24` | Web/storefront product page delegates to Catalog GraphQL and returns seeded products, variants, prices, categories, and reviews. |
+| `a1` | Checkout crosses Catalog, Pricing gRPC, PostgreSQL order/cart, Payment gRPC, Inventory, Recommendation, analytics, and the outbox. |
+| `a4` | Fulfillment publishes seeded orders to RabbitMQ, consumes with a span link, persists shipment state, writes ClickHouse, and calls Notifications. |
+| `a7` | Catalog price change is committed in PostgreSQL's durable journal; LISTEN wakes the replayable GraphQL subscription. |
+| `a7b` | Pricing server stream emits per-message telemetry and distinct failure/cancellation paths. |
+| `a23` | Storefront GraphQL resolver calls the real Pricing gRPC contract. |
+| `a25` | Inventory uses real PostgreSQL row locks, slow query, bounded query fan-out, and pool limits. |
+| `a26` | Recommendation reads Catalog GraphQL; parallelism is explicit bounded chaos, not a normal fake cache. |
+| `a14` | flagd string variants change checkout behavior without restarting checkout and are recorded with business context. The managed verifier restarts only flagd after changing its bind-mounted file so the check is deterministic on Docker Desktop. |
+| `b-chaos` / `b2` | Provider decline and inventory failure are explicit typed failure paths using normal SKUs. |
+| `a-breach-error-rate` / `a-recover` | Decline traffic then healthy traffic demonstrate error-rate recovery. |
+| `a29` | Shared typed business event names appear across Rust, Java, and web telemetry. |
+| `c11` | Browser smoke, when the Parallax CLI/browser harness is available. |
 
-| Backend | Disposition (2026-07-17) |
-| --- | --- |
-| Sentry self-hosted 26.6.0 | **PASS** product grouping: `verify.sh` A15/A16 `times_seen=5` on `PaymentError: payment failure (chaos)` (plan 154 multi-backend packet). |
-| Parallax | Fingerprint/issue surface consumes OTLP error events; shared `error.type` alone is not claimed as grouping — Sentry is the product grouping authority for this probe. |
-| Maple / SigNoz / OpenObserve | Trace/log error attributes retained on fan-out plumbing PASS; **no product-level cross-language issue grouping claim** (vendor UIs show attributes, not shared issue identity). |
+The real distributed topology has an executable Parallax assertion. With the
+stack and Parallax server running, execute:
 
-The runnable driver is `CROSS_LANGUAGE_PAYMENT_ERROR=1
-scenarios/b-chaos.sh` after starting the existing
-`deploy/docker-compose.xlang.yml` overlay, which routes checkout's pricing call
-to Java payment.
-
-### A5 / B15 — browser RUM + rage-clicks + session replay
-Code: `web` has `replayIntegration` + `browserTracingIntegration`; buttons
-"break (RUM error)" (A5) and "apply promo (unresponsive)" (B15).
-Verify: `bun run dev`, open the app in a browser with `VITE_SENTRY_DSN` set:
-- click "break" → a Sentry **error** with session **replay** (A5);
-- rapidly click "apply promo" → Sentry flags a **rage click** in the replay (B15);
-- confirm **web vitals** (LCP/CLS/INP) appear in Sentry Performance.
-
-Parallax arm (2026-08-14): same break path stitches in `/traces` as
-`ui.click` (web) parent of checkout `http.server.request` + `checkout`
-(`19edbf0ad9f030364b4657dfc7f4f463`, shot `traces-teach-rum-1440-dark.png`).
-Playground HTML `web-rum-break-1440-dark.png` is the producer, not the
-Parallax stitch.
-
-### A15 / A16 — Sentry issue grouping + lifecycle
-Code: every service initializes Sentry from `SENTRY_DSN`; Rust `tracing::error!`
-emits a Sentry issue through `sentry-tracing`, and Java uses the Spring SDK
-starter alongside the upstream OTel agent. GraphQL/field errors should call
-`Sentry.captureException` when they are handled rather than allowed to escape.
-Verify: with `SENTRY_DSN` set, trigger the same error repeatedly (e.g.
-`/checkout?fail=1`) → one **grouped issue** with rising event count (A15); resolve
-it in Sentry, deploy `v2` (`RELEASE=v2`) that re-introduces it → Sentry marks it
-**regressed** (A16).
-
-### A17 — profiling
-Code: JVM uses the Sentry Spring SDK's continuous-profiling configuration while
-the upstream OTel agent remains the OTLP exporter. CPU hot path:
-`/checkout?cpu_ms=200`.
-Verify: with profiling enabled + `SENTRY_DSN`, drive the hot path → a CPU profile
-with the slow function appears in Sentry Profiling.
-
-### Live simultaneous cross-language trace into the backend
-Run Java `payment` + the Rust services together against Rotel; with a short
-collector flush, one OpenObserve trace search shows `checkout` (Rust) **and**
-`payment` (Java) sharing one trace (add a tonic client interceptor in checkout to
-inject `traceparent` into gRPC metadata for full stitching).
-
-## Parallax live acceptance (plan 159, 2026-07-17)
-
-The Parallax-backend arm of the acceptance sweep ran green on the operator's
-Docker host: the full corner-case corpus (24 scenario ids), all four CLI
-modes, the journey scenarios, real browser sessions on `:5173`, and one
-wrapper-registered observable test session (83/83 Rust tests). The 27
-machine assertions in the Parallax repo's
-`docs/research/validation/2026-07-unified-cli-observability/assert.sh`
-exit 0 against the live GraphQL surface, and thirteen UI captures with a
-clean browser console close the coverage matrix. Playground fixes that fell
-out of the run: the test-telemetry exporter deadlock + wrapper-protocol
-clash, the Boot-4 Sentry starter for the Java services, invocation-id
-stamping on drive/cron log lines, and `PLAYGROUND_DAEMON_HOLD_SECONDS` +
-`app.mode` on background cycles for live daemon observation.
-
-## Multi-backend fan-out residual (plan 154, 2026-07-17)
-
-Live re-run on the operator host (64 GiB, Docker/OrbStack), **one self-hosted
-external at a time** through Rotel (`bench/otlp-fanout` in the Parallax
-repo). Host Parallax on offset OTLP `14317/14318` with `bind=0.0.0.0`.
-Durable packet:
-`parallax/docs/research/validation/2026-07-17-plan-154-multi-backend/`.
-
-| Backend | Result | Assert |
-|---|---|---|
-| OpenObserve | **PASS** | `smoke.sh` + search `count=102`; Parallax SQL `service=smoke` → 102 |
-| Maple v0.0.12 | **PASS** | `maple traces` shows `maple-fanout`; Parallax SQL → 102 |
-| SigNoz v0.129.0 | **PASS** | CH `signoz-smoke=102`, `signoz-smoke2=82` after first-org register (OpAMP OTLP gate) |
-| Sentry self-hosted 26.6.0 | **PASS** | `verify.sh` A1 OTLP HTTP 200 + A15/A16 `times_seen=5` (`PaymentError`) |
-
-W5 histogram + `PaymentError` disposition rows filled above. Collector-backed
-**rust** acceptance wrapper closed live 2026-07-17 against host Parallax lab
-(`api:4610`, OTLP gRPC `14317`, token auth):
-
-```text
-parallax invocation start -- <rust acceptance script>
-# 90/90 ci nextest + w4 flaky fixtures + test-report
-playground test-verify <invocation-id> rust http://127.0.0.1:4610
-# verified: 3 traces, 95 test attempts, 2 app descendants
-# invocation 1969ff68-0ebc-4bc0-afd5-5c7226b2662e
+```bash
+parallax invocation start -- scripts/verify-commerce-trace.sh
 ```
 
-Note: `mise exec` was rate-limited (GitHub 403); acceptance ran with cargo/
-nextest on `PATH` and `GIT_SHA`/`VCS_REF` set. Durable wrapper remains
-`scripts/observable-test-session.sh rust --acceptance` when mise is healthy.
-Java/web wrappers stay the same script shape; rust is the machine-checked
-acceptance residual for plan 154.
+The script sends a real checkout carrying all three W3C headers, then runs
+`playground commerce-verify`. That verifier queries Parallax GraphQL, follows
+linked RabbitMQ traces, and fails unless Catalog, Pricing, Inventory, Payment,
+Fulfillment/RabbitMQ, Notifications, and analytics evidence are present.
+
+## Storage assertions
+
+After `a1` and `a4`, verify directly through SQL/ClickHouse/RabbitMQ tooling:
+
+- PostgreSQL has a paid order, order items, payment lifecycle row, analytics
+  event, outbox event, shipment/processing claim with lease, and notification
+  delivery. Failed checkout compensation has durable reservation/task rows.
+- Replaying the same RabbitMQ event does not create a second shipment or
+  duplicate notification delivery.
+- ClickHouse `analytics.analytics_events` contains the checkout/fulfillment
+  event with tenant, entity, trace, span, properties, and context columns.
+- RabbitMQ has durable commerce/fulfillment queues and dead-letter queues.
+- Redis contains catalog/pricing cache entries whose values came from
+  PostgreSQL-backed reads.
+
+## Failure and security checks
+
+- All payment lifecycle operations require tenant context and enforce tenant
+  qualified database access.
+- Payment decline, provider-unavailable, invalid-state, and pending outcomes
+  remain distinguishable through gRPC and Checkout status responses.
+- Inventory reservation compensation releases previously reserved lines when a
+  later checkout step fails; captured payments are refunded by the recovery
+  path and authorized payments are voided. If a direct recovery is ambiguous,
+  PostgreSQL owns a bounded retryable compensation task; exhaustion leaves a
+  terminal `failed` task for reconciliation instead of an infinite retry loop.
+- Every async message carries W3C `traceparent`, `tracestate`, and safe
+  business `baggage`; consumers create links to producer contexts.
+- Tenant, customer, SKU, and event keys are bounded and validated at service
+  boundaries.
+- No normal response depends on in-memory product, price, order, queue, or
+  analytics fixtures. Synthetic delay/failure/leak/stampede controls are
+  bounded and explicit query/body/config inputs; normal Catalog reads do not
+  fail by SKU.
+
+## Browser contract
+
+The TanStack app must build and expose real routes for browse, product detail,
+cart, checkout, orders, and analytics. Storefront GraphQL must expose the
+durable Checkout-backed cart query/mutation, and checkout must submit actual
+JSON. The UI must render typed API failures, preserve trace context, and keep
+RUM spans/events. No demo-only SKU or retired endpoint is valid acceptance
+evidence.

@@ -1,21 +1,29 @@
-# Cross-language gRPC overlay. Points the Rust `checkout` orchestrator's pricing
-# client at the Java `payment` service (both serve the same playground.pricing.v1
-# Pricing/Quote contract), so a single distributed trace spans Rust → Java over
-# gRPC (W3C traceparent in gRPC metadata). Without it, checkout calls the Rust
-# `pricing` service (Rust → Rust).
+# Cross-language gRPC overlay. Keeps pricing on the Rust pricing service and
+# points checkout/storefront at the Java payment service through the separate
+# payment endpoint. A single distributed trace can then span Rust → Java over
+# gRPC (W3C traceparent in gRPC metadata).
 #
 #   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.xlang.yml up -d checkout
-#   curl "http://localhost:8088/checkout?sku=WIDGET-1&quantity=2"
+#   curl -X POST http://localhost:8088/checkout \
+#     -H 'content-type: application/json' \
+#     --data '{"tenant_id":"tenant-acme","customer_id":"customer-acme-ava","items":[{"sku":"WIDGET-1","quantity":2}]}'
 #
-# Verified live 2026-06-23: payment emits Pricing/Quote SERVER spans and the
-# checkout trace_id is shared with payment (one trace, two languages).
-name: telemetry-playground
 services:
   checkout:
     environment:
-      PRICING_ENDPOINT: "http://payment:9090"
-    depends_on: [payment]
+      PRICING_ENDPOINT: "http://pricing:50051"
+      PAYMENT_ENDPOINT: "http://payment:9090"
+    depends_on:
+      pricing:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
   storefront:
     environment:
-      PRICING_ENDPOINT: "http://payment:9090"
-    depends_on: [payment]
+      PRICING_ENDPOINT: "http://pricing:50051"
+      PAYMENT_ENDPOINT: "http://payment:9090"
+    depends_on:
+      pricing:
+        condition: service_healthy
+      payment:
+        condition: service_healthy

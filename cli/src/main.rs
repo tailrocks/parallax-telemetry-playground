@@ -11,6 +11,7 @@
 //!                         screens, ui.action roots)
 //! Flushes telemetry on exit (short-lived discipline).
 
+mod commerce_verify;
 mod console_sim;
 mod shapes;
 mod test_report;
@@ -39,10 +40,12 @@ async fn main() -> anyhow::Result<()> {
     // well as a live OTLP producer. Avoid the SDK's implicit localhost exporter
     // when no collector was requested; `parallax invocation start` supplies
     // the endpoint for the observable path.
-    let telemetry = if matches!(mode.as_str(), "test-report" | "test-verify")
-        && std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-            .ok()
-            .is_none_or(|endpoint| endpoint.trim().is_empty())
+    let telemetry = if matches!(
+        mode.as_str(),
+        "test-report" | "test-verify" | "commerce-verify"
+    ) && std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .ok()
+        .is_none_or(|endpoint| endpoint.trim().is_empty())
     {
         None
     } else {
@@ -64,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
         match mode.as_str() {
             "test-report" => test_report_command(&rest),
             "test-verify" => test_verify_command(&rest).await,
+            "commerce-verify" => commerce_verify_command(&rest).await,
             "cron" => cron(rest).await,
             "daemon" => daemon(rest).await,
             "enter" => enter(rest).await,
@@ -104,6 +108,7 @@ fn command_name(mode: &str) -> &'static str {
         "shapes" => "playground.shapes",
         "test-report" => "playground.test.report",
         "test-verify" => "playground.test.verify",
+        "commerce-verify" => "playground.commerce.verify",
         _ => "playground.drive",
     }
 }
@@ -127,6 +132,27 @@ fn outcome_for_exit(code: i32) -> &'static str {
     }
 }
 
+pub(crate) async fn traced_checkout_post(
+    url: &str,
+    body: &serde_json::Value,
+) -> reqwest::Result<reqwest::Response> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    playground_telemetry::inject_headers(&mut headers);
+    reqwest::Client::new()
+        .post(url)
+        .headers(headers)
+        .json(body)
+        .send()
+        .await
+}
+
+fn checkout_response_body(status: reqwest::StatusCode, body: String) -> anyhow::Result<String> {
+    if !status.is_success() {
+        anyhow::bail!("checkout returned HTTP {status}: {body}");
+    }
+    Ok(body)
+}
+
 async fn test_verify_command(args: &[String]) -> anyhow::Result<i32> {
     let [invocation_id, stack, rest @ ..] = args else {
         return Err(anyhow::anyhow!(
@@ -141,6 +167,26 @@ async fn test_verify_command(args: &[String]) -> anyhow::Result<i32> {
     println!(
         "verified {stack} observable invocation {invocation_id}: {} traces, {} test attempts, {} app descendants",
         summary.traces, summary.test_attempts, summary.app_descendants
+    );
+    Ok(0)
+}
+
+async fn commerce_verify_command(args: &[String]) -> anyhow::Result<i32> {
+    let [trace_id, rest @ ..] = args else {
+        return Err(anyhow::anyhow!(
+            "usage: playground commerce-verify <trace-id> [parallax-api-url]"
+        ));
+    };
+    let api_url = rest
+        .first()
+        .map(String::as_str)
+        .unwrap_or("http://127.0.0.1:4000");
+    let summary = commerce_verify::verify(api_url, trace_id).await?;
+    println!(
+        "verified commerce trace {trace_id}: {} linked trace(s), {} spans, services={}",
+        summary.traces,
+        summary.spans,
+        summary.services.join(",")
     );
     Ok(0)
 }
@@ -160,8 +206,19 @@ fn test_report_command(args: &[String]) -> anyhow::Result<i32> {
 #[tracing::instrument(fields(otel.kind = semconv::SPAN_KIND_CLIENT))]
 async fn drive() -> anyhow::Result<i32> {
     let base = std::env::var("CHECKOUT_URL").unwrap_or_else(|_| "http://localhost:8088".into());
-    let url = format!("{base}/checkout?sku=WIDGET-1&quantity=3");
-    let body = playground_telemetry::traced_get(&url).await?.text().await?;
+    let url = format!("{base}/checkout");
+    let request = serde_json::json!({
+        "tenant_id": "tenant-acme",
+        "customer_id": "customer-acme-ava",
+        "items": [{"sku": "WIDGET-1", "quantity": 3}],
+        "currency_code": "USD",
+        "payment_method_token": "tok_visa",
+        "request_id": format!("cli-{}", invocation::invocation_id()),
+    });
+    let response = traced_checkout_post(&url, &request).await?;
+    let status = response.status();
+    let body = response.text().await?;
+    let body = checkout_response_body(status, body)?;
     // Log records don't inherit span attributes; stamp the invocation id so
     // invocation-scoped log queries can find this line.
     tracing::info!(
@@ -487,9 +544,11 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        CronOutcome, app_mode, command_name, cron_once, execution_child_command, outcome_for_exit,
+        CronOutcome, app_mode, checkout_response_body, command_name, cron_once,
+        execution_child_command, outcome_for_exit,
     };
     use playground_telemetry::semconv;
+    use reqwest::StatusCode;
 
     #[tokio::test]
     async fn cron_outcomes_preserve_process_exit_contract() {
@@ -520,6 +579,11 @@ mod tests {
                 "playground.test.verify",
                 semconv::APP_MODE_ONE_SHOT,
             ),
+            (
+                "commerce-verify",
+                "playground.commerce.verify",
+                semconv::APP_MODE_ONE_SHOT,
+            ),
         ];
         for (mode, command, app) in cases {
             assert_eq!(command_name(mode), command, "{mode}");
@@ -531,6 +595,26 @@ mod tests {
     fn exit_codes_map_to_the_bounded_outcome() {
         assert_eq!(outcome_for_exit(0), semconv::OUTCOME_SUCCESS);
         assert_eq!(outcome_for_exit(1), semconv::OUTCOME_FAILURE);
+    }
+
+    #[test]
+    fn checkout_success_returns_the_response_body() {
+        assert_eq!(
+            checkout_response_body(StatusCode::OK, "{\"status\":\"paid\"}".to_owned())
+                .expect("successful checkout"),
+            "{\"status\":\"paid\"}"
+        );
+    }
+
+    #[test]
+    fn checkout_http_failure_is_a_cli_error() {
+        let error = checkout_response_body(
+            StatusCode::BAD_GATEWAY,
+            "{\"message\":\"payment unavailable\"}".to_owned(),
+        )
+        .expect_err("non-success checkout must fail");
+        assert!(error.to_string().contains("HTTP 502"));
+        assert!(error.to_string().contains("payment unavailable"));
     }
 
     #[test]

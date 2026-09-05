@@ -2,6 +2,8 @@
 set -euo pipefail
 
 BASE="${INVENTORY_URL:-http://localhost:8089}"
+TENANT_ID="${INVENTORY_TENANT_ID:-tenant-acme}"
+RUN_ID="${A25_RUN_ID:-a25-$$}"
 TMPDIR="${TMPDIR:-/tmp}"
 POOL_BODY="$(mktemp "$TMPDIR/a25-pool.XXXXXX")"
 trap 'rm -f "$POOL_BODY"' EXIT
@@ -15,30 +17,30 @@ request() {
 }
 
 echo "A25 Postgres: normal reserve"
-request "normal" "$BASE/reserve?sku=WIDGET-1&quantity=1"
+request "normal" "$BASE/reserve?tenant_id=$TENANT_ID&reservation_id=${RUN_ID}-normal&sku=WIDGET-1&quantity=1"
 echo "Check in Parallax: reserve trace has UPDATE stock span with db.system.name=postgresql and db.query.text."
 echo
 
 echo "A25 Postgres: slow query"
-request "pg_sleep 400ms" "$BASE/reserve?sku=WIDGET-2&quantity=1&slow=400"
+request "pg_sleep 400ms" "$BASE/reserve?tenant_id=$TENANT_ID&reservation_id=${RUN_ID}-slow&sku=WIDGET-2&quantity=1&slow=400"
 echo "Check in Parallax: trace has SELECT pg_sleep db span around 400ms."
 echo
 
 echo "A25 Postgres: DB N+1"
-request "db_n1=12" "$BASE/reserve?sku=WIDGET-3&quantity=1&db_n1=12"
+request "db_n1=12" "$BASE/reserve?tenant_id=$TENANT_ID&reservation_id=${RUN_ID}-db-n1&sku=GADGET-1&quantity=1&db_n1=12"
 echo "Check in Parallax: trace has 12 SELECT stock spans before UPDATE."
 echo
 
 echo "A25 Postgres: pool exhaustion"
 pids=()
-for i in 1 2 3 4 5 6; do
-  curl --max-time 12 -sS "$BASE/reserve?sku=WIDGET-4&quantity=1&hold_ms=4000" \
+for i in $(seq 1 10); do
+  curl --max-time 12 -sS "$BASE/reserve?tenant_id=$TENANT_ID&reservation_id=${RUN_ID}-hold-$i&sku=WIDGET-2&quantity=1&hold_ms=4000" \
     -o /dev/null -w "hold-$i [%{http_code}]\n" &
   pids+=("$!")
 done
 
 sleep 0.5
-pool_code="$(curl --max-time 8 -sS "$BASE/reserve?sku=WIDGET-1&quantity=1" -o "$POOL_BODY" -w "%{http_code}" || true)"
+pool_code="$(curl --max-time 8 -sS "$BASE/reserve?tenant_id=$TENANT_ID&reservation_id=${RUN_ID}-pool-probe&sku=WIDGET-1&quantity=1" -o "$POOL_BODY" -w "%{http_code}" || true)"
 printf "%-20s [%s]\n" "pool pressure" "$pool_code"
 
 for pid in "${pids[@]}"; do

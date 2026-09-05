@@ -17,6 +17,10 @@ tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
 tower-http = { workspace = true }
 tower = { workspace = true }
+lapin = { workspace = true }
+futures-lite = { workspace = true }
+deadpool-postgres = { workspace = true }
+tokio-postgres = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }

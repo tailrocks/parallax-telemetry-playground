@@ -1,0 +1,16 @@
+version: v2
+
+modules:
+  - path: .
+
+lint:
+  use:
+    - MINIMAL
+  except:
+    - DIRECTORY_SAME_PACKAGE
+    - PACKAGE_DIRECTORY_MATCH
+    - PACKAGE_SAME_DIRECTORY
+
+breaking:
+  use:
+    - FILE

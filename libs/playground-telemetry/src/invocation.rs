@@ -10,8 +10,8 @@ use std::sync::OnceLock;
 
 use crate::semconv;
 
-/// Env carrier for the invocation id. The legacy `PARALLAX_RUN_ID` carrier is
-/// retired (operator, 2026-07-17) and is never read or written.
+/// Env carrier for the invocation id. `PARALLAX_RUN_ID` is intentionally not
+/// accepted or emitted; wrapped processes use this single carrier.
 pub const INVOCATION_ENV: &str = "CLI_INVOCATION_ID";
 
 static INVOCATION_ID: OnceLock<String> = OnceLock::new();

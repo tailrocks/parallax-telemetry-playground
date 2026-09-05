@@ -1,34 +1,16 @@
 package dev.tailrocks.fulfillment;
 
-import dev.tailrocks.pricing.v1.PricingGrpc;
-import dev.tailrocks.pricing.v1.QuoteRequest;
-import io.opentelemetry.api.common.AttributeKey;
-import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.api.trace.SpanContext;
-import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
-import io.opentelemetry.context.Context;
-import io.opentelemetry.context.propagation.TextMapGetter;
-import io.opentelemetry.context.propagation.TextMapSetter;
-import io.tailrocks.semconv.Semconv;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.header.Header;
-import org.apache.kafka.common.header.Headers;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
+import java.util.concurrent.ThreadFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.grpc.client.GrpcChannelFactory;
-import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.stereotype.Component;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 @SpringBootApplication
 public class FulfillmentApplication {
@@ -37,128 +19,60 @@ public class FulfillmentApplication {
     }
 
     @Bean
-    PricingGrpc.PricingBlockingStub paymentPricingClient(GrpcChannelFactory channels) {
-        return PricingGrpc.newBlockingStub(channels.createChannel("payment"));
-    }
-}
-
-// Real-Kafka producer: POST /publish sends to the `orders` topic (PRODUCER span,
-// agent-instrumented), which the consumer below picks up over the broker
-// (CONSUMER span). Replaces the in-process queue with a real broker round-trip.
-@RestController
-class OrderProducer {
-    private final KafkaTemplate<String, String> kafka;
-
-    OrderProducer(KafkaTemplate<String, String> kafka) {
-        this.kafka = kafka;
+    ObjectMapper objectMapper() {
+        return new ObjectMapper().findAndRegisterModules();
     }
 
-    static final String JOB_ID_HEADER = "x-job-id";
-
-    @PostMapping("/publish")
-    String publish(@RequestParam(defaultValue = "order-1") String order) {
-        // Detached-job identity (plan 158 decision 6): the PRODUCER mints a
-        // job id, stamps it on its span, and carries it over Kafka headers so
-        // the CONSUMER attempt shares the same job.
-        String jobId = UUID.randomUUID().toString();
-        Span.current().setAttribute(AttributeKey.stringKey(Semconv.JOB_ID), jobId);
-        Span.current()
-            .setAttribute(
-                AttributeKey.stringKey(Semconv.JOB_TYPE), Semconv.JOB_TYPE_FULFILLMENT_SHIPMENT);
-        ProducerRecord<String, String> record = new ProducerRecord<>("orders", order);
-        KafkaTraceContext.inject(Context.current(), record.headers());
-        record.headers().add(JOB_ID_HEADER, jobId.getBytes(StandardCharsets.US_ASCII));
-        kafka.send(record);
-        return "published " + order;
-    }
-}
-
-@Component
-class NotificationClient {
-    private final RestClient http;
-    private final String notificationsUrl =
-        System.getenv().getOrDefault("NOTIFICATIONS_URL", "http://notifications:8091");
-
-    NotificationClient() {
-        this(RestClient.create());
+    @Bean
+    RestClient.Builder restClientBuilder(
+        @Value("${fulfillment.http.connect-timeout-ms:2000}") int connectTimeoutMillis,
+        @Value("${fulfillment.http.read-timeout-ms:10000}") int readTimeoutMillis
+    ) {
+        validateTimeout("fulfillment.http.connect-timeout-ms", connectTimeoutMillis);
+        validateTimeout("fulfillment.http.read-timeout-ms", readTimeoutMillis);
+        var requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(Duration.ofMillis(connectTimeoutMillis));
+        requestFactory.setReadTimeout(Duration.ofMillis(readTimeoutMillis));
+        return RestClient.builder().requestFactory(requestFactory);
     }
 
-    NotificationClient(RestClient http) {
-        this.http = http;
-    }
-
-    void notifyOrder() {
-        http.get().uri(notificationsUrl + "/").retrieve().toBodilessEntity();
-    }
-}
-
-@Component
-class OrderConsumer {
-    private final PricingGrpc.PricingBlockingStub pricing;
-    private final NotificationClient notifications;
-
-    OrderConsumer(PricingGrpc.PricingBlockingStub pricing, NotificationClient notifications) {
-        this.pricing = pricing;
-        this.notifications = notifications;
-    }
-
-    // CONSUMER span (auto-instrumented); the reverse Java→Rust hop follows.
-    @KafkaListener(topics = "orders", groupId = "fulfillment")
-    void onOrder(ConsumerRecord<String, String> record) {
-        Context producer = KafkaTraceContext.extract(record.headers());
-        SpanContext producerSpan = Span.fromContext(producer).getSpanContext();
-        if (producerSpan.isValid()) {
-            Span.current().addLink(producerSpan);
+    @Bean(destroyMethod = "shutdown")
+    ScheduledExecutorService fulfillmentLeaseExecutor(
+        @Value("${spring.rabbitmq.listener.simple.max-concurrency:4}") int maxConcurrentConsumers,
+        @Value("${fulfillment.claim-lease-heartbeat-threads:8}") int heartbeatThreads
+    ) {
+        if (maxConcurrentConsumers < 1) {
+            throw new IllegalStateException(
+                "spring.rabbitmq.listener.simple.max-concurrency must be positive"
+            );
         }
-        String jobId = KafkaTraceContext.header(record.headers(), OrderProducer.JOB_ID_HEADER);
-        if (jobId != null && !jobId.isEmpty()) {
-            Span.current().setAttribute(AttributeKey.stringKey(Semconv.JOB_ID), jobId);
-            Span.current()
-                .setAttribute(
-                    AttributeKey.stringKey(Semconv.JOB_TYPE),
-                    Semconv.JOB_TYPE_FULFILLMENT_SHIPMENT);
+        int requiredThreads;
+        try {
+            // One listener container exists for each durable queue. Reserve one
+            // heartbeat worker per possible claim in both containers.
+            requiredThreads = Math.multiplyExact(maxConcurrentConsumers, 2);
+        } catch (ArithmeticException error) {
+            throw new IllegalStateException("fulfillment listener concurrency is too large", error);
         }
-        String order = record.value();
-        pricing.quote(QuoteRequest.newBuilder().setSku(order).setQuantity(1).build());
-        notifications.notifyOrder();
-    }
-}
-
-final class KafkaTraceContext {
-    private static final W3CTraceContextPropagator W3C = W3CTraceContextPropagator.getInstance();
-    private static final TextMapSetter<Headers> SETTER = (headers, key, value) -> {
-        headers.remove(key);
-        headers.add(key, value.getBytes(StandardCharsets.US_ASCII));
-    };
-    private static final TextMapGetter<Headers> GETTER = new TextMapGetter<>() {
-        @Override
-        public Iterable<String> keys(Headers headers) {
-            List<String> keys = new ArrayList<>();
-            for (Header header : headers) {
-                keys.add(header.key());
-            }
-            return keys;
+        if (heartbeatThreads < requiredThreads) {
+            throw new IllegalStateException(
+                "fulfillment.claim-lease-heartbeat-threads must be >= twice listener max-concurrency"
+            );
         }
-
-        @Override
-        public String get(Headers headers, String key) {
-            Header header = headers.lastHeader(key);
-            return header == null ? null : new String(header.value(), StandardCharsets.US_ASCII);
-        }
-    };
-
-    private KafkaTraceContext() {}
-
-    static void inject(Context context, Headers headers) {
-        W3C.inject(context, headers, SETTER);
+        return Executors.newScheduledThreadPool(heartbeatThreads, fulfillmentThreadFactory());
     }
 
-    static Context extract(Headers headers) {
-        return W3C.extract(Context.root(), headers, GETTER);
+    private static ThreadFactory fulfillmentThreadFactory() {
+        return runnable -> {
+            Thread thread = new Thread(runnable, "fulfillment-lease-heartbeat");
+            thread.setDaemon(true);
+            return thread;
+        };
     }
 
-    static String header(Headers headers, String key) {
-        Header header = headers.lastHeader(key);
-        return header == null ? null : new String(header.value(), StandardCharsets.US_ASCII);
+    private static void validateTimeout(String property, int timeoutMillis) {
+        if (timeoutMillis < 1 || timeoutMillis > 60_000) {
+            throw new IllegalStateException(property + " must be between 1 and 60000 milliseconds");
+        }
     }
 }

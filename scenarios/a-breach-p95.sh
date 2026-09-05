@@ -4,7 +4,7 @@
 # breaches. Uses the existing deterministic ?slow= knob (b13 mechanics).
 set -euo pipefail
 
-BASE="${RECOMMENDATION_URL:-http://localhost:8091}"
+BASE="${RECOMMENDATION_URL:-http://localhost:8090}"
 BREACH_SECONDS="${BREACH_SECONDS:-200}"
 REQUEST_GAP_SECONDS="${REQUEST_GAP_SECONDS:-2}"
 SLOW_MS="${BREACH_SLOW_MS:-900}"
@@ -13,7 +13,7 @@ echo "a-breach-p95: driving ${SLOW_MS}ms recommendation responses for ${BREACH_S
 end=$((SECONDS + BREACH_SECONDS))
 count=0
 while ((SECONDS < end)); do
-  curl --max-time 30 -sS "$BASE/recommend?sku=WIDGET-1&slow=$SLOW_MS" -o /dev/null \
+  curl --max-time 30 -sS "$BASE/recommend?tenant_id=tenant-acme&sku=WIDGET-1&slow=$SLOW_MS" -o /dev/null \
     -w "slow request [%{http_code}] %{time_total}s\n" || true
   count=$((count + 1))
   echo "a-breach-p95: request #$count ($((end - SECONDS))s remaining)"

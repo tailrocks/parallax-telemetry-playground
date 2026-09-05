@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# A13: release-attributed regression. Recreate checkout with RELEASE=v1,
-# then RELEASE=v2; v2 fails through checkout's release branch, no ?fail crutch.
+# A13: release-attributed comparison. Recreate the same valid checkout with
+# RELEASE=v1, then RELEASE=v2, and compare service.version attribution.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,7 +15,7 @@ compose() {
 
 wait_checkout() {
   for _ in $(seq 1 30); do
-    code="$(curl --max-time 10 -sS "$BASE/checkout" -o /dev/null -w "%{http_code}" || true)"
+    code="$(curl --max-time 10 -sS "$BASE/healthz" -o /dev/null -w "%{http_code}" || true)"
     if [[ "$code" != "000" ]]; then
       return 0
     fi
@@ -29,7 +29,10 @@ drive_burst() {
   local label="$1"
   local expected="$2"
   for i in $(seq 1 "$REQUESTS"); do
-    code="$(curl --max-time 10 -sS "$BASE/checkout" -o /dev/null -w "%{http_code}")"
+    code="$(curl --max-time 10 -sS -X POST "$BASE/checkout" \
+      -H 'content-type: application/json' \
+      --data "{\"tenant_id\":\"tenant-acme\",\"customer_id\":\"customer-acme-ava\",\"items\":[{\"sku\":\"WIDGET-1\",\"quantity\":1}],\"currency_code\":\"USD\",\"payment_method_token\":\"tok_visa\",\"payment_method_type\":\"card\",\"request_id\":\"a13-${label}-${i}\"}" \
+      -o /dev/null -w "%{http_code}")"
     echo "$label #$i [$code]"
     [[ "$code" == "$expected" ]]
   done
@@ -52,21 +55,21 @@ start_v1_stack() {
 
 trap restore_v1 EXIT
 
-echo "A13 phase 1: checkout RELEASE=v1 clean"
+echo "A13 phase 1: checkout RELEASE=v1 baseline"
 start_v1_stack
 wait_checkout
-drive_burst "v1 clean" 200
+drive_burst "v1-baseline" 200
 
 echo
-echo "A13 phase 2: checkout RELEASE=v2 regressed"
+echo "A13 phase 2: checkout RELEASE=v2 release attribution"
 RELEASE=v2 compose up -d --no-deps --force-recreate checkout >/dev/null
 wait_checkout
-drive_burst "v2 regressed" 502
+drive_burst "v2-attribution" 200
 
 restore_v1
 trap - EXIT
 
 echo
 echo "Check in Parallax UI:"
-echo "- Issues: checkout error spike attributed to service.version=v2"
-echo "- Services -> checkout: release strip shows v1 -> v2 once plan 041 lands"
+echo "- Compare checkout traces and resource attributes by service.version=v1 versus v2"
+echo "- Services -> checkout: release attribution changes while request behavior stays valid"

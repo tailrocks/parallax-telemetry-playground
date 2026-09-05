@@ -3,18 +3,27 @@
 // Rotel → every backend). See spec §8 (Frontend). Called once from the client
 // entry before hydration.
 import * as Sentry from "@sentry/tanstackstart-react";
+import type { Context } from "@opentelemetry/api";
 import { initOtel } from "./telemetry";
 
 // API origins matched by Sentry tracePropagationTargets. OTel app fetches use
 // tracedFetch() so they can inject trace context and session baggage explicitly.
-const checkoutUrl = import.meta.env["VITE_CHECKOUT_URL"] ?? "http://localhost:8088";
-const ordersUrl = import.meta.env["VITE_ORDERS_URL"] ?? "http://localhost:8092";
-const apiTargets: (string | RegExp)[] = [/^\//, checkoutUrl, ordersUrl];
+const storefrontUrl =
+  import.meta.env["VITE_STOREFRONT_URL"] ?? "/__storefront/graphql";
+const storefrontOrigin = (() => {
+  try {
+    return new URL(storefrontUrl).origin;
+  } catch {
+    return storefrontUrl;
+  }
+})();
+const apiTargets: (string | RegExp)[] = [/^\//, storefrontOrigin];
 
 let started = false;
+let browserContext: Context | undefined;
 
-export function initBrowserTelemetry() {
-  if (started || typeof document === "undefined") return;
+export function initBrowserTelemetry(): Context | undefined {
+  if (started || typeof document === "undefined") return browserContext;
   started = true;
 
   Sentry.init({
@@ -24,8 +33,9 @@ export function initBrowserTelemetry() {
     tracesSampleRate: 1.0,
     replaysSessionSampleRate: 0.1,
     replaysOnErrorSampleRate: 1.0,
-    // Share W3C traceparent so the Sentry transaction tree and the OTLP trace
-    // carry the same trace_id (emission is opt-in; §6).
+    // The SSR entry emits Sentry's `sentry-trace` meta parent alongside W3C
+    // metadata. BrowserTracing reads it, so the pageload transaction is a
+    // child of the real SSR span instead of a second trace root.
     tracePropagationTargets: apiTargets,
     // Sentry logs (browser OTel logs are still experimental — §8).
     enableLogs: true,
@@ -41,5 +51,6 @@ export function initBrowserTelemetry() {
   // Portable path: OTel WebTracerProvider → /v1/traces proxy. Fetch +
   // document-load + user-interaction instrumentation propagate traceparent to
   // the backend so the browser span joins the same distributed trace.
-  initOtel();
+  browserContext = initOtel();
+  return browserContext;
 }

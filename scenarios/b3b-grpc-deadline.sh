@@ -6,8 +6,9 @@ BODY="$(mktemp "${TMPDIR:-/tmp}/b3b-grpc-deadline.XXXXXX")"
 trap 'rm -f "$BODY"' EXIT
 
 echo "B3b gRPC deadline: pricing delay exceeds grpc-timeout"
-code="$(curl --max-time 15 -sS \
-  "$BASE/checkout?sku=WIDGET-1&quantity=1&retry=2&timeout_ms=100&delay_ms=350" \
+code="$(curl --max-time 15 -sS -X POST "$BASE/checkout" \
+  -H 'content-type: application/json' \
+  --data '{"tenant_id":"tenant-acme","customer_id":"customer-acme-ava","items":[{"sku":"WIDGET-1","quantity":1}],"currency_code":"USD","payment_method_token":"tok_visa","payment_method_type":"card","retry":2,"timeout_ms":100,"delay_ms":350}' \
   -o "$BODY" -w "%{http_code}" || true)"
 printf "deadline [%s]\n" "$code"
 cat "$BODY"

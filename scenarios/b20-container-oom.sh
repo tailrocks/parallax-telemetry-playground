@@ -17,7 +17,7 @@ $COMPOSE -f deploy/docker-compose.yml -f deploy/docker-compose.limits.yml up -d 
 
 for i in $(seq 1 "$ROUNDS"); do
   echo "leak round $i: ${LEAK_KB}KiB"
-  curl -sS "$BASE/recommend?sku=WIDGET-1&leak=$LEAK_KB" -o /dev/null -w "  [%{http_code}]\n" || true
+  curl -sS "$BASE/recommend?tenant_id=tenant-acme&sku=WIDGET-1&leak=$LEAK_KB" -o /dev/null -w "  [%{http_code}]\n" || true
   $COMPOSE -f deploy/docker-compose.yml -f deploy/docker-compose.limits.yml ps recommendation
   sleep 0.5
 done

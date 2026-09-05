@@ -10,8 +10,16 @@ playground-proto = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
+tonic-health = { workspace = true }
 tokio-stream = { workspace = true }
+deadpool-postgres = { workspace = true }
+tokio-postgres = { workspace = true }
+redis = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }
+opentelemetry = { workspace = true }
+open-feature = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }

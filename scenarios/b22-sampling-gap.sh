@@ -34,7 +34,11 @@ wait_checkout
 
 ok=0
 for i in $(seq 1 50); do
-  code="$(curl --max-time 10 -sS "$BASE/checkout?sku=WIDGET-1&quantity=$((i % 5 + 1))" -o /dev/null -w "%{http_code}")"
+  quantity=$((i % 5 + 1))
+  code="$(curl --max-time 10 -sS -X POST "$BASE/checkout" \
+    -H 'content-type: application/json' \
+    --data "{\"tenant_id\":\"tenant-acme\",\"customer_id\":\"customer-acme-ava\",\"items\":[{\"sku\":\"WIDGET-1\",\"quantity\":$quantity}],\"currency_code\":\"USD\",\"payment_method_token\":\"tok_visa\",\"payment_method_type\":\"card\",\"request_id\":\"b22-$i-$$\"}" \
+    -o /dev/null -w "%{http_code}")"
   echo "checkout $i [$code]"
   if [[ "$code" == "200" ]]; then
     ok=$((ok + 1))

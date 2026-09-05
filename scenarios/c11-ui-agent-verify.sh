@@ -24,7 +24,7 @@ check() {
   snap="$(ab snapshot -i -c || true)"
   if ! printf '%s' "$snap" | grep -Eiq "$expect"; then
     echo "c11-ui: $path missing /$expect/" >&2
-    printf '%s\n' "$snap" | head -40 >&2
+    printf '%s\n' "$snap" | head -40 >&2 || true
     exit 1
   fi
   echo "c11-ui ok $path"

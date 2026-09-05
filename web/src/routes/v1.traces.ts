@@ -35,10 +35,11 @@ export const Route = createFileRoute("/v1/traces")({
             },
           });
         } catch (err) {
-          // Rotel down: drop the batch but don't surface a hard error to the
-          // page (telemetry must never break the app).
+          // Do not claim a receipt when the collector is unavailable. The
+          // exporter can retry, while the non-telemetry application path stays
+          // independent of this response.
           console.error("[/v1/traces] forward to Rotel failed:", err);
-          return new Response(null, { status: 202 });
+          return new Response(null, { status: 503 });
         }
       },
     },

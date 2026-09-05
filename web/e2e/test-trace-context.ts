@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const W3C_TRACEPARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-0[01]$/i;
+const W3C_TRACEPARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/;
 
 /**
  * Gives one Playwright test a stable synthetic parent. When a run-level
