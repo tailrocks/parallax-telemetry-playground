@@ -408,16 +408,38 @@ fn configured_positive(name: &str) -> Result<Option<u64>> {
     Ok(Some(value))
 }
 
-async fn graphql(
+async fn parallax_graphql(
+    client: &reqwest::Client,
+    endpoint: &str,
+    query: &str,
+    variables: Value,
+    bearer_token: Option<&str>,
+) -> Result<Value> {
+    graphql(client, endpoint, query, variables, bearer_token).await
+}
+
+async fn storefront_graphql(
     client: &reqwest::Client,
     endpoint: &str,
     query: &str,
     variables: Value,
 ) -> Result<Value> {
+    // Storefront is a local application endpoint. It must never receive the
+    // credential used for the optional external Parallax GraphQL API.
+    graphql(client, endpoint, query, variables, None).await
+}
+
+async fn graphql(
+    client: &reqwest::Client,
+    endpoint: &str,
+    query: &str,
+    variables: Value,
+    bearer_token: Option<&str>,
+) -> Result<Value> {
     let mut request = client
         .post(endpoint)
         .json(&json!({"query": query, "variables": variables}));
-    if let Ok(token) = std::env::var("PARALLAX_API_TOKEN") {
+    if let Some(token) = bearer_token.filter(|token| !token.trim().is_empty()) {
         request = request.bearer_auth(token);
     }
     let response = request
@@ -465,7 +487,7 @@ async fn verify_clickhouse_evidence(
     expected_baggage: &BusinessBaggage,
     identity: &CommerceIdentity,
 ) -> Result<()> {
-    let response = graphql(
+    let response = storefront_graphql(
         client,
         endpoint,
         ANALYTICS_QUERY,
@@ -479,8 +501,17 @@ async fn verify_clickhouse_evidence(
         .context("Storefront analytics response has no event list")?;
     let event = events
         .iter()
-        .find(|event| event.get("traceId").and_then(Value::as_str) == Some(trace_id))
-        .with_context(|| format!("ClickHouse has no order.paid event for trace {trace_id}"))?;
+        .find(|event| {
+            event.get("traceId").and_then(Value::as_str) == Some(trace_id)
+                && event.get("eventKey").and_then(Value::as_str)
+                    == Some(identity.event_key.as_str())
+        })
+        .with_context(|| {
+            format!(
+                "ClickHouse has no order.paid event for trace {trace_id} and event key {}",
+                bounded_output(&identity.event_key)
+            )
+        })?;
     validate_clickhouse_event_with_context(event, tenant_id, trace_id, expected_baggage, identity)
 }
 
@@ -488,6 +519,7 @@ async fn verify_clickhouse_evidence(
 fn validate_clickhouse_event(event: &Value, tenant_id: &str, trace_id: &str) -> Result<()> {
     let baggage = validate_baggage(required_string(event, "baggage")?)?;
     let expected_baggage = BusinessBaggage::from_entries(&baggage, "ClickHouse baggage")?;
+    let event_key = required_string(event, "eventKey")?.to_owned();
     validate_clickhouse_event_with_context(
         event,
         tenant_id,
@@ -497,6 +529,7 @@ fn validate_clickhouse_event(event: &Value, tenant_id: &str, trace_id: &str) -> 
             tenant_id: tenant_id.to_owned(),
             event_id: required_string(event, "eventId")?.to_owned(),
             event_type: required_string(event, "eventName")?.to_owned(),
+            event_key,
             order_id: required_string(event, "entityId")?.to_owned(),
         },
     )
@@ -510,7 +543,12 @@ fn validate_clickhouse_event_with_context(
     identity: &CommerceIdentity,
 ) -> Result<()> {
     let event_id = required_string(event, "eventId")?;
-    ensure!(!event_id.is_empty(), "ClickHouse event id is empty");
+    let event_uuid = uuid::Uuid::parse_str(event_id)
+        .context("ClickHouse event id is not a UUID analytics projection")?;
+    ensure!(
+        event_uuid.get_version_num() == 5,
+        "ClickHouse event id is not a UUID v5 analytics projection"
+    );
     ensure!(
         required_string(event, "tenantId")? == tenant_id,
         "ClickHouse event tenant does not match the verified tenant"
@@ -524,7 +562,10 @@ fn validate_clickhouse_event_with_context(
         "verified commerce identity tenant does not match the verified tenant"
     );
     let event_key = required_string(event, "eventKey")?;
-    ensure!(!event_key.is_empty(), "ClickHouse event key is empty");
+    ensure!(
+        event_key == identity.event_key,
+        "ClickHouse event key does not match the verified Rabbit event"
+    );
     ensure!(
         required_string(event, "eventName")? == "order.paid",
         "ClickHouse evidence is not an order.paid event"
@@ -532,6 +573,10 @@ fn validate_clickhouse_event_with_context(
     ensure!(
         required_string(event, "eventName")? == identity.event_type,
         "ClickHouse event type does not match the verified Rabbit event"
+    );
+    ensure!(
+        identity.event_key == format!("{}:paid", identity.order_id),
+        "verified Rabbit event key is not the canonical paid-order key"
     );
     ensure!(
         required_string(event, "source")? == "fulfillment",
@@ -694,6 +739,7 @@ fn validate_tracestate(value: &str) -> Result<BTreeMap<String, String>> {
         ensure!(
             !member.is_empty()
                 && !key.is_empty()
+                && member.len() <= MAX_TRACESTATE_MEMBER_BYTES
                 && !member_value.is_empty()
                 && !member_value.contains('=')
                 && valid_tracestate_key(key)
@@ -840,6 +886,17 @@ fn analyze_details(anchor: &str, traces: &[Value]) -> Result<Analysis> {
             "commerce trace is missing service `{required}`"
         );
     }
+    // A direct checkout trace intentionally has no browser hop. If either
+    // canonical browser service is present, accepting the other as absent
+    // would make a partial browser topology look complete.
+    if services.contains("web") || services.contains("storefront") {
+        for required in ["web", "storefront"] {
+            ensure!(
+                services.contains(required),
+                "canonical browser trace is missing service `{required}`"
+            );
+        }
+    }
 
     let names = spans
         .iter()
@@ -914,7 +971,7 @@ fn analyze_details(anchor: &str, traces: &[Value]) -> Result<Analysis> {
         "fulfillment analytics consumers are not linked to the checkout producer",
     )?;
 
-    let checkout_root = checkout_root_index(anchor, &nodes, &roots)?;
+    let checkout_root = checkout_span_index(anchor, &nodes)?;
     let business_baggage = BusinessBaggage::from_attribute_object(
         &span_attribute_object(nodes[checkout_root].span)?,
         "checkout business baggage",
@@ -977,22 +1034,22 @@ fn analyze_details(anchor: &str, traces: &[Value]) -> Result<Analysis> {
     })
 }
 
-fn checkout_root_index(anchor: &str, nodes: &[SpanNode<'_>], roots: &[usize]) -> Result<usize> {
-    let checkout_roots = roots
+fn checkout_span_index(anchor: &str, nodes: &[SpanNode<'_>]) -> Result<usize> {
+    let checkout_spans = nodes
         .iter()
-        .copied()
-        .filter(|position| {
-            let span = nodes[*position].span;
-            nodes[*position].trace_id == anchor
-                && span.get("service").and_then(Value::as_str) == Some("checkout")
-                && span.get("name").and_then(Value::as_str) == Some("checkout")
+        .enumerate()
+        .filter(|(_, node)| {
+            node.trace_id == anchor
+                && node.span.get("service").and_then(Value::as_str) == Some("checkout")
+                && node.span.get("name").and_then(Value::as_str) == Some("checkout")
         })
+        .map(|(position, _)| position)
         .collect::<Vec<_>>();
     ensure!(
-        checkout_roots.len() == 1,
-        "commerce checkout trace does not have exactly one checkout root"
+        checkout_spans.len() == 1,
+        "commerce checkout trace does not have exactly one checkout span"
     );
-    Ok(checkout_roots[0])
+    Ok(checkout_spans[0])
 }
 
 fn require_span_business_baggage(

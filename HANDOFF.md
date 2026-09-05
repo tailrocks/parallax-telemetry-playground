@@ -17,6 +17,10 @@ the pasted DOD at:
   deliberate `reviewsSlow` N+1 field.
 - Pricing and Orders inbound W3C context now remains current across async work;
   focused tests passed.
+- The CLI verifier received a late auth-separation, ClickHouse/Rabbit event-key,
+  analytics event-id, checkout-root, and tracestate-bound patch immediately
+  after the main commit. It is included in the follow-up commit below but was
+  not re-tested before this pause.
 
 ## Last proven gates
 
@@ -38,9 +42,9 @@ Fresh read-only audits identified these items; they were not completed before
 this handoff:
 
 1. Bound transient Rabbit/outbox retries at the declared three-attempt limit.
-2. Finish CLI verifier separation of Parallax authorization from Storefront
-   requests, event-identity-matched ClickHouse proof, required web/storefront
-   topology coverage, direct-trace payment method, and CLI tracestate bounds.
+2. Test and finish the CLI verifier patch: verify required web/storefront
+   topology coverage and direct-trace payment method, and confirm the new
+   auth/event-identity/tracestate checks against a live stack.
 3. Make browser mock/Compose E2E and selected scenario scripts fail closed;
    validate actual stream messages and required Parallax/MCP/webhook evidence.
 4. Complete pricing correctness review: one snapshot for pricing version and
