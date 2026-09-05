@@ -1,31 +1,68 @@
 #!/usr/bin/env bash
+# A28: real Compose-backed browser journey plus stitched Parallax evidence.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=lib-c.sh
+source "$SCRIPT_DIR/lib-c.sh"
+c_validate_parallax_mode
+
 WEB_URL="${WEB_URL:-http://localhost:5173}"
+E2E_LOG="$(mktemp "${TMPDIR:-/tmp}/a28-e2e.XXXXXX")"
+trap 'rm -f "$E2E_LOG"' EXIT
+
+if c_parallax_required; then
+  c_require_health
+fi
 
 echo "A28 frontend RUM journey"
-echo
 echo "Smoke-check SSR pages:"
 for path in / /catalog /cart /checkout /orders /analytics; do
-  curl -fsS "$WEB_URL$path" -o /dev/null
+  curl --fail-with-body --max-time 15 -sS "$WEB_URL$path" -o /dev/null
   printf "  ok %s\n" "$WEB_URL$path"
 done
 
-cat <<STEPS
+command -v bun >/dev/null 2>&1 || {
+  echo "A28: bun is required for the Compose-backed Playwright journey" >&2
+  exit 1
+}
 
-Manual browser journey:
-  1. Open $WEB_URL/
-  2. Browse $WEB_URL/catalog and open a seeded WIDGET-1 product.
-  3. Add it to cart, open $WEB_URL/cart, and continue to checkout.
-  4. Optionally enter promo code ACME10, submit with a normal payment method, and review the order.
-  5. Open $WEB_URL/orders and an order detail page, then open $WEB_URL/analytics.
-  6. Refresh order status or analytics, then background or close the tab to trigger OTel flush hooks.
+trace_id="$(c_new_trace_id)"
+traceparent="$(c_traceparent_for "$trace_id")"
+if c_parallax_required; then
+  otlp_endpoint="${PLAYGROUND_TEST_OTLP_ENDPOINT:-${PARALLAX_OTLP_HTTP_TRACES_ENDPOINT:-${PARALLAX_URL%/}/v1/traces}}"
+else
+  otlp_endpoint="${PLAYGROUND_TEST_OTLP_ENDPOINT:-}"
+fi
 
-Expected Parallax evidence:
-  - service.name=web spans carry resource_attributes.session.id.
-  - app.screen.name route spans appear for home, catalog, cart, checkout, orders, and analytics.
-  - ui.click/ui.submit spans carry app.widget.name.
-  - browser.web_vital spans carry web_vital.name/value/rating.
-  - Checkout is stitched browser -> storefront -> checkout.
-  - web.checkout.submitted and ClickHouse-backed analytics evidence are present.
-STEPS
+if ! (
+  cd "$ROOT/web"
+  export PLAYGROUND_COMPOSE_E2E=1
+  export PLAYGROUND_COMPOSE_BASE_URL="$WEB_URL"
+  export TRACEPARENT="$traceparent"
+  export TRACESTATE="${TRACESTATE:-playground=browser}"
+  export BAGGAGE="${BAGGAGE:-tenant.id=tenant-acme,user.tier=standard,customer.segment=standard,region=us-east-1,request.priority=normal}"
+  if [[ -n "$otlp_endpoint" ]]; then
+    export PLAYGROUND_TEST_OTLP_ENDPOINT="$otlp_endpoint"
+  else
+    unset PLAYGROUND_TEST_OTLP_ENDPOINT
+  fi
+  bun run e2e:compose
+) >"$E2E_LOG" 2>&1; then
+  cat "$E2E_LOG" >&2
+  exit 1
+fi
+cat "$E2E_LOG"
+echo "A28 browser journey PASS"
+
+if c_parallax_required; then
+  c_wait_for_trace "$trace_id" "A28 browser RUM journey stitching" \
+    "{ trace(traceId: \"$trace_id\") { spans { service name attributes resource } } }" \
+    'any(.trace.spans[]?; .service == "playground-web-tests" and .name == "test.case")
+     and any(.trace.spans[]?; .service == "web")
+     and any(.trace.spans[]?; .service == "storefront")
+     and any(.trace.spans[]?; .service == "checkout")'
+else
+  echo "A28 Parallax trace assertion SKIPPED by SCENARIO_PARALLAX_MODE=skip"
+fi
