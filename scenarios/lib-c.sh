@@ -28,14 +28,21 @@ C_CANARY_JWT="eyJhbGciOiJIUzI1NiJ9.CANARY.sig"
 c_gql() {
   local query="$1"
   python3 - "$PARALLAX_URL" "$query" <<'PY'
-import json, sys, urllib.request
+import json, os, sys, urllib.request
 url, query = sys.argv[1], sys.argv[2]
+headers = {"content-type": "application/json"}
+token = os.environ.get("PARALLAX_API_TOKEN", "").strip()
+if token:
+    headers["authorization"] = f"Bearer {token}"
+timeout = float(os.environ.get("PARALLAX_GRAPHQL_TIMEOUT_SECONDS", "30"))
+if timeout <= 0:
+    raise SystemExit("PARALLAX_GRAPHQL_TIMEOUT_SECONDS must be positive")
 req = urllib.request.Request(
     url.rstrip("/") + "/graphql",
     data=json.dumps({"query": query}).encode(),
-    headers={"content-type": "application/json"},
+    headers=headers,
 )
-with urllib.request.urlopen(req, timeout=30) as resp:
+with urllib.request.urlopen(req, timeout=timeout) as resp:
     body = json.loads(resp.read().decode())
 if body.get("errors"):
     raise SystemExit(f"graphql errors: {body['errors']}")
@@ -43,9 +50,92 @@ json.dump(body.get("data"), sys.stdout)
 PY
 }
 
+c_validate_parallax_mode() {
+  case "${SCENARIO_PARALLAX_MODE:-required}" in
+    required|skip) ;;
+    *)
+      echo "SCENARIO_PARALLAX_MODE must be required or skip" >&2
+      return 1
+      ;;
+  esac
+}
+
+c_parallax_required() {
+  [[ "${SCENARIO_PARALLAX_MODE:-required}" == "required" ]]
+}
+
+c_new_trace_id() {
+  local trace_id
+  trace_id="$(od -An -N16 -tx1 /dev/urandom | tr -d '[:space:]')"
+  [[ "$trace_id" =~ ^[[:xdigit:]]{32}$ ]] || {
+    echo "could not generate a 32-hex trace id" >&2
+    return 1
+  }
+  printf '%s' "${trace_id,,}"
+}
+
+c_traceparent_for() {
+  local trace_id="$1"
+  local span_number="${2:-1}"
+  [[ "$trace_id" =~ ^[[:xdigit:]]{32}$ ]] || {
+    echo "trace id is not 32 hexadecimal characters" >&2
+    return 1
+  }
+  [[ "$span_number" =~ ^[0-9]+$ && "$span_number" -gt 0 ]] || {
+    echo "span number must be a positive integer" >&2
+    return 1
+  }
+  printf '00-%s-%016x-01' "${trace_id,,}" "$span_number"
+}
+
+c_wait_for_trace() {
+  local trace_id="$1"
+  local label="$2"
+  local query="$3"
+  local filter="$4"
+  local timeout_seconds="${PARALLAX_TRACE_TIMEOUT_SECONDS:-30}"
+  local poll_seconds="${PARALLAX_TRACE_POLL_SECONDS:-1}"
+  local response=""
+
+  [[ "$trace_id" =~ ^[[:xdigit:]]{32}$ ]] || {
+    echo "$label: invalid trace id" >&2
+    return 1
+  }
+  [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || {
+    echo "PARALLAX_TRACE_TIMEOUT_SECONDS must be a positive integer" >&2
+    return 1
+  }
+  [[ "$poll_seconds" =~ ^[1-9][0-9]*$ ]] || {
+    echo "PARALLAX_TRACE_POLL_SECONDS must be a positive integer" >&2
+    return 1
+  }
+
+  local deadline=$((SECONDS + timeout_seconds))
+  while (( SECONDS <= deadline )); do
+    if response="$(c_gql "$query")" && jq -e "$filter" <<<"$response" >/dev/null; then
+      echo "Parallax trace PASS: $label"
+      return 0
+    fi
+    (( SECONDS >= deadline )) && break
+    sleep "$poll_seconds"
+  done
+
+  echo "Parallax trace FAIL: $label (trace=$trace_id)" >&2
+  [[ -z "$response" ]] || printf '%s\n' "$response" >&2
+  return 1
+}
+
 c_require_health() {
   local code
-  code="$(curl -sS -o /dev/null -w "%{http_code}" "$PARALLAX_URL/health" || true)"
+  local curl_args=(-sS --max-time "${PARALLAX_HTTP_TIMEOUT_SECONDS:-10}" -o /dev/null -w "%{http_code}")
+  if [[ -n "${PARALLAX_API_TOKEN:-}" ]]; then
+    curl_args+=(-H "authorization: Bearer $PARALLAX_API_TOKEN")
+  fi
+  if code="$(curl "${curl_args[@]}" "$PARALLAX_URL/health")"; then
+    :
+  else
+    code=000
+  fi
   if [[ "$code" != "200" ]]; then
     echo "Parallax health failed at $PARALLAX_URL/health (http $code)" >&2
     exit 1

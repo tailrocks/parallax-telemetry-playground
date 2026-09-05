@@ -10,7 +10,7 @@ use axum::{
     routing::{get, post},
 };
 use futures::{StreamExt, stream::BoxStream};
-use juniper::{FieldError, FieldResult, RootNode, graphql_object, graphql_subscription};
+use juniper::{FieldError, FieldResult, RootNode, graphql_object, graphql_subscription, graphql_value};
 use juniper_axum::{extract::JuniperRequest, graphiql, response::JuniperResponse, subscriptions};
 use juniper_graphql_ws::{ConnectionConfig, Schema as GraphqlSchema};
 use opentelemetry::{Context as OtelContext, trace::TraceContextExt};
@@ -879,6 +879,62 @@ const DOWNSTREAM_ERROR: ClientSafeError = ClientSafeError {
     message: "downstream request failed",
 };
 
+impl ClientSafeError {
+    fn category(self) -> &'static str {
+        match self.code {
+            "payment_declined" | "payment_insufficient_funds" => "decline",
+            "invalid_request"
+            | "invalid_identity"
+            | "invalid_tenant"
+            | "tenant_required"
+            | "identity_conflict"
+            | "customer_required"
+            | "invalid_session"
+            | "invalid_cart"
+            | "invalid_cart_item"
+            | "invalid_quantity"
+            | "cart_quantity_limit"
+            | "invalid_currency"
+            | "invalid_items"
+            | "invalid_sku"
+            | "invalid_promotion"
+            | "payment_method_required"
+            | "invalid_payment_method_token"
+            | "invalid_payment_method_type"
+            | "payment_invalid_request"
+            | "payment_invalid_method"
+            | "payment_invalid_state"
+            | "product_not_found"
+            | "payment_not_found" => "invalid",
+            "checkout_in_progress"
+            | "payment_pending"
+            | "payment_provider_unavailable"
+            | "payment_timeout"
+            | "payment_internal"
+            | "inventory_unavailable"
+            | "catalog_unavailable"
+            | "pricing_unavailable"
+            | "recommendation_unavailable"
+            | "messaging_unavailable"
+            | "downstream_error" => "retryable",
+            "checkout_request_conflict" | "order_state_conflict" => "conflict",
+            _ => "failure",
+        }
+    }
+
+    fn retryable(self) -> bool {
+        self.category() == "retryable"
+    }
+
+    fn graphql_extensions(self) -> juniper::Value {
+        graphql_value!({
+            "code": self.code,
+            "category": self.category(),
+            "retryable": self.retryable(),
+        })
+    }
+}
+
 fn client_safe_downstream_error(body: &str) -> ClientSafeError {
     let code = serde_json::from_str::<Value>(body)
         .ok()
@@ -890,7 +946,11 @@ fn client_safe_downstream_error(body: &str) -> ClientSafeError {
                 .map(str::to_owned)
         });
 
-    match code.as_deref() {
+    client_safe_error_for_code(code.as_deref())
+}
+
+fn client_safe_error_for_code(code: Option<&str>) -> ClientSafeError {
+    match code {
         Some("invalid_request") => ClientSafeError {
             code: "invalid_request",
             message: "the request is invalid",
@@ -1055,6 +1115,44 @@ fn client_safe_downstream_error(body: &str) -> ClientSafeError {
     }
 }
 
+fn client_safe_error(error: &anyhow::Error) -> ClientSafeError {
+    if let Some(downstream) = error.downcast_ref::<DownstreamHttpError>() {
+        return client_safe_downstream_error(&downstream.body);
+    }
+    client_safe_error_from_message(&error.to_string())
+}
+
+fn client_safe_error_from_message(message: &str) -> ClientSafeError {
+    let message = message.to_ascii_lowercase();
+    let code = if message.contains("tenant identity conflicts") {
+        Some("identity_conflict")
+    } else if message.contains("tenant_id is required") {
+        Some("tenant_required")
+    } else if message.contains("customer_id is required") {
+        Some("customer_required")
+    } else if message.contains("payment_method_token is required") {
+        Some("payment_method_required")
+    } else if message.contains("unsupported payment method type") {
+        Some("invalid_payment_method_type")
+    } else if message.contains("currency_code") {
+        Some("invalid_currency")
+    } else if message.contains("pricing_strategy") {
+        Some("invalid_request")
+    } else if message.contains("pricing connection") || message.contains("pricing quote failed") {
+        Some("pricing_unavailable")
+    } else if message.contains("required")
+        || message.contains("invalid")
+        || message.contains("unsupported")
+        || message.contains("quantity")
+        || message.contains("sku")
+    {
+        Some("invalid_request")
+    } else {
+        None
+    };
+    client_safe_error_for_code(code)
+}
+
 const REDACTED_LOG_VALUE: &str = "[REDACTED]";
 
 fn redacted_downstream_body(body: &str) -> String {
@@ -1125,7 +1223,9 @@ fn api_error(error: anyhow::Error) -> (StatusCode, Json<Value>) {
             status,
             Json(json!({
                 "error": client_error.code,
-                "message": client_error.message
+                "message": client_error.message,
+                "category": client_error.category(),
+                "retryable": client_error.retryable()
             })),
         );
     }
@@ -1155,13 +1255,23 @@ fn api_error(error: anyhow::Error) -> (StatusCode, Json<Value>) {
     )
 }
 
-fn field_error(error: impl std::fmt::Display) -> FieldError {
+fn field_error<E>(error: E) -> FieldError
+where
+    E: std::fmt::Display + Send + Sync + 'static,
+{
+    let error_text = error.to_string();
+    let client_error = (&error as &dyn std::any::Any)
+        .downcast_ref::<anyhow::Error>()
+        .map(client_safe_error)
+        .unwrap_or_else(|| client_safe_error_from_message(&error_text));
     playground_telemetry::mark_span_error("storefront_upstream_error");
-    tracing::warn!(error = %error, "storefront GraphQL resolver failed");
-    FieldError::new(
-        "storefront request could not be completed",
-        juniper::Value::null(),
-    )
+    tracing::warn!(
+        client_error = client_error.code,
+        category = client_error.category(),
+        error = %error_text,
+        "storefront GraphQL resolver failed"
+    );
+    FieldError::new(client_error.message, client_error.graphql_extensions())
 }
 
 fn resolver_span(name: &'static str, path: &'static str, operation: &'static str) -> tracing::Span {

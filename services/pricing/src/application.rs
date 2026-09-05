@@ -5,7 +5,10 @@ use crate::{
 use open_feature::EvaluationContext;
 use opentelemetry::KeyValue;
 use playground_proto::pricing::v1::QuoteRequest;
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 use tonic::Status;
 
 pub(crate) async fn calculate_quote(
@@ -13,8 +16,6 @@ pub(crate) async fn calculate_quote(
     request: &QuoteRequest,
 ) -> Result<CachedQuote, Status> {
     validate_request(request)?;
-    let pricing_version = state.postgres.pricing_version(&request.tenant_id).await?;
-    let key = cache_key(request, &pricing_version);
     let pricing_mode = tokio::time::timeout(
         Duration::from_millis(500),
         playground_telemetry::feature_variant(
@@ -38,22 +39,35 @@ pub(crate) async fn calculate_quote(
         }
     };
     tracing::Span::current().record("pricing.strategy", pricing_mode.as_str());
+    let key = cache_key(request);
     if use_cache {
         if let Some(result) = state.redis.get(&key).await {
             match result {
                 Ok(Some(value)) => match serde_json::from_str::<CachedQuote>(&value) {
                     Ok(quote) => {
-                        if quote.pricing_version == pricing_version {
-                            tracing::Span::current().record("cache.result", "hit");
-                            tracing::info!(cache = "hit", "pricing quote cache hit");
-                            record_cache_metric("hit");
-                            return Ok(quote);
+                        if quote.consume().is_ok() {
+                            let pricing_version =
+                                state.postgres.pricing_version(&request.tenant_id).await?;
+                            if quote.pricing_version == pricing_version {
+                                tracing::Span::current()
+                                    .record("pricing.price_list", quote.price_list_code.as_str());
+                                tracing::Span::current().record("cache.result", "hit");
+                                tracing::info!(
+                                    cache = "hit",
+                                    price_list = %quote.price_list_code,
+                                    "pricing quote cache hit"
+                                );
+                                record_cache_metric("hit");
+                                return Ok(quote);
+                            }
+                            tracing::warn!(
+                                cached_version = %quote.pricing_version,
+                                current_version = %pricing_version,
+                                "pricing cache entry has an obsolete durable price version"
+                            );
+                        } else {
+                            tracing::info!("pricing quote cache entry expired; refreshing source");
                         }
-                        tracing::warn!(
-                            cached_version = %quote.pricing_version,
-                            current_version = %pricing_version,
-                            "pricing cache entry has an obsolete durable price version"
-                        );
                     }
                     Err(error) => {
                         tracing::warn!(error = %error, "pricing cache entry was invalid; refreshing source")
@@ -72,16 +86,17 @@ pub(crate) async fn calculate_quote(
         tracing::Span::current().record("cache.result", "bypass");
     }
 
-    let quote = state
-        .postgres
-        .calculate_quote(request, &pricing_version)
-        .await?;
+    let quote = state.postgres.calculate_quote(request).await?;
+    tracing::Span::current().record("pricing.price_list", quote.price_list_code.as_str());
     if use_cache && let Some(result) = state.redis.set(&key, &quote).await {
         if let Err(error) = result {
             tracing::warn!(error = %error, "redis quote population failed");
         } else {
+            let ttl_seconds = quote
+                .remaining_validity_seconds(SystemTime::now())
+                .unwrap_or_default();
             tracing::info!(
-                ttl_seconds = crate::domain::QUOTE_TTL_SECONDS,
+                ttl_seconds,
                 "pricing quote cached"
             );
         }

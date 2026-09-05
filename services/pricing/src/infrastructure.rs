@@ -1,17 +1,23 @@
-use crate::domain::{CachedLine, CachedQuote, QUOTE_TTL_SECONDS, request_id};
+use crate::domain::{
+    CachedLine, CachedQuote, DEFAULT_CUSTOMER_SEGMENT, DEFAULT_CUSTOMER_TIER,
+    QUOTE_TTL_SECONDS, quote_expiry_from, request_id,
+};
 use anyhow::Context;
-use deadpool_postgres::{Config, ManagerConfig, Pool, PoolConfig, RecyclingMethod, Runtime};
+use deadpool_postgres::{
+    Config, GenericClient, ManagerConfig, Pool, PoolConfig, RecyclingMethod, Runtime,
+};
 use playground_proto::pricing::v1::QuoteRequest;
 use redis::{AsyncCommands, aio::ConnectionManager};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tokio::sync::Mutex;
+use tokio_postgres::IsolationLevel;
 use tonic::Status;
 
 const DEFAULT_DATABASE_URL: &str = "postgres://postgres:playground@postgres:5432/playground";
@@ -42,21 +48,25 @@ pub(crate) struct PostgresRepository {
 
 impl PostgresRepository {
     pub(crate) async fn pricing_version(&self, tenant_id: &str) -> Result<String, Status> {
-        let client = tokio::time::timeout(DB_TIMEOUT, self.pool.get())
+        let mut client = tokio::time::timeout(DB_TIMEOUT, self.pool.get())
             .await
             .map_err(|_| Status::deadline_exceeded("pricing database pool timeout"))?
             .map_err(|error| {
                 Status::unavailable(format!("pricing database unavailable: {error}"))
             })?;
-        let row = client
-            .query_one(
-                "SELECT COALESCE(MAX(sequence), 0)::BIGINT FROM price_change_events WHERE tenant_id = $1",
-                &[&tenant_id],
-            )
+        let transaction = client
+            .build_transaction()
+            .isolation_level(IsolationLevel::RepeatableRead)
+            .start()
             .await
-            .map_err(|error| Status::unavailable(format!("pricing version query failed: {error}")))?;
-        let sequence: i64 = row.get(0);
-        Ok(format!("price-change-{sequence}"))
+            .map_err(|error| {
+                Status::unavailable(format!("pricing transaction start failed: {error}"))
+            })?;
+        let version = pricing_version_in(&transaction, tenant_id).await?;
+        transaction.commit().await.map_err(|error| {
+            Status::unavailable(format!("pricing version transaction failed: {error}"))
+        })?;
+        Ok(version)
     }
 
     async fn is_ready(&self) -> bool {
@@ -72,14 +82,22 @@ impl PostgresRepository {
     pub(crate) async fn calculate_quote(
         &self,
         request: &QuoteRequest,
-        pricing_version: &str,
     ) -> Result<CachedQuote, Status> {
-        let client = tokio::time::timeout(DB_TIMEOUT, self.pool.get())
+        let mut client = tokio::time::timeout(DB_TIMEOUT, self.pool.get())
             .await
             .map_err(|_| Status::deadline_exceeded("pricing database pool timeout"))?
             .map_err(|error| {
                 Status::unavailable(format!("pricing database unavailable: {error}"))
             })?;
+        let transaction = client
+            .build_transaction()
+            .isolation_level(IsolationLevel::RepeatableRead)
+            .start()
+            .await
+            .map_err(|error| {
+                Status::unavailable(format!("pricing transaction start failed: {error}"))
+            })?;
+        let pricing_version = pricing_version_in(&transaction, &request.tenant_id).await?;
         let promotion_code = request
             .context
             .get("promotion_code")
@@ -90,23 +108,111 @@ impl PostgresRepository {
             .get("pricing_strategy")
             .map(String::as_str)
             .unwrap_or("standard");
+        let segment = request
+            .context
+            .get("customer_segment")
+            .map(String::as_str)
+            .unwrap_or(DEFAULT_CUSTOMER_SEGMENT);
+        let tier = request
+            .context
+            .get("customer_tier")
+            .map(String::as_str)
+            .unwrap_or(DEFAULT_CUSTOMER_TIER);
+        let skus = request
+            .items
+            .iter()
+            .map(|item| item.sku.clone())
+            .collect::<Vec<_>>();
+        let selected_rows = transaction
+            .query(
+                "SELECT DISTINCT ON (v.sku)
+                    v.sku,
+                    product.id,
+                    p.amount_minor,
+                    p.currency,
+                    pl.code
+                 FROM unnest($1::text[]) AS requested(sku)
+                 JOIN product_variants v
+                   ON v.tenant_id = $2
+                  AND v.sku = requested.sku
+                  AND v.status = 'active'
+                 JOIN products product
+                   ON product.tenant_id = v.tenant_id
+                  AND product.id = v.product_id
+                  AND product.status = 'active'
+                 JOIN customers customer
+                   ON customer.tenant_id = v.tenant_id
+                  AND customer.id = $3
+                  AND customer.status = 'active'
+                 JOIN prices p
+                   ON p.tenant_id = v.tenant_id
+                  AND p.variant_id = v.id
+                  AND p.currency = $4
+                  AND p.valid_from <= CURRENT_TIMESTAMP
+                  AND (p.valid_to IS NULL OR p.valid_to > CURRENT_TIMESTAMP)
+                 JOIN price_lists pl
+                   ON pl.tenant_id = p.tenant_id
+                  AND pl.id = p.price_list_id
+                  AND pl.active
+                  AND (
+                      (pl.customer_segment = $5 AND pl.customer_tier = $6)
+                      OR (
+                          pl.customer_segment = $7
+                          AND pl.customer_tier = $8
+                      )
+                  )
+                 WHERE v.tenant_id = $2
+                 ORDER BY
+                    v.sku,
+                    CASE
+                        WHEN pl.customer_segment = $5 AND pl.customer_tier = $6
+                            THEN 0
+                        ELSE 1
+                    END,
+                    pl.priority DESC,
+                    p.valid_from DESC,
+                    p.id",
+                &[
+                    &skus,
+                    &request.tenant_id,
+                    &request.customer_id,
+                    &request.currency_code,
+                    &segment,
+                    &tier,
+                    &DEFAULT_CUSTOMER_SEGMENT,
+                    &DEFAULT_CUSTOMER_TIER,
+                ],
+            )
+            .await
+            .map_err(|error| Status::unavailable(format!("pricing batch query failed: {error}")))?;
+        let selected_prices = selected_rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<_, String>(0),
+                    SelectedPrice {
+                        product_id: row.get(1),
+                        unit_minor: i64::from(row.get::<_, i32>(2)),
+                        currency: row.get(3),
+                        price_list_code: row.get(4),
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
         let mut lines = Vec::with_capacity(request.items.len());
+        let mut selected_price_list = None;
         for item in &request.items {
-            let row = client.query_opt(
-                "SELECT v.sku, product.id, p.amount_minor, p.currency FROM product_variants v JOIN products product ON product.tenant_id = v.tenant_id AND product.id = v.product_id JOIN customers customer ON customer.tenant_id = v.tenant_id AND customer.id = $3 AND customer.status = 'active' JOIN prices p ON p.variant_id = v.id AND p.tenant_id = v.tenant_id WHERE v.tenant_id = $4 AND v.sku = $1 AND v.status = 'active' AND product.status = 'active' AND p.currency = $2 AND p.is_default AND p.valid_from <= now() AND (p.valid_to IS NULL OR p.valid_to > now()) ORDER BY p.valid_from DESC LIMIT 1",
-                &[&item.sku, &request.currency_code, &request.customer_id, &request.tenant_id],
-            ).await.map_err(|error| Status::unavailable(format!("pricing query failed: {error}")))?;
-            let Some(row) = row else {
+            let Some(price) = selected_prices.get(&item.sku) else {
                 return Err(Status::not_found(format!(
                     "unknown priced SKU: {}",
                     item.sku
                 )));
             };
-            let unit_minor: i64 = i64::from(row.get::<_, i32>(2));
+            let unit_minor = price.unit_minor;
             if unit_minor < 0 {
                 return Err(Status::internal("pricing source returned a negative price"));
             }
-            if row.get::<_, &str>(3) != request.currency_code {
+            if price.currency != request.currency_code {
                 return Err(Status::invalid_argument(
                     "currency is not supported for the SKU",
                 ));
@@ -115,12 +221,15 @@ impl PostgresRepository {
                 .checked_mul(i64::from(item.quantity))
                 .ok_or_else(|| Status::out_of_range("quote line amount overflowed"))?;
             lines.push(CachedLine {
-                product_id: row.get(1),
+                product_id: price.product_id.clone(),
                 sku: item.sku.clone(),
                 quantity: item.quantity,
                 unit_minor,
                 line_minor,
             });
+            if selected_price_list.is_none() {
+                selected_price_list = Some(price.price_list_code.clone());
+            }
         }
         let subtotal_minor = lines.iter().try_fold(0_i64, |subtotal, line| {
             subtotal
@@ -128,7 +237,7 @@ impl PostgresRepository {
                 .ok_or_else(|| Status::out_of_range("quote subtotal overflowed"))
         })?;
         let discount_minor = if strategy == "promotional" && !promotion_code.is_empty() {
-            self.promotion_discount(&client, request, promotion_code, &lines, subtotal_minor)
+            promotion_discount(&transaction, request, promotion_code, &lines, subtotal_minor)
                 .await?
         } else {
             0
@@ -137,26 +246,68 @@ impl PostgresRepository {
             .checked_sub(discount_minor)
             .ok_or_else(|| Status::internal("quote total arithmetic underflowed"))?;
         let quote_id = request_id(request);
-        tracing::info!(pricing_strategy = strategy, promotion_code = %promotion_code, subtotal_minor, discount_minor, "pricing rules applied");
-        Ok(CachedQuote {
+        let expires_at_unix_ms = quote_expiry_from(SystemTime::now())?;
+        let quote = CachedQuote {
             quote_id,
             lines,
             subtotal_minor,
             discount_minor,
             grand_total_minor,
             currency: request.currency_code.clone(),
-            pricing_version: pricing_version.to_owned(),
-        })
+            pricing_version,
+            price_list_code: selected_price_list.ok_or_else(|| {
+                Status::internal("pricing batch query returned no selected price list")
+            })?,
+            expires_at_unix_ms,
+        };
+        tracing::info!(
+            pricing_strategy = strategy,
+            promotion_code = %promotion_code,
+            price_list = %quote.price_list_code,
+            subtotal_minor,
+            discount_minor,
+            "pricing rules applied"
+        );
+        transaction.commit().await.map_err(|error| {
+            Status::unavailable(format!("pricing quote transaction failed: {error}"))
+        })?;
+        Ok(quote)
     }
+}
 
-    async fn promotion_discount(
-        &self,
-        client: &deadpool_postgres::Client,
+#[derive(Debug)]
+struct SelectedPrice {
+    product_id: String,
+    unit_minor: i64,
+    currency: String,
+    price_list_code: String,
+}
+
+async fn pricing_version_in<C>(client: &C, tenant_id: &str) -> Result<String, Status>
+where
+    C: GenericClient + Sync,
+{
+    let row = client
+        .query_one(
+            "SELECT COALESCE(MAX(sequence), 0)::BIGINT FROM price_change_events WHERE tenant_id = $1",
+            &[&tenant_id],
+        )
+        .await
+        .map_err(|error| Status::unavailable(format!("pricing version query failed: {error}")))?;
+    let sequence: i64 = row.get(0);
+    Ok(format!("price-change-{sequence}"))
+}
+
+async fn promotion_discount<C>(
+        client: &C,
         request: &QuoteRequest,
         code: &str,
         lines: &[CachedLine],
         subtotal_minor: i64,
-    ) -> Result<i64, Status> {
+    ) -> Result<i64, Status>
+where
+    C: GenericClient + Sync,
+{
         let row = client.query_opt(
             "SELECT id, discount_type, discount_value::double precision, currency FROM promotions WHERE tenant_id = $1 AND code = $2 AND active AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now()) AND (max_redemptions IS NULL OR redemption_count < max_redemptions) AND (currency IS NULL OR currency = $3) AND minimum_subtotal_minor <= $4",
             &[&request.tenant_id, &code, &request.currency_code, &subtotal_minor],

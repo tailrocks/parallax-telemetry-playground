@@ -1844,25 +1844,17 @@ async fn claim_outbox_event(state: &AppState) -> ApiResult<Option<OutboxClaim>> 
         )
         .await
         .map_err(db_error)?;
-    let candidate = transaction
+    let row = transaction
         .query_opt(
-            "SELECT id FROM outbox_events WHERE attempts < $1 AND ((status='queued' AND available_at <= CURRENT_TIMESTAMP) OR (status='processing' AND claim_expires_at <= CURRENT_TIMESTAMP)) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1",
-            &[&OUTBOX_MAX_ATTEMPTS],
+            "WITH next_event AS (SELECT id FROM outbox_events WHERE attempts < $1 AND ((status='queued' AND available_at <= CURRENT_TIMESTAMP) OR (status='processing' AND claim_expires_at <= CURRENT_TIMESTAMP)) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE outbox_events AS event SET status='processing', attempts=event.attempts+1, available_at=CURRENT_TIMESTAMP + ($2::double precision * INTERVAL '1 second'), claim_token=$3, claim_expires_at=CURRENT_TIMESTAMP + ($2::double precision * INTERVAL '1 second') FROM next_event WHERE event.id=next_event.id RETURNING event.id,event.tenant_id,event.event_key,event.aggregate_type,event.aggregate_id,event.event_type,event.schema_version,to_char(event.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),event.payload::text,event.traceparent,event.tracestate,event.baggage,event.attempts,event.claim_token",
+            &[&OUTBOX_MAX_ATTEMPTS, &OUTBOX_LEASE_SECONDS, &claim_token],
         )
         .await
         .map_err(db_error)?;
-    let Some(candidate) = candidate else {
+    let Some(row) = row else {
         transaction.commit().await.map_err(db_error)?;
         return Ok(None);
     };
-    let event_id: String = candidate.get(0);
-    let row = transaction
-        .query_one(
-            "UPDATE outbox_events SET status='processing', attempts=attempts+1, available_at=CURRENT_TIMESTAMP + ($2::double precision * INTERVAL '1 second'), claim_token=$3, claim_expires_at=CURRENT_TIMESTAMP + ($2::double precision * INTERVAL '1 second') WHERE id=$1 AND ((status='queued' AND available_at <= CURRENT_TIMESTAMP) OR (status='processing' AND claim_expires_at <= CURRENT_TIMESTAMP)) RETURNING id,tenant_id,event_key,aggregate_type,aggregate_id,event_type,schema_version,to_char(occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'),payload::text,traceparent,tracestate,baggage,attempts,claim_token",
-            &[&event_id, &OUTBOX_LEASE_SECONDS, &claim_token],
-        )
-        .await
-        .map_err(db_error)?;
     let event = OutboxRow {
         id: row.get(0),
         tenant_id: row.get(1),
@@ -1911,7 +1903,7 @@ pub(crate) async fn publish_one_outbox(state: &AppState) -> ApiResult<bool> {
             Ok(true)
         }
         Err(error) => {
-            let next_status = outbox_failure_status(claim.event.attempts);
+            let next_status = outbox_failure_status(claim.event.attempts, error.code);
             let delay = outbox_retry_delay(claim.event.attempts) as f64;
             let failure_message = bounded_outbox_error(&error.message);
             let update_result = claim
@@ -1960,12 +1952,19 @@ pub(crate) async fn publish_one_outbox(state: &AppState) -> ApiResult<bool> {
     }
 }
 
-fn outbox_failure_status(attempts: i32) -> &'static str {
-    if attempts >= OUTBOX_MAX_ATTEMPTS {
+fn outbox_failure_status(attempts: i32, error_code: &str) -> &'static str {
+    if !is_transient_outbox_error(error_code) || attempts >= OUTBOX_MAX_ATTEMPTS {
         "failed"
     } else {
         "queued"
     }
+}
+
+fn is_transient_outbox_error(error_code: &str) -> bool {
+    matches!(
+        error_code,
+        "messaging_unavailable" | "messaging_timeout" | "messaging_rejected"
+    )
 }
 
 fn outbox_retry_delay(attempts: i32) -> i32 {
@@ -2237,11 +2236,35 @@ mod tests {
     }
 
     #[test]
-    fn outbox_failures_retry_twice_then_terminalize() {
-        assert_eq!(outbox_failure_status(1), "queued");
-        assert_eq!(outbox_failure_status(2), "queued");
-        assert_eq!(outbox_failure_status(OUTBOX_MAX_ATTEMPTS), "failed");
-        assert_eq!(outbox_failure_status(OUTBOX_MAX_ATTEMPTS + 1), "failed");
+    fn transient_outbox_failures_retry_twice_then_terminalize() {
+        assert_eq!(outbox_failure_status(1, "messaging_unavailable"), "queued");
+        assert_eq!(outbox_failure_status(2, "messaging_timeout"), "queued");
+        assert_eq!(
+            outbox_failure_status(OUTBOX_MAX_ATTEMPTS, "messaging_rejected"),
+            "failed"
+        );
+        assert_eq!(
+            outbox_failure_status(OUTBOX_MAX_ATTEMPTS + 1, "messaging_unavailable"),
+            "failed"
+        );
+    }
+
+    #[test]
+    fn non_transient_outbox_failures_terminalize_without_retry() {
+        for error_code in [
+            "event_protocol_error",
+            "event_encode_failed",
+            "stored_propagation_invalid",
+            "messaging_unroutable",
+            "messaging_confirm_unavailable",
+            "unknown_error",
+        ] {
+            assert_eq!(
+                outbox_failure_status(1, error_code),
+                "failed",
+                "{error_code}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -542,6 +542,9 @@ fn validate_clickhouse_event_with_context(
     expected_baggage: &BusinessBaggage,
     identity: &CommerceIdentity,
 ) -> Result<()> {
+    // Rabbit's message identity is the outbox event id. The analytics
+    // projection deliberately uses a tenant/event-key UUID v5 as its storage
+    // identity, so verify the source event key and projection shape together.
     let event_id = required_string(event, "eventId")?;
     let event_uuid = uuid::Uuid::parse_str(event_id)
         .context("ClickHouse event id is not a UUID analytics projection")?;
@@ -1088,27 +1091,24 @@ fn verified_commerce_identity(
     }
 
     let order_consumer = nodes[order_consumers[0]].span;
+    let event_type = required_attribute_string(
+        order_consumer,
+        "commerce.event.type",
+        "fulfillment order consumer",
+    )?;
+    let order_id =
+        required_attribute_string(order_consumer, "order.id", "fulfillment order consumer")?;
+    ensure!(
+        event_type == "order.paid",
+        "verified fulfillment event is not order.paid"
+    );
     let identity = CommerceIdentity {
         tenant_id: expected_baggage.tenant_id().to_owned(),
         event_id,
-        event_type: required_attribute_string(
-            order_consumer,
-            "commerce.event.type",
-            "fulfillment order consumer",
-        )?,
-        order_id: required_attribute_string(
-            order_consumer,
-            "order.id",
-            "fulfillment order consumer",
-        )?,
-        event_key: String::new(),
+        event_type,
+        event_key: format!("{order_id}:paid"),
+        order_id,
     };
-    ensure!(
-        identity.event_type == "order.paid",
-        "verified fulfillment event is not order.paid"
-    );
-    let mut identity = identity;
-    identity.event_key = format!("{}:paid", identity.order_id);
 
     for position in order_consumers {
         ensure_span_identity(nodes[*position].span, &identity, true)?;
@@ -2165,37 +2165,56 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
         let address = listener.local_addr()?;
         let server = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await?;
-            let mut reader = BufReader::new(stream);
-            let mut headers = String::new();
-            loop {
-                let mut line = String::new();
-                let bytes = reader.read_line(&mut line).await?;
-                if bytes == 0 || line == "\r\n" {
-                    break;
+            let mut captured_headers = Vec::new();
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await?;
+                let mut reader = BufReader::new(stream);
+                let mut headers = String::new();
+                loop {
+                    let mut line = String::new();
+                    let bytes = reader.read_line(&mut line).await?;
+                    if bytes == 0 || line == "\r\n" {
+                        break;
+                    }
+                    headers.push_str(&line);
                 }
-                headers.push_str(&line);
+                let mut stream = reader.into_inner();
+                let body = r#"{"data":{"ok":true}}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(response.as_bytes()).await?;
+                captured_headers.push(headers);
             }
-            let mut stream = reader.into_inner();
-            let body = r#"{"data":{"ok":true}}"#;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            stream.write_all(response.as_bytes()).await?;
-            Ok::<String, std::io::Error>(headers)
+            Ok::<Vec<String>, std::io::Error>(captured_headers)
         });
 
         let client = reqwest::Client::new();
         let endpoint = format!("http://{address}/graphql");
-        let response = storefront_graphql(&client, &endpoint, "query Health { ok }", json!({}))
-            .await?;
+        let response = parallax_graphql(
+            &client,
+            &endpoint,
+            "query Health { ok }",
+            json!({}),
+            Some("parallax-secret"),
+        )
+        .await?;
         assert_eq!(response.pointer("/data/ok"), Some(&json!(true)));
-        let headers = server.await??;
-        assert!(!headers.lines().any(|line| {
-            line.to_ascii_lowercase().starts_with("authorization:")
+        let response =
+            storefront_graphql(&client, &endpoint, "query Health { ok }", json!({})).await?;
+        assert_eq!(response.pointer("/data/ok"), Some(&json!(true)));
+        let captured_headers = server.await??;
+        assert!(captured_headers[0].lines().any(|line| {
+            line.trim_end()
+                .eq_ignore_ascii_case("authorization: bearer parallax-secret")
         }));
+        assert!(
+            !captured_headers[1]
+                .lines()
+                .any(|line| { line.to_ascii_lowercase().starts_with("authorization:") })
+        );
         Ok(())
     }
 
@@ -2512,16 +2531,42 @@ mod tests {
     }
 
     #[test]
-    fn clickhouse_event_must_match_verified_rabbit_identity() {
+    fn clickhouse_event_must_match_verified_rabbit_identity() -> Result<()> {
+        let analysis = analyze_details(TRACE_ID, &complete_traces())?;
+        validate_clickhouse_event_with_context(
+            &clickhouse_event(),
+            "tenant-acme",
+            TRACE_ID,
+            &analysis.business_baggage,
+            &analysis.identity,
+        )?;
+
         let mut event_key_mismatch = clickhouse_event();
         event_key_mismatch["eventKey"] = json!("order-other:paid");
         assert!(
-            validate_clickhouse_event(&event_key_mismatch, "tenant-acme", TRACE_ID).is_err()
+            validate_clickhouse_event_with_context(
+                &event_key_mismatch,
+                "tenant-acme",
+                TRACE_ID,
+                &analysis.business_baggage,
+                &analysis.identity,
+            )
+            .is_err()
         );
 
         let mut event_id_mismatch = clickhouse_event();
         event_id_mismatch["eventId"] = json!("event-1");
-        assert!(validate_clickhouse_event(&event_id_mismatch, "tenant-acme", TRACE_ID).is_err());
+        assert!(
+            validate_clickhouse_event_with_context(
+                &event_id_mismatch,
+                "tenant-acme",
+                TRACE_ID,
+                &analysis.business_baggage,
+                &analysis.identity,
+            )
+            .is_err()
+        );
+        Ok(())
     }
 
     #[test]

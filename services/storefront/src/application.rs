@@ -66,6 +66,62 @@ pub(crate) struct ValidatedBusinessContext {
     pub(crate) tier: String,
     pub(crate) region: String,
     pub(crate) priority: String,
+    pub(crate) pricing_strategy: String,
+    pub(crate) promotion_code: Option<String>,
+    pub(crate) payment_method_type: PaymentMethodType,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct BusinessContextInput<'a> {
+    pub(crate) segment: Option<&'a str>,
+    pub(crate) tier: Option<&'a str>,
+    pub(crate) region: Option<&'a str>,
+    pub(crate) priority: Option<&'a str>,
+    pub(crate) pricing_strategy: Option<&'a str>,
+    pub(crate) promotion_code: Option<&'a str>,
+    pub(crate) payment_method_type: Option<&'a str>,
+}
+
+impl ValidatedBusinessContext {
+    pub(crate) fn pricing_context(&self) -> HashMap<String, String> {
+        let mut context = HashMap::from([
+            (
+                "customer_segment".to_owned(),
+                self.segment.clone(),
+            ),
+            ("customer_tier".to_owned(), self.tier.clone()),
+            ("region".to_owned(), self.region.clone()),
+            ("request_priority".to_owned(), self.priority.clone()),
+            (
+                "pricing_strategy".to_owned(),
+                self.pricing_strategy.clone(),
+            ),
+            (
+                "payment_method_type".to_owned(),
+                self.payment_method_type_name().to_owned(),
+            ),
+        ]);
+        if let Some(promotion_code) = &self.promotion_code {
+            context.insert("promotion_code".to_owned(), promotion_code.clone());
+        }
+        context
+    }
+
+    pub(crate) fn payment_method_type_name(&self) -> &'static str {
+        payment_method_type_name(self.payment_method_type)
+    }
+
+    pub(crate) fn apply_to_context(&self, context: &OtelContext) -> OtelContext {
+        playground_telemetry::extend_baggage(
+            context,
+            [
+                KeyValue::new(semconv::USER_TIER, self.tier.clone()),
+                KeyValue::new("customer.segment", self.segment.clone()),
+                KeyValue::new("region", self.region.clone()),
+                KeyValue::new("request.priority", self.priority.clone()),
+            ],
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -345,29 +401,81 @@ impl StoreContext {
 
     pub(crate) fn validated_business_context(
         context: &OtelContext,
-        segment_override: Option<&str>,
+        input: BusinessContextInput<'_>,
     ) -> anyhow::Result<ValidatedBusinessContext> {
-        let segment = segment_override
+        let segment = validated_context_value(
+            input.segment,
+            context,
+            "customer.segment",
+            "standard",
+            "segment",
+        )?;
+        let tier = validated_context_value(
+            input.tier,
+            context,
+            semconv::USER_TIER,
+            "standard",
+            "tier",
+        )?;
+        let region = validated_context_value(
+            input.region,
+            context,
+            "region",
+            "us-east-1",
+            "region",
+        )?;
+        let priority = validated_context_value(
+            input.priority,
+            context,
+            "request.priority",
+            "normal",
+            "priority",
+        )?;
+        let promotion_code = input
+            .promotion_code
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| {
+                validate_identity_component(value, "promotion_code")?;
+                Ok::<String, anyhow::Error>(value.to_owned())
+            })
+            .transpose()?;
+        let pricing_strategy = input
+            .pricing_strategy
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
-            .unwrap_or_else(|| baggage_or(context, "customer.segment", "standard"));
-        let tier = baggage_or(context, semconv::USER_TIER, "standard");
-        let region = baggage_or(context, "region", "us-east-1");
-        let priority = baggage_or(context, "request.priority", "normal");
-        for (name, value) in [
-            ("segment", segment.as_str()),
-            ("tier", tier.as_str()),
-            ("region", region.as_str()),
-            ("priority", priority.as_str()),
-        ] {
-            validate_identity_component(value, name)?;
+            .unwrap_or_else(|| {
+                if promotion_code.is_some() {
+                    "promotional".to_owned()
+                } else {
+                    "standard".to_owned()
+                }
+            });
+        if !matches!(pricing_strategy.as_str(), "standard" | "promotional") {
+            return Err(anyhow!("pricing_strategy is not supported"));
         }
+        if promotion_code.is_some() && pricing_strategy != "promotional" {
+            return Err(anyhow!(
+                "pricing_strategy must be promotional when promotion_code is supplied"
+            ));
+        }
+        if promotion_code.is_none() && pricing_strategy == "promotional" {
+            return Err(anyhow!(
+                "promotion_code is required for promotional pricing_strategy"
+            ));
+        }
+        let payment_method_type = parse_payment_method_type(
+            input.payment_method_type.unwrap_or("card"),
+        )?;
         Ok(ValidatedBusinessContext {
             segment,
             tier,
             region,
             priority,
+            pricing_strategy,
+            promotion_code,
+            payment_method_type,
         })
     }
 
@@ -756,19 +864,20 @@ impl StoreContext {
                 "currency_code must be a three-letter uppercase code"
             ));
         }
-        let mut pricing_context = HashMap::new();
-        if let Some(promotion_code) = input.promotion_code.as_deref() {
-            pricing_context.insert("promotion_code".to_owned(), promotion_code.to_owned());
-        }
-        if let Some(strategy) = input.pricing_strategy.as_deref() {
-            pricing_context.insert("pricing_strategy".to_owned(), strategy.to_owned());
-        }
-        let payment_method_type = input
-            .payment_method_type
-            .as_deref()
-            .map(parse_payment_method_type)
-            .transpose()?;
         let identity_context = self.outbound_context_for_identity(&identity);
+        let business = Self::validated_business_context(
+            &identity_context,
+            BusinessContextInput {
+                segment: input.segment.as_deref(),
+                tier: input.tier.as_deref(),
+                region: input.region.as_deref(),
+                priority: input.priority.as_deref(),
+                pricing_strategy: input.pricing_strategy.as_deref(),
+                promotion_code: input.promotion_code.as_deref(),
+                payment_method_type: input.payment_method_type.as_deref(),
+            },
+        )?;
+        let outbound_context = business.apply_to_context(&identity_context);
         let request = QuoteRequest {
             request_id: input
                 .request_id
@@ -779,15 +888,15 @@ impl StoreContext {
             customer_id: identity.customer_id.clone(),
             items,
             currency_code: currency_code.to_owned(),
-            context: pricing_context,
-            payment_method_type,
+            context: business.pricing_context(),
+            payment_method_type: Some(business.payment_method_type as i32),
         };
         let channel = self.pricing_channel().await?;
         let mut client = PricingClient::new(channel.clone());
         let mut grpc_request = tonic::Request::new(request);
         grpc_request.set_timeout(self.remaining_timeout("pricing quote")?);
         playground_telemetry::inject_grpc_metadata_with_context(
-            &identity_context,
+            &outbound_context,
             grpc_request.metadata_mut(),
         );
         let response = self
@@ -823,8 +932,19 @@ impl StoreContext {
             .filter(|value| !value.is_empty())
             .ok_or_else(|| anyhow!("payment_method_token is required"))?;
         let identity_context = self.outbound_context_for_identity(&identity);
-        let business =
-            Self::validated_business_context(&identity_context, input.segment.as_deref())?;
+        let business = Self::validated_business_context(
+            &identity_context,
+            BusinessContextInput {
+                segment: input.segment.as_deref(),
+                tier: input.tier.as_deref(),
+                region: input.region.as_deref(),
+                priority: input.priority.as_deref(),
+                pricing_strategy: input.pricing_strategy.as_deref(),
+                promotion_code: input.promotion_code.as_deref(),
+                payment_method_type: input.payment_method_type.as_deref(),
+            },
+        )?;
+        let outbound_context = business.apply_to_context(&identity_context);
         let body = json!({
             "request_id": input.request_id,
             "tenant_id": identity.tenant_id,
@@ -832,9 +952,10 @@ impl StoreContext {
             "cart_id": input.cart_id,
             "session_id": identity.session_id,
             "currency_code": currency_code,
-            "promotion_code": input.promotion_code,
+            "promotion_code": business.promotion_code,
+            "pricing_strategy": business.pricing_strategy,
             "payment_method_token": payment_method_token,
-            "payment_method_type": input.payment_method_type.as_deref().unwrap_or("card"),
+            "payment_method_type": business.payment_method_type_name(),
             "segment": business.segment,
             "tier": business.tier,
             "region": business.region,
@@ -845,7 +966,7 @@ impl StoreContext {
             &join_endpoint(&self.checkout_endpoint, "/checkout"),
             &body,
             "checkout",
-            &identity_context,
+            &outbound_context,
         )
         .await
     }
@@ -1365,6 +1486,21 @@ fn validate_identity_component(value: &str, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn validated_context_value(
+    override_value: Option<&str>,
+    context: &OtelContext,
+    baggage_key: &str,
+    default: &str,
+    name: &str,
+) -> anyhow::Result<String> {
+    let value = override_value
+        .map(str::trim)
+        .map(str::to_owned)
+        .unwrap_or_else(|| baggage_or(context, baggage_key, default).trim().to_owned());
+    validate_identity_component(&value, name)?;
+    Ok(value)
+}
+
 fn validate_currency_code(value: &str) -> anyhow::Result<()> {
     if value.len() != 3
         || value != value.to_ascii_uppercase()
@@ -1412,7 +1548,7 @@ pub(crate) fn validate_analytics_input(input: &AnalyticsInput) -> anyhow::Result
     Ok(())
 }
 
-pub(crate) fn parse_payment_method_type(value: &str) -> anyhow::Result<i32> {
+pub(crate) fn parse_payment_method_type(value: &str) -> anyhow::Result<PaymentMethodType> {
     let normalized = value.to_ascii_lowercase();
     let method = match normalized.as_str() {
         "card" => PaymentMethodType::Card,
@@ -1420,7 +1556,16 @@ pub(crate) fn parse_payment_method_type(value: &str) -> anyhow::Result<i32> {
         "wallet" => PaymentMethodType::Wallet,
         _ => return Err(anyhow!("unsupported payment method type: {value}")),
     };
-    Ok(method as i32)
+    Ok(method)
+}
+
+fn payment_method_type_name(value: PaymentMethodType) -> &'static str {
+    match value {
+        PaymentMethodType::Card => "card",
+        PaymentMethodType::BankAccount => "bank_account",
+        PaymentMethodType::Wallet => "wallet",
+        PaymentMethodType::Unspecified => "card",
+    }
 }
 
 pub(crate) fn order_list_from_value(
@@ -1560,6 +1705,49 @@ mod tests {
         assert!(error.to_string().contains("required root"));
     }
 
+    #[test]
+    fn validated_pricing_context_has_one_quote_and_checkout_projection() {
+        let inbound = OtelContext::new().with_baggage([
+            KeyValue::new(semconv::USER_TIER, "premium"),
+            KeyValue::new("customer.segment", "vip"),
+            KeyValue::new("region", "eu-west-1"),
+            KeyValue::new("request.priority", "urgent"),
+        ]);
+        let business = StoreContext::validated_business_context(
+            &inbound,
+            BusinessContextInput {
+                promotion_code: Some("NOVA15"),
+                payment_method_type: Some("bank-account"),
+                ..BusinessContextInput::default()
+            },
+        )
+        .expect("pricing context validates");
+
+        let pricing_context = business.pricing_context();
+        assert_eq!(pricing_context["customer_segment"], "vip");
+        assert_eq!(pricing_context["customer_tier"], "premium");
+        assert_eq!(pricing_context["region"], "eu-west-1");
+        assert_eq!(pricing_context["request_priority"], "urgent");
+        assert_eq!(pricing_context["pricing_strategy"], "promotional");
+        assert_eq!(pricing_context["promotion_code"], "NOVA15");
+        assert_eq!(pricing_context["payment_method_type"], "bank_account");
+        assert_eq!(business.payment_method_type_name(), "bank_account");
+    }
+
+    #[test]
+    fn validated_pricing_context_rejects_conflicting_promotion_strategy() {
+        let error = StoreContext::validated_business_context(
+            &OtelContext::new(),
+            BusinessContextInput {
+                promotion_code: Some("NOVA15"),
+                pricing_strategy: Some("standard"),
+                ..BusinessContextInput::default()
+            },
+        )
+        .expect_err("promotion strategy conflict");
+        assert!(error.to_string().contains("promotional"));
+    }
+
     #[tokio::test]
     async fn checkout_forwards_validated_business_context() {
         let seen = Arc::new(tokio::sync::Mutex::new(None::<Value>));
@@ -1607,10 +1795,14 @@ mod tests {
                 cart_id: None,
                 session_id: Some("session-1".to_owned()),
                 currency_code: Some("USD".to_owned()),
-                promotion_code: None,
+                promotion_code: Some("NOVA15".to_owned()),
+                pricing_strategy: Some("promotional".to_owned()),
                 payment_method_token: Some("tok_visa".to_owned()),
-                payment_method_type: Some("card".to_owned()),
+                payment_method_type: Some("bank-account".to_owned()),
                 segment: None,
+                tier: None,
+                region: None,
+                priority: None,
                 request_id: Some("request-1".to_owned()),
             })
             .await
@@ -1621,6 +1813,9 @@ mod tests {
         assert_eq!(body["tier"], "premium");
         assert_eq!(body["region"], "eu-west-1");
         assert_eq!(body["priority"], "urgent");
+        assert_eq!(body["promotion_code"], "NOVA15");
+        assert_eq!(body["pricing_strategy"], "promotional");
+        assert_eq!(body["payment_method_type"], "bank_account");
         server.abort();
     }
 

@@ -1,12 +1,18 @@
 use playground_proto::pricing::v1::{Money, QuoteLine, QuoteRequest, QuoteResponse, QuoteStatus};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tonic::Status;
 
 pub(crate) const QUOTE_TTL_SECONDS: u64 = 45;
+pub(crate) const DEFAULT_CUSTOMER_SEGMENT: &str = "standard";
+pub(crate) const DEFAULT_CUSTOMER_TIER: &str = "free";
 pub(crate) const MAX_ITEMS: usize = 50;
 pub(crate) const MAX_QUANTITY: u32 = 100;
 pub(crate) const MAX_IDENTIFIER_LENGTH: usize = 128;
+const MILLIS_PER_SECOND: i64 = 1_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct CachedQuote {
@@ -17,6 +23,8 @@ pub(crate) struct CachedQuote {
     pub(crate) grand_total_minor: i64,
     pub(crate) currency: String,
     pub(crate) pricing_version: String,
+    pub(crate) price_list_code: String,
+    pub(crate) expires_at_unix_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +34,58 @@ pub(crate) struct CachedLine {
     pub(crate) quantity: u32,
     pub(crate) unit_minor: i64,
     pub(crate) line_minor: i64,
+}
+
+impl CachedQuote {
+    pub(crate) fn remaining_validity_seconds(
+        &self,
+        now: SystemTime,
+    ) -> Result<u32, Status> {
+        let now_unix_ms = unix_millis(now)?;
+        if self.expires_at_unix_ms <= now_unix_ms {
+            return Ok(0);
+        }
+        let remaining_ms = self
+            .expires_at_unix_ms
+            .checked_sub(now_unix_ms)
+            .ok_or_else(|| Status::internal("quote expiry arithmetic overflowed"))?;
+        let remaining_seconds = remaining_ms
+            .checked_add(MILLIS_PER_SECOND - 1)
+            .ok_or_else(|| Status::internal("quote expiry arithmetic overflowed"))?
+            / MILLIS_PER_SECOND;
+        u32::try_from(remaining_seconds)
+            .map_err(|_| Status::internal("quote validity exceeds protocol limits"))
+    }
+
+    pub(crate) fn consume_at(&self, now: SystemTime) -> Result<(), Status> {
+        if self.remaining_validity_seconds(now)? == 0 {
+            return Err(Status::failed_precondition("quote has expired"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn consume(&self) -> Result<(), Status> {
+        self.consume_at(SystemTime::now())
+    }
+}
+
+pub(crate) fn quote_expiry_from(now: SystemTime) -> Result<i64, Status> {
+    let now_unix_ms = unix_millis(now)?;
+    let ttl_ms = i64::try_from(QUOTE_TTL_SECONDS)
+        .ok()
+        .and_then(|seconds| seconds.checked_mul(MILLIS_PER_SECOND))
+        .ok_or_else(|| Status::internal("quote TTL arithmetic overflowed"))?;
+    now_unix_ms
+        .checked_add(ttl_ms)
+        .ok_or_else(|| Status::internal("quote expiry arithmetic overflowed"))
+}
+
+fn unix_millis(now: SystemTime) -> Result<i64, Status> {
+    let duration = now
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| Status::internal("system clock predates the Unix epoch"))?;
+    i64::try_from(duration.as_millis())
+        .map_err(|_| Status::internal("system clock exceeds quote timestamp limits"))
 }
 
 pub(crate) fn validate_request(request: &QuoteRequest) -> Result<(), Status> {
@@ -145,19 +205,24 @@ pub(crate) fn stable_request_fingerprint(request: &QuoteRequest) -> String {
         .to_string()
 }
 
-pub(crate) fn cache_key(request: &QuoteRequest, pricing_version: &str) -> String {
+pub(crate) fn cache_key(request: &QuoteRequest) -> String {
     format!(
-        "pricing:quote:{}:{}:{}:{}:{}",
+        "pricing:quote:{}:{}:{}:{}",
         request.tenant_id,
         request.customer_id,
         request.currency_code,
-        pricing_version,
         stable_request_fingerprint(request)
     )
 }
 
-pub(crate) fn to_proto(quote: &CachedQuote) -> QuoteResponse {
-    QuoteResponse {
+pub(crate) fn to_proto(quote: &CachedQuote) -> Result<QuoteResponse, Status> {
+    to_proto_at(quote, SystemTime::now())
+}
+
+fn to_proto_at(quote: &CachedQuote, now: SystemTime) -> Result<QuoteResponse, Status> {
+    quote.consume_at(now)?;
+    let valid_for_seconds = quote.remaining_validity_seconds(now)?;
+    Ok(QuoteResponse {
         quote_id: quote.quote_id.clone(),
         status: QuoteStatus::Ready as i32,
         lines: quote
@@ -192,9 +257,9 @@ pub(crate) fn to_proto(quote: &CachedQuote) -> QuoteResponse {
             currency_code: quote.currency.clone(),
             amount_minor: quote.grand_total_minor,
         }),
-        valid_for_seconds: QUOTE_TTL_SECONDS as u32,
+        valid_for_seconds,
         pricing_version: quote.pricing_version.clone(),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -243,8 +308,8 @@ mod tests {
         };
         assert_eq!(request_id(&request), "request-1");
         assert_eq!(
-            cache_key(&request, "price-change-7"),
-            cache_key(&request, "price-change-7")
+            cache_key(&request),
+            cache_key(&request)
         );
     }
 
@@ -266,8 +331,8 @@ mod tests {
             ..acme.clone()
         };
         assert_ne!(
-            cache_key(&acme, "price-change-7"),
-            cache_key(&nova, "price-change-7")
+            cache_key(&acme),
+            cache_key(&nova)
         );
         assert_ne!(
             stable_request_fingerprint(&acme),
@@ -276,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn cache_key_changes_when_the_durable_price_version_changes() {
+    fn cache_key_is_independent_of_the_durable_price_version() {
         let request = QuoteRequest {
             tenant_id: "tenant-acme".into(),
             customer_id: "customer-acme-ava".into(),
@@ -288,10 +353,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_ne!(
-            cache_key(&request, "price-change-7"),
-            cache_key(&request, "price-change-8")
-        );
+        assert_eq!(cache_key(&request), cache_key(&request));
     }
 
     #[test]
@@ -310,6 +372,83 @@ mod tests {
                 .expect_err("tenant required")
                 .code(),
             tonic::Code::InvalidArgument
+        );
+    }
+
+    fn quote_with_expiry(expires_at_unix_ms: i64) -> CachedQuote {
+        CachedQuote {
+            quote_id: "quote-test".into(),
+            lines: vec![CachedLine {
+                product_id: "product-test".into(),
+                sku: "WIDGET-1".into(),
+                quantity: 1,
+                unit_minor: 1_999,
+                line_minor: 1_999,
+            }],
+            subtotal_minor: 1_999,
+            discount_minor: 0,
+            grand_total_minor: 1_999,
+            currency: "USD".into(),
+            pricing_version: "price-change-7".into(),
+            price_list_code: "standard-free".into(),
+            expires_at_unix_ms,
+        }
+    }
+
+    #[test]
+    fn quote_expiry_is_absolute_and_remaining_validity_is_rounded_up() {
+        let quote = quote_with_expiry(6_000);
+        let just_before_expiry = UNIX_EPOCH + Duration::from_millis(1_001);
+
+        assert_eq!(
+            quote
+                .remaining_validity_seconds(just_before_expiry)
+                .expect("validity calculation"),
+            5
+        );
+        assert!(quote.consume_at(just_before_expiry).is_ok());
+        assert_eq!(
+            quote
+                .remaining_validity_seconds(UNIX_EPOCH + Duration::from_millis(6_000))
+                .expect("expired validity calculation"),
+            0
+        );
+        assert_eq!(
+            quote
+                .consume_at(UNIX_EPOCH + Duration::from_millis(6_000))
+                .expect_err("expired quote must be rejected")
+                .code(),
+            tonic::Code::FailedPrecondition
+        );
+    }
+
+    #[test]
+    fn quote_expiry_is_serialized_into_the_cache_value() {
+        let quote = quote_with_expiry(6_000);
+        let value = serde_json::to_value(&quote).expect("quote serializes");
+
+        assert_eq!(value["expires_at_unix_ms"], 6_000);
+        assert_eq!(value["price_list_code"], "standard-free");
+    }
+
+    #[test]
+    fn quote_proto_reports_remaining_validity_and_rejects_expiration() {
+        let quote = quote_with_expiry(6_000);
+        let response = to_proto_at(&quote, UNIX_EPOCH + Duration::from_millis(1_001))
+            .expect("live quote converts");
+        assert_eq!(response.valid_for_seconds, 5);
+
+        let error = to_proto_at(&quote, UNIX_EPOCH + Duration::from_millis(6_000))
+            .expect_err("expired quote conversion must fail");
+        assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+    }
+
+    #[test]
+    fn quote_expiry_from_now_uses_the_configured_ttl() {
+        let now = UNIX_EPOCH + Duration::from_secs(100);
+        assert_eq!(
+            quote_expiry_from(now).expect("expiry calculation"),
+            100_000 + (QUOTE_TTL_SECONDS as i64 * MILLIS_PER_SECOND)
         );
     }
 }

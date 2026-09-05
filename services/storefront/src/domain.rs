@@ -571,6 +571,10 @@ pub(crate) struct QuoteInput {
     pub(crate) promotion_code: Option<String>,
     pub(crate) pricing_strategy: Option<String>,
     pub(crate) payment_method_type: Option<String>,
+    pub(crate) segment: Option<String>,
+    pub(crate) tier: Option<String>,
+    pub(crate) region: Option<String>,
+    pub(crate) priority: Option<String>,
     pub(crate) request_id: Option<String>,
 }
 
@@ -583,9 +587,13 @@ pub(crate) struct CheckoutInput {
     pub(crate) session_id: Option<String>,
     pub(crate) currency_code: Option<String>,
     pub(crate) promotion_code: Option<String>,
+    pub(crate) pricing_strategy: Option<String>,
     pub(crate) payment_method_token: Option<String>,
     pub(crate) payment_method_type: Option<String>,
     pub(crate) segment: Option<String>,
+    pub(crate) tier: Option<String>,
+    pub(crate) region: Option<String>,
+    pub(crate) priority: Option<String>,
     pub(crate) request_id: Option<String>,
 }
 

@@ -5,9 +5,9 @@ const mockMode = process.env["PLAYGROUND_MOCK_E2E"] === "1";
 const composeBaseURL =
   process.env["PLAYGROUND_COMPOSE_BASE_URL"]?.trim() || "http://localhost:5173";
 
-if (!composeMode && !mockMode) {
+if (composeMode === mockMode) {
   throw new Error(
-    "Choose the real Compose gate (`bun run e2e`) or the explicitly mocked UI contract suite (`bun run e2e:mock`).",
+    "Choose exactly one explicit browser gate: `PLAYGROUND_COMPOSE_E2E=1` for Compose or `PLAYGROUND_MOCK_E2E=1` for the mocked UI contract suite.",
   );
 }
 
@@ -32,9 +32,9 @@ export default defineConfig({
   webServer: composeMode
     ? undefined
     : {
-        command: "bun run build && PORT=4173 HOST=127.0.0.1 bun start",
-        url: "http://127.0.0.1:4173",
+        command: "bun run build && bun e2e/mock-storefront.ts",
+        url: "http://127.0.0.1:4173/healthz",
         timeout: 120_000,
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: false,
       },
 });
