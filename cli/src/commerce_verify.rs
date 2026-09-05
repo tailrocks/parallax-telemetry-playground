@@ -1101,11 +1101,14 @@ fn verified_commerce_identity(
             "order.id",
             "fulfillment order consumer",
         )?,
+        event_key: String::new(),
     };
     ensure!(
         identity.event_type == "order.paid",
         "verified fulfillment event is not order.paid"
     );
+    let mut identity = identity;
+    identity.event_key = format!("{}:paid", identity.order_id);
 
     for position in order_consumers {
         ensure_span_identity(nodes[*position].span, &identity, true)?;
@@ -1785,6 +1788,8 @@ fn is_trace_id(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
 
     const TRACE_ID: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
     const FULFILLMENT_TRACE_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -1800,6 +1805,8 @@ mod tests {
     const NOTIFICATION_SPAN: &str = "0000000000000011";
     const FULFILLMENT_PRODUCER: &str = "0000000000000012";
     const ANALYTICS_CONSUMER: &str = "0000000000000020";
+    const WEB_SPAN: &str = "0000000000000030";
+    const STOREFRONT_SPAN: &str = "0000000000000031";
     const BUSINESS_BAGGAGE: &str = "tenant.id=tenant-acme,user.tier=standard,customer.segment=standard,region=us-east-1,request.priority=normal,session.id=session-1";
 
     fn link(trace_id: &str, span_id: &str) -> Value {
@@ -2000,12 +2007,53 @@ mod tests {
         ]
     }
 
+    fn browser_traces() -> Vec<Value> {
+        let mut traces = complete_traces();
+        traces[0]["spans"][0]["parentSpanId"] = json!(STOREFRONT_SPAN);
+        let storefront = span(
+            STOREFRONT_SPAN,
+            Some(WEB_SPAN),
+            "storefront",
+            "GraphQL checkout",
+            "SERVER",
+            json!({
+                "tenant.id":"tenant-acme",
+                "user.tier":"standard",
+                "customer.segment":"standard",
+                "region":"us-east-1",
+                "request.priority":"normal",
+                "session.id":"session-1"
+            }),
+            vec![],
+        );
+        let web = span(
+            WEB_SPAN,
+            None,
+            "web",
+            "HTTP POST /__storefront/graphql",
+            "SERVER",
+            json!({
+                "tenant.id":"tenant-acme",
+                "user.tier":"standard",
+                "customer.segment":"standard",
+                "region":"us-east-1",
+                "request.priority":"normal",
+                "session.id":"session-1"
+            }),
+            vec![],
+        );
+        let anchor_spans = traces[0]["spans"].as_array_mut().expect("anchor spans");
+        anchor_spans.insert(0, storefront);
+        anchor_spans.insert(0, web);
+        traces
+    }
+
     fn clickhouse_event() -> Value {
         let traceparent = format!("00-{TRACE_ID}-0123456789abcdef-01");
         let tracestate = "playground=commerce";
         let baggage = BUSINESS_BAGGAGE;
         json!({
-            "eventId": "event-1",
+            "eventId": "bf442986-ff20-5ff4-b3bf-ed2ec1246160",
             "tenantId": "tenant-acme",
             "eventKey": "order-1:paid",
             "eventName": "order.paid",
