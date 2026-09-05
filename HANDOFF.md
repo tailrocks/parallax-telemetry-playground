@@ -40,6 +40,9 @@ Since resuming, additional patches landed:
   integrated rerun.
 - Browser/scenario changes add explicit Playwright mode and fail-closed checks;
   inspect the mock server and affected scripts before relying on them.
+- `a25-postgres.sh` now exercises reservation/release and pool-pressure paths
+  against a live checkout fence; it requires `A25_CHECKOUT_REQUEST_ID` and
+  `A25_CHECKOUT_LEASE_TOKEN` when run directly.
 
 ## Last proven gates
 
