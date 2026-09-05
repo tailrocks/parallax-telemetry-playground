@@ -33,6 +33,7 @@ if ! LC_ALL=C awk -v header="$tracestate" '
     for (member_index = 1; member_index <= count; member_index += 1) {
       member = trim_ows(members[member_index])
       if (member == "" || member ~ /^[ \t]+$/) exit 1
+      if (length(member) > 256) exit 1
       separator = index(member, "=")
       if (separator <= 1) exit 1
       if (index(substr(member, separator + 1), "=") != 0) exit 1
@@ -74,7 +75,7 @@ payload="$(curl --fail-with-body --max-time 30 -sS -X POST "$checkout_url/checko
   -H "traceparent: $traceparent" \
   -H "tracestate: $tracestate" \
   -H "baggage: $baggage" \
-  --data "$(jq -cn --arg request_id "$request_id" '{tenant_id:"tenant-acme",customer_id:"customer-acme-ava",items:[{sku:"WIDGET-1",quantity:1}],currency_code:"USD",payment_method_token:"tok_visa",request_id:$request_id}')")"
+  --data "$(jq -cn --arg request_id "$request_id" '{tenant_id:"tenant-acme",customer_id:"customer-acme-ava",items:[{sku:"WIDGET-1",quantity:1}],currency_code:"USD",payment_method_token:"tok_visa",payment_method_type:"card",request_id:$request_id}')")"
 jq -e '.status == "paid" and (.order_id | type == "string" and length > 0)' <<<"$payload" >/dev/null
 
 cd "$root"

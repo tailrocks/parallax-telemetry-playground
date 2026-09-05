@@ -2262,6 +2262,7 @@ mod tests {
             tenant_id: "tenant-acme".to_owned(),
             event_id: "event-1".to_owned(),
             event_type: "order.paid".to_owned(),
+            event_key: "order-1:paid".to_owned(),
             order_id: "order-1".to_owned(),
         };
         assert!(
