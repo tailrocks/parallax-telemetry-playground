@@ -2135,6 +2135,71 @@ mod tests {
     }
 
     #[test]
+    fn canonical_browser_topology_requires_web_and_storefront() -> Result<()> {
+        let summary = analyze(TRACE_ID, &browser_traces())?;
+        assert!(summary.services.contains(&"web".to_owned()));
+        assert!(summary.services.contains(&"storefront".to_owned()));
+
+        for service in ["web", "storefront"] {
+            let mut incomplete = browser_traces();
+            let replacement = if service == "web" {
+                "browser"
+            } else {
+                "storefront-missing"
+            };
+            for span in incomplete[0]["spans"].as_array_mut().expect("anchor spans") {
+                if span.get("service").and_then(Value::as_str) == Some(service) {
+                    span["service"] = json!(replacement);
+                }
+            }
+            assert!(
+                analyze(TRACE_ID, &incomplete).is_err(),
+                "missing canonical browser service {service} must fail closed"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn storefront_graphql_does_not_forward_parallax_bearer_token() -> Result<()> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+        let address = listener.local_addr()?;
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await?;
+            let mut reader = BufReader::new(stream);
+            let mut headers = String::new();
+            loop {
+                let mut line = String::new();
+                let bytes = reader.read_line(&mut line).await?;
+                if bytes == 0 || line == "\r\n" {
+                    break;
+                }
+                headers.push_str(&line);
+            }
+            let mut stream = reader.into_inner();
+            let body = r#"{"data":{"ok":true}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await?;
+            Ok::<String, std::io::Error>(headers)
+        });
+
+        let client = reqwest::Client::new();
+        let endpoint = format!("http://{address}/graphql");
+        let response = storefront_graphql(&client, &endpoint, "query Health { ok }", json!({}))
+            .await?;
+        assert_eq!(response.pointer("/data/ok"), Some(&json!(true)));
+        let headers = server.await??;
+        assert!(!headers.lines().any(|line| {
+            line.to_ascii_lowercase().starts_with("authorization:")
+        }));
+        Ok(())
+    }
+
+    #[test]
     fn complete_fixture_has_unique_nonempty_span_identity_and_edges() {
         let traces = complete_traces();
         assert_eq!(traces.len(), 3);
@@ -2447,6 +2512,19 @@ mod tests {
     }
 
     #[test]
+    fn clickhouse_event_must_match_verified_rabbit_identity() {
+        let mut event_key_mismatch = clickhouse_event();
+        event_key_mismatch["eventKey"] = json!("order-other:paid");
+        assert!(
+            validate_clickhouse_event(&event_key_mismatch, "tenant-acme", TRACE_ID).is_err()
+        );
+
+        let mut event_id_mismatch = clickhouse_event();
+        event_id_mismatch["eventId"] = json!("event-1");
+        assert!(validate_clickhouse_event(&event_id_mismatch, "tenant-acme", TRACE_ID).is_err());
+    }
+
+    #[test]
     fn tracestate_accepts_internal_ascii_spaces() {
         assert!(validate_tracestate("vendor=state with internal spaces").is_ok());
     }
@@ -2485,6 +2563,14 @@ mod tests {
         );
         assert!(oversized_header.len() > MAX_TRACESTATE_HEADER_BYTES);
         assert!(validate_tracestate(&oversized_header).is_err());
+
+        let max_member = format!("k={}", "v".repeat(MAX_TRACESTATE_MEMBER_BYTES - 2));
+        assert_eq!(max_member.len(), MAX_TRACESTATE_MEMBER_BYTES);
+        assert!(validate_tracestate(&max_member).is_ok());
+
+        let oversized_member = format!("k={}", "v".repeat(MAX_TRACESTATE_MEMBER_BYTES - 1));
+        assert_eq!(oversized_member.len(), MAX_TRACESTATE_MEMBER_BYTES + 1);
+        assert!(validate_tracestate(&oversized_member).is_err());
     }
 
     #[test]
