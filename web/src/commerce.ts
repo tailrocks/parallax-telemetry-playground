@@ -258,6 +258,7 @@ const PRODUCTS_QUERY = `
           price { id currency amountMinor compareAtMinor validFrom }
         }
         reviews { id productId title text stars verifiedPurchase createdAt }
+        reviewsSlow { id productId title text stars verifiedPurchase createdAt }
         riskScore
       }
       page size totalElements totalPages hasNext experience
@@ -276,6 +277,7 @@ const PRODUCT_QUERY = `
         price { id currency amountMinor compareAtMinor validFrom }
       }
       reviews { id productId title text stars verifiedPurchase createdAt }
+      reviewsSlow { id productId title text stars verifiedPurchase createdAt }
       riskScore
     }
   }
@@ -405,6 +407,7 @@ export async function fetchCategories(
 export async function fetchQuote(
   input: Readonly<{
     items: readonly CartEntry[];
+    tenantId: string;
     customerId: string;
     currencyCode: string;
     promotionCode?: string;
@@ -419,6 +422,7 @@ export async function fetchQuote(
         sku: item.sku,
         quantity: item.quantity,
       })),
+      tenantId: input.tenantId,
       customerId: input.customerId,
       currencyCode: input.currencyCode,
       promotionCode: input.promotionCode || null,

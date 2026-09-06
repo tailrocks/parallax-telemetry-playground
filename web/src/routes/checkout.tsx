@@ -73,6 +73,7 @@ function CheckoutPage() {
     setQuoteState({ kind: "loading" });
     void fetchQuote({
       items,
+      tenantId: DEMO_TENANT_ID,
       promotionCode,
       customerId: DEMO_CUSTOMER_ID,
       currencyCode: DEMO_CURRENCY,

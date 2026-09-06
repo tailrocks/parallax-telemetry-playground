@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail, ensure};
 use axum::body::{Body, to_bytes};
@@ -874,6 +874,9 @@ const REQUIRED_RUNNING_COMPOSE_SERVICES: &[&str] = &[
 const REQUIRED_COMPLETED_COMPOSE_SERVICES: &[&str] =
     &["flagd-health-tools", "postgres-migrate", "clickhouse-init"];
 
+const VERIFY_COMPOSE_WAIT_TIMEOUT_SECONDS_ENV: &str = "VERIFY_COMPOSE_WAIT_TIMEOUT_SECONDS";
+const VERIFY_COMPOSE_POLL_INTERVAL_MILLIS_ENV: &str = "VERIFY_COMPOSE_POLL_INTERVAL_MILLIS";
+
 const POSTGRES_PROBE: &[&str] = &["pg_isready", "-U", "postgres", "-d", "playground"];
 const REDIS_PROBE: &[&str] = &["redis-cli", "-h", "127.0.0.1", "-p", "6379", "ping"];
 const RABBITMQ_PROBE: &[&str] = &["su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"];
@@ -1074,23 +1077,85 @@ fn verify_compose_state(output: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn compose_command(compose: &Path, args: &[&str]) -> Vec<String> {
-    let mut command = vec![
-        "compose".to_owned(),
-        "-f".to_owned(),
-        compose.display().to_string(),
-    ];
+fn compose_command_for_project(
+    compose: &Path,
+    project: Option<&str>,
+    args: &[&str],
+) -> Vec<String> {
+    let mut command = vec!["compose".to_owned()];
+    if let Some(project) = project {
+        command.push("-p".to_owned());
+        command.push(project.to_owned());
+    }
+    command.push("-f".to_owned());
+    command.push(compose.display().to_string());
     command.extend(args.iter().map(|arg| (*arg).to_owned()));
     command
 }
 
+fn managed_compose_project_name() -> String {
+    format!(
+        "telemetry-playground-verify-{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..12]
+    )
+}
+
+async fn compose_status(
+    compose: &Path,
+    project: Option<&str>,
+    repository: &Path,
+) -> anyhow::Result<String> {
+    let compose_status = output(
+        "docker",
+        &compose_command_for_project(compose, project, &["ps", "--all", "--format", "json"]),
+        repository,
+    )
+    .await?;
+    ensure!(
+        compose_status.status.success(),
+        "docker compose ps failed: {}",
+        String::from_utf8_lossy(&compose_status.stderr).trim()
+    );
+    Ok(String::from_utf8_lossy(&compose_status.stdout).into_owned())
+}
+
+async fn wait_for_compose_state(
+    compose: &Path,
+    project: Option<&str>,
+    repository: &Path,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> anyhow::Result<String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let last_error = match compose_status(compose, project, repository).await {
+            Ok(status) => match verify_compose_state(&status) {
+                Ok(()) => return Ok(status),
+                Err(error) => error.to_string(),
+            },
+            Err(error) => error.to_string(),
+        };
+
+        let now = Instant::now();
+        if now >= deadline {
+            bail!(
+                "Compose readiness timed out after {}s: {}",
+                timeout.as_secs(),
+                last_error
+            );
+        }
+        tokio::time::sleep(poll_interval.min(deadline - now)).await;
+    }
+}
+
 async fn compose_exec(
     compose: &Path,
+    project: Option<&str>,
     repository: &Path,
     service: &str,
     command: &[&str],
 ) -> anyhow::Result<()> {
-    let mut args = compose_command(compose, &["exec", "-T", service]);
+    let mut args = compose_command_for_project(compose, project, &["exec", "-T", service]);
     args.extend(command.iter().map(|arg| (*arg).to_owned()));
     status("docker", &args, repository)
         .await
@@ -1099,6 +1164,7 @@ async fn compose_exec(
 
 async fn verify_compose_dependency_surfaces(
     compose: &Path,
+    project: Option<&str>,
     repository: &Path,
 ) -> anyhow::Result<()> {
     for (name, service, command) in [
@@ -1116,7 +1182,7 @@ async fn verify_compose_dependency_surfaces(
             NOTIFICATIONS_HTTP_PROBE,
         ),
     ] {
-        compose_exec(compose, repository, service, command)
+        compose_exec(compose, project, repository, service, command)
             .await
             .with_context(|| format!("{name} dependency surface is unavailable"))?;
     }
@@ -1141,47 +1207,51 @@ async fn check_http_endpoint(
     Ok(())
 }
 
-pub(crate) async fn verify_stack(_args: Vec<String>) -> anyhow::Result<i32> {
-    let repository = root();
-    let compose = repository.join("deploy/docker-compose.yml");
-    if !compose.exists() {
-        bail!("Compose file is missing: {}", compose.display());
-    }
+async fn verify_stack_run(
+    repository: &Path,
+    compose: &Path,
+    project: Option<&str>,
+    manage_stack: bool,
+) -> anyhow::Result<i32> {
     status(
         "docker",
-        &[
-            "compose".into(),
-            "-f".into(),
-            compose.display().to_string(),
-            "config".into(),
-            "--quiet".into(),
-        ],
-        &repository,
+        &compose_command_for_project(compose, project, &["config", "--quiet"]),
+        repository,
     )
     .await?;
-    if std::env::var("VERIFY_MANAGE_STACK").unwrap_or_else(|_| "0".into()) == "1" {
+
+    let compose_status = if manage_stack {
+        let wait_timeout_seconds = positive_env(VERIFY_COMPOSE_WAIT_TIMEOUT_SECONDS_ENV, 120)?;
+        let poll_interval_millis = positive_env(VERIFY_COMPOSE_POLL_INTERVAL_MILLIS_ENV, 500)?;
+        let wait_timeout_arg = wait_timeout_seconds.to_string();
+        let up_args = [
+            "--profile",
+            "demo",
+            "up",
+            "--build",
+            "-d",
+            "--wait",
+            "--wait-timeout",
+            wait_timeout_arg.as_str(),
+        ];
         status(
             "docker",
-            &compose_command(
-                compose.as_path(),
-                &["--profile", "demo", "up", "--build", "-d"],
-            ),
-            &repository,
+            &compose_command_for_project(compose, project, &up_args),
+            repository,
         )
         .await?;
-    }
-    let compose_status = output(
-        "docker",
-        &compose_command(compose.as_path(), &["ps", "--all", "--format", "json"]),
-        &repository,
-    )
-    .await?;
-    ensure!(
-        compose_status.status.success(),
-        "docker compose ps failed: {}",
-        String::from_utf8_lossy(&compose_status.stderr).trim()
-    );
-    verify_compose_state(&String::from_utf8_lossy(&compose_status.stdout))?;
+        wait_for_compose_state(
+            compose,
+            project,
+            repository,
+            Duration::from_secs(wait_timeout_seconds),
+            Duration::from_millis(poll_interval_millis),
+        )
+        .await?
+    } else {
+        compose_status(compose, project, repository).await?
+    };
+    verify_compose_state(&compose_status)?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(
             std::env::var("VERIFY_HTTP_TIMEOUT_SECONDS")
@@ -1194,11 +1264,46 @@ pub(crate) async fn verify_stack(_args: Vec<String>) -> anyhow::Result<i32> {
         let url = nonempty_env(env_name).unwrap_or_else(|| default_url.to_owned());
         check_http_endpoint(&client, name, &url).await?;
     }
-    verify_compose_dependency_surfaces(&compose, &repository).await?;
+    verify_compose_dependency_surfaces(compose, project, repository).await?;
     println!(
         "commerce stack verification passed: Compose state, HTTP readiness, and dependency probes"
     );
     Ok(0)
+}
+
+pub(crate) async fn verify_stack(_args: Vec<String>) -> anyhow::Result<i32> {
+    let repository = root();
+    let compose = repository.join("deploy/docker-compose.yml");
+    if !compose.exists() {
+        bail!("Compose file is missing: {}", compose.display());
+    }
+
+    let manage_stack = std::env::var("VERIFY_MANAGE_STACK").unwrap_or_else(|_| "0".into()) == "1";
+    let project = manage_stack.then(managed_compose_project_name);
+    let result = verify_stack_run(&repository, &compose, project.as_deref(), manage_stack).await;
+
+    if !manage_stack {
+        return result;
+    }
+
+    let cleanup = status(
+        "docker",
+        &compose_command_for_project(
+            &compose,
+            project.as_deref(),
+            &["--profile", "demo", "down", "-v", "--remove-orphans"],
+        ),
+        &repository,
+    )
+    .await;
+    match (result, cleanup) {
+        (Ok(code), Ok(())) => Ok(code),
+        (Ok(_), Err(error)) => bail!("managed Compose cleanup failed: {error:#}"),
+        (Err(error), Ok(())) => Err(error),
+        (Err(error), Err(cleanup_error)) => bail!(
+            "managed Compose verification failed: {error:#}; cleanup failed: {cleanup_error:#}"
+        ),
+    }
 }
 
 pub(crate) async fn observable_test(args: Vec<String>) -> anyhow::Result<i32> {
@@ -1729,12 +1834,31 @@ pub(crate) async fn demo_fresh(args: Vec<String>) -> anyhow::Result<i32> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use serde_json::json;
 
     use super::{
-        REQUIRED_COMPLETED_COMPOSE_SERVICES, REQUIRED_RUNNING_COMPOSE_SERVICES, is_semantic_name,
+        REQUIRED_COMPLETED_COMPOSE_SERVICES, REQUIRED_RUNNING_COMPOSE_SERVICES,
+        compose_command_for_project, is_semantic_name, managed_compose_project_name,
         stack_http_defaults, validate_traceparent, verify_compose_state, web_observable_plan,
     };
+
+    #[test]
+    fn managed_compose_commands_are_project_scoped() {
+        let project = managed_compose_project_name();
+        let command = compose_command_for_project(
+            Path::new("deploy/docker-compose.yml"),
+            Some(&project),
+            &["ps", "--all"],
+        );
+        assert_eq!(command[0], "compose");
+        assert_eq!(command[1], "-p");
+        assert_eq!(command[2], project);
+        assert_eq!(command[3], "-f");
+        assert_eq!(command[4], "deploy/docker-compose.yml");
+        assert_eq!(&command[5..], ["ps", "--all"]);
+    }
 
     #[test]
     fn semantic_name_contract_accepts_lower_snake_case_segments() {

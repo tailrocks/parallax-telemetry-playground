@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
-RUN cargo build --release --bin ${BIN}
+RUN cargo build --locked --release --bin ${BIN}
 RUN cp target/release/${BIN} /out
 
 # Pricing exposes tonic-health rather than an HTTP port. Bundle a pinned,

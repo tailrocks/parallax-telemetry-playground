@@ -91,6 +91,7 @@ describe("commerce API boundary", () => {
     await expect(
       fetchQuote({
         items: [{ sku: "WIDGET-1", quantity: 2 }],
+        tenantId: "tenant-acme",
         customerId: "customer-acme-ava",
         currencyCode: "USD",
       }),
@@ -178,6 +179,7 @@ describe("commerce API boundary", () => {
     await expect(
       fetchQuote({
         items: [{ sku: "WIDGET-1", quantity: 1 }],
+        tenantId: "tenant-acme",
         customerId: "customer-acme-ava",
         currencyCode: "USD",
       }),
@@ -208,6 +210,7 @@ describe("commerce API boundary", () => {
     await expect(
       fetchQuote({
         items: [{ sku: "WIDGET-1", quantity: 1 }],
+        tenantId: "tenant-acme",
         customerId: "customer-acme-ava",
         currencyCode: "USD",
       }),

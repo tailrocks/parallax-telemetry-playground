@@ -47,6 +47,7 @@ query StorefrontProduct($sku: String!, $tenantId: ID!, $segment: String!) {
       price { id currency amountMinor compareAtMinor validFrom }
     }
     reviews { id productId title text stars verifiedPurchase createdAt }
+    reviewsSlow { id productId title text stars verifiedPurchase createdAt }
     riskScore
   }
 }
@@ -79,6 +80,7 @@ query StorefrontProducts(
         price { id currency amountMinor compareAtMinor validFrom }
       }
       reviews { id productId title text stars verifiedPurchase createdAt }
+      reviewsSlow { id productId title text stars verifiedPurchase createdAt }
       riskScore
     }
     page size totalElements totalPages hasNext experience
