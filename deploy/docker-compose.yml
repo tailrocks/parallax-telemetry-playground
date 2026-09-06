@@ -87,7 +87,7 @@ services:
       test:
         - CMD-SHELL
         - >-
-          printf 'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n' |
+          printf 'GET /readyz HTTP/1.0\r\nHost: localhost\r\n\r\n' |
           nc -w 2 127.0.0.1 8088 |
           grep -q ' 200 '
       interval: 5s
@@ -110,6 +110,8 @@ services:
       flagd:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
