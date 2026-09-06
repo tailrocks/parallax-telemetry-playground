@@ -122,8 +122,124 @@ pub(crate) const SCENARIO_NAMES: &[&str] = &[
     "product:ui_agent_verify",
 ];
 
+/// Stable A/B/C/corner-corpus proof IDs, aligned one-for-one with
+/// `SCENARIO_NAMES`. Keeping the inventory in the runner makes every public
+/// semantic task point at an executable proof instead of relying on a second
+/// shell catalog that can drift.
+const SCENARIO_PROOF_IDS: &[&str] = &[
+    "a1",
+    "a2",
+    "a5",
+    "a6",
+    "a7",
+    "a7b",
+    "a8",
+    "a9",
+    "a10",
+    "a3",
+    "a4",
+    "a12",
+    "a13",
+    "a14",
+    "a18",
+    "a19",
+    "a20-compare",
+    "a20",
+    "a22",
+    "a23",
+    "a24",
+    "a25",
+    "a26",
+    "a27",
+    "a28",
+    "a29",
+    "a30",
+    "a31",
+    "b-async-chaos",
+    "b2",
+    "b5",
+    "b6",
+    "b10",
+    "b13",
+    "b15",
+    "b16",
+    "b-chaos",
+    "b-checkout-chaos",
+    "b3b",
+    "a-breach-error-rate",
+    "a-breach-p95",
+    "a-recover",
+    "b-degradation",
+    "b17",
+    "b17b",
+    "b19",
+    "b20",
+    "b21",
+    "b22",
+    "b23",
+    "t-deep",
+    "t-wide",
+    "t-multiroot",
+    "t-orphan",
+    "t-skew",
+    "t-zero",
+    "t-links",
+    "t-longnames",
+    "t-events",
+    "l-burst",
+    "l-bodies",
+    "l-patterns",
+    "m-shapes",
+    "m-labels",
+    "f-attrs",
+    "e-burst",
+    "e-multi-lang",
+    "p-grpc-err",
+    "p-grpc-stream",
+    "p-graphql-err",
+    "p-rabbitmq-lag",
+    "j-happy",
+    "j-error",
+    "j-outside",
+    "j-reattach",
+    "j-parallel",
+    "eco-external",
+    "eco-full",
+    "c1",
+    "c2",
+    "c3",
+    "c4",
+    "c5",
+    "c6",
+    "c7",
+    "c8",
+    "c9",
+    "c10",
+    "c11",
+];
+
 pub(crate) fn semantic_names() -> &'static [&'static str] {
     SCENARIO_NAMES
+}
+
+fn scenario_proof_id(name: &str) -> Option<&'static str> {
+    SCENARIO_NAMES
+        .iter()
+        .position(|candidate| *candidate == name)
+        .and_then(|index| SCENARIO_PROOF_IDS.get(index).copied())
+}
+
+fn scenario_dispatch_id(name: &str) -> Option<&'static str> {
+    match name {
+        "grpc:pricing_stream" => Some("dispatch:grpc:pricing_stream"),
+        "protocols:grpc_stream" => Some("dispatch:protocols:grpc_stream"),
+        "messaging:java_fulfillment_replay" => Some("dispatch:messaging:java_fulfillment_replay"),
+        "messaging:seeded_order_replay" => Some("dispatch:messaging:seeded_order_replay"),
+        "traces:wide_trace" => Some("dispatch:traces:wide_trace"),
+        "traces:wide" => Some("dispatch:traces:wide"),
+        "protocols:rabbitmq_lag" => Some("dispatch:protocols:rabbitmq_lag_replay"),
+        _ => scenario_proof_id(name),
+    }
 }
 
 pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
@@ -145,7 +261,9 @@ pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
 }
 
 async fn run_named(name: &str, extra: &[String]) -> anyhow::Result<i32> {
-    println!("scenario {name}");
+    let proof_id = scenario_proof_id(name).unwrap_or("corpus:all");
+    let dispatch_id = scenario_dispatch_id(name).unwrap_or("dispatch:corpus:all");
+    println!("scenario {name} proof={proof_id} dispatch={dispatch_id}");
 
     match name {
         "commerce:checkout_saga" => checkout_saga().await,
@@ -153,10 +271,10 @@ async fn run_named(name: &str, extra: &[String]) -> anyhow::Result<i32> {
         "metrics:exemplars" => catalog_queries("exemplars", positive_env("A2_REQUESTS", 12)?).await,
         "graphql:batching_errors" => graphql_shapes().await,
         "database:price_subscription" => run_bun_script("scenarios/a7-subscription.ts", &[]).await,
-        "grpc:pricing_stream" | "protocols:grpc_stream" => pricing_stream().await,
-        "messaging:java_fulfillment_replay" | "messaging:seeded_order_replay" => {
-            seeded_order_replay().await
-        }
+        "grpc:pricing_stream" => pricing_stream().await,
+        "protocols:grpc_stream" => protocols_grpc_stream().await,
+        "messaging:java_fulfillment_replay" => java_fulfillment_replay().await,
+        "messaging:seeded_order_replay" => seeded_order_replay().await,
         "logs:field_spike" => run_shape("l-patterns").await,
         "propagation:baggage" => baggage_checkout().await,
         "cli:checkout_invocation" => run_current(&[]).await,
@@ -164,7 +282,7 @@ async fn run_named(name: &str, extra: &[String]) -> anyhow::Result<i32> {
         "feature_flags:checkout_variants" => feature_flag_variants().await,
         "feature_flags:topology_compare" => feature_flag_topology_compare().await,
         "security:redaction_canary" => sentry_canary().await,
-        "traces:wide_trace" => run_shape("t-wide").await,
+        "traces:wide_trace" => wide_trace().await,
         "messaging:batch_fanin" => synthetic_batch_fanin().await,
         "messaging:poison_retry" => synthetic_poison_retry().await,
         "messaging:orphan_consumer" => synthetic_orphan_consumer().await,
@@ -228,7 +346,7 @@ async fn run_named(name: &str, extra: &[String]) -> anyhow::Result<i32> {
         "issues:multi_language" => run_shape("e-multi-lang").await,
         "protocols:grpc_errors" => grpc_error_corpus().await,
         "protocols:graphql_errors" => graphql_shapes().await,
-        "protocols:rabbitmq_lag" => synthetic_poison_retry().await,
+        "protocols:rabbitmq_lag" => rabbitmq_lag_replay().await,
         "journeys:happy_path" => journey(&["--seconds", "6"]).await,
         "journeys:error_path" => expected_journey_failure().await,
         "journeys:outside_screen" => journey(&["--seconds", "6", "--outside-error"]).await,
@@ -517,9 +635,8 @@ async fn parallax_graphql(query: &str) -> anyhow::Result<Value> {
     Ok(body.get("data").cloned().unwrap_or(body))
 }
 
-async fn emit_issue_seed() -> anyhow::Result<()> {
+async fn emit_trace_request(request: ExportTraceServiceRequest) -> anyhow::Result<()> {
     let mut encoded = Vec::new();
-    let request: ExportTraceServiceRequest = shapes::issue_seed();
     request.encode(&mut encoded)?;
     let base = url_env("PARALLAX_OTLP_HTTP", "http://127.0.0.1:4318");
     let endpoint = if base.ends_with("/v1/traces") {
@@ -555,7 +672,11 @@ async fn emit_issue_seed() -> anyhow::Result<()> {
             Err(error) => failures.push(format!("{endpoint}: {error}")),
         }
     }
-    bail!("issue seed OTLP request failed: {}", failures.join("; "))
+    bail!("OTLP trace request failed: {}", failures.join("; "))
+}
+
+async fn emit_issue_seed() -> anyhow::Result<()> {
+    emit_trace_request(shapes::issue_seed()).await
 }
 
 async fn wait_for_issue() -> anyhow::Result<String> {
@@ -686,6 +807,16 @@ async fn wait_for_fulfillment(
     tenant: &str,
     require_notification: bool,
 ) -> anyhow::Result<()> {
+    wait_for_fulfillment_snapshot(order, tenant, require_notification)
+        .await
+        .map(|_| ())
+}
+
+async fn wait_for_fulfillment_snapshot(
+    order: &str,
+    tenant: &str,
+    require_notification: bool,
+) -> anyhow::Result<Value> {
     let base = url_env("FULFILLMENT_URL", "http://localhost:8093");
     let token = std::env::var("FULFILLMENT_INTERNAL_TOKEN")
         .unwrap_or_else(|_| "fulfillment-internal:research-secret".into());
@@ -709,7 +840,7 @@ async fn wait_for_fulfillment(
                     .and_then(Value::as_u64)
                     .is_some_and(|count| count >= 1))
         {
-            return Ok(());
+            return Ok(body);
         }
         if tokio::time::Instant::now() >= deadline {
             bail!("fulfillment did not complete order {order} before timeout: {body}");
@@ -926,6 +1057,61 @@ async fn pricing_stream() -> anyhow::Result<i32> {
     Ok(0)
 }
 
+async fn protocols_grpc_stream() -> anyhow::Result<i32> {
+    let base = url_env("CHECKOUT_URL", "http://localhost:8088");
+    let parallax_required = validate_parallax_mode()?;
+    for (label, query, expected, validation) in [
+        (
+            "Nova multi-quantity stream",
+            "?tenant_id=tenant-nova&customer_id=customer-nova-mia&sku=NOVA-PACK-20&quantity=2&request_id=p-grpc-stream-nova",
+            StatusCode::OK,
+            "clean",
+        ),
+        (
+            "protocol stream rejection",
+            "?tenant_id=tenant-nova&customer_id=customer-nova-mia&sku=NO-SUCH-NOVA-SKU&quantity=1&request_id=p-grpc-stream-rejection",
+            StatusCode::NOT_FOUND,
+            "unknown",
+        ),
+        (
+            "Nova client cancellation",
+            "?tenant_id=tenant-nova&customer_id=customer-nova-mia&sku=NOVA-PACK-30&quantity=1&delay_ms=1&request_id=p-grpc-stream-cancel",
+            StatusCode::OK,
+            "cancelled",
+        ),
+    ] {
+        let trace_id = hex_id(16);
+        let traceparent = format!("00-{trace_id}-{}-01", hex_id(8));
+        let mut headers = HeaderMap::new();
+        headers.insert("traceparent", traceparent.parse()?);
+        headers.insert("tracestate", "playground=grpc-stream".parse()?);
+        headers.insert("x-scenario-proof", "p-grpc-stream".parse()?);
+        let (status, body) = request_json(
+            Method::GET,
+            &format!("{base}/quote-stream{query}"),
+            headers,
+            None,
+        )
+        .await?;
+        ensure!(
+            status == expected,
+            "{label}: expected HTTP {}, got {status}: {body}",
+            expected.as_u16()
+        );
+        validate_pricing_stream_response(label, &body, validation)?;
+        println!("{label}: HTTP {status} traceparent={traceparent} {body}");
+        if parallax_required {
+            wait_for_pricing_trace(&trace_id, label, validation).await?;
+        }
+    }
+    if parallax_required {
+        println!("p-grpc-stream Parallax trace assertions PASS");
+    } else {
+        println!("p-grpc-stream Parallax trace assertions SKIPPED by SCENARIO_PARALLAX_MODE=skip");
+    }
+    Ok(0)
+}
+
 fn validate_parallax_mode() -> anyhow::Result<bool> {
     match std::env::var("SCENARIO_PARALLAX_MODE")
         .unwrap_or_else(|_| "required".to_owned())
@@ -1041,6 +1227,41 @@ fn hex_id(bytes: usize) -> String {
     format!("{id:032x}")[..bytes * 2].to_owned()
 }
 
+async fn publish_seeded_order(
+    base: &str,
+    token: &str,
+    order: &str,
+    tenant: &str,
+) -> anyhow::Result<Value> {
+    let mut headers = HeaderMap::new();
+    headers.insert("authorization", format!("Bearer {token}").parse()?);
+    headers.insert("x-tenant-id", tenant.parse()?);
+    let url = format!("{base}/publish?order={order}&tenant={tenant}");
+    let (status, body) = request_json(Method::POST, &url, headers, None).await?;
+    ensure!(
+        status.is_success(),
+        "seeded order {order} publish failed: {status}: {body}"
+    );
+    Ok(body)
+}
+
+async fn java_fulfillment_replay() -> anyhow::Result<i32> {
+    let base = url_env("FULFILLMENT_URL", "http://localhost:8093");
+    let token = std::env::var("FULFILLMENT_INTERNAL_TOKEN")
+        .unwrap_or_else(|_| "fulfillment-internal:research-secret".into());
+    for (order, tenant) in [
+        ("order-acme-1001", "tenant-acme"),
+        ("order-nova-2001", "tenant-nova"),
+    ] {
+        publish_seeded_order(&base, &token, order, tenant).await?;
+        wait_for_fulfillment(order, tenant, false).await?;
+    }
+    println!(
+        "Java fulfillment replay reached fulfillment and notifications for both seeded tenants"
+    );
+    Ok(0)
+}
+
 async fn seeded_order_replay() -> anyhow::Result<i32> {
     let base = url_env("FULFILLMENT_URL", "http://localhost:8093");
     let token = std::env::var("FULFILLMENT_INTERNAL_TOKEN")
@@ -1049,18 +1270,27 @@ async fn seeded_order_replay() -> anyhow::Result<i32> {
         ("order-acme-1001", "tenant-acme"),
         ("order-nova-2001", "tenant-nova"),
     ] {
-        let mut headers = HeaderMap::new();
-        headers.insert("authorization", format!("Bearer {token}").parse()?);
-        headers.insert("x-tenant-id", tenant.parse()?);
-        let url = format!("{base}/publish?order={order}&tenant={tenant}");
-        let (status, body) = request_json(Method::POST, &url, headers, None).await?;
+        publish_seeded_order(&base, &token, order, tenant).await?;
+        let first = wait_for_fulfillment_snapshot(order, tenant, false).await?;
+        publish_seeded_order(&base, &token, order, tenant).await?;
+        let second = wait_for_fulfillment_snapshot(order, tenant, false).await?;
+        let first_deliveries = first
+            .get("notification_deliveries")
+            .and_then(Value::as_u64)
+            .context("first seeded replay verification omitted notification_deliveries")?;
+        let second_deliveries = second
+            .get("notification_deliveries")
+            .and_then(Value::as_u64)
+            .context("second seeded replay verification omitted notification_deliveries")?;
         ensure!(
-            status.is_success(),
-            "seeded order {order} publish failed: {status}: {body}"
+            second_deliveries == first_deliveries,
+            "seeded replay duplicated notification delivery for {order}: before={first_deliveries}, after={second_deliveries}"
         );
-        wait_for_fulfillment(order, tenant, false).await?;
+        println!(
+            "seeded replay idempotence verified order={order} notification_deliveries={second_deliveries}"
+        );
     }
-    println!("seeded-order replay reached fulfillment and notifications");
+    println!("seeded-order replay preserved durable inbox and notification idempotence");
     Ok(0)
 }
 
@@ -2681,6 +2911,23 @@ async fn run_shape(id: &str) -> anyhow::Result<i32> {
     shapes::run(vec![id.to_owned()]).await
 }
 
+async fn wide_trace() -> anyhow::Result<i32> {
+    let proof_id =
+        scenario_proof_id("traces:wide_trace").context("wide trace proof is unmapped")?;
+    let mut spans = shapes::t_wide();
+    for (index, span) in spans.iter_mut().enumerate() {
+        span.name = if index == 0 {
+            "a19.wide_trace.root".to_owned()
+        } else {
+            format!("a19.wide_trace.child_{index}")
+        };
+        span.attrs.push(shapes::kv("scenario.proof_id", proof_id));
+    }
+    emit_trace_request(shapes::traces_request(spans)).await?;
+    println!("{proof_id} emitted a 521-span wide trace with proof-specific names");
+    Ok(0)
+}
+
 async fn journey(args: &[&str]) -> anyhow::Result<i32> {
     let mut command = vec!["console".to_owned()];
     command.extend(args.iter().map(|arg| (*arg).to_owned()));
@@ -3799,6 +4046,13 @@ async fn synthetic_poison_retry() -> anyhow::Result<i32> {
     Ok(0)
 }
 
+async fn rabbitmq_lag_replay() -> anyhow::Result<i32> {
+    synthetic_poison_retry().await?;
+    seeded_order_replay().await?;
+    println!("RabbitMQ lag, bounded poison retry, dead-letter, and seeded replay completed");
+    Ok(0)
+}
+
 async fn synthetic_orphan_consumer() -> anyhow::Result<i32> {
     let linked_trace = "b7f2d9a4c6e81f03579ab2cd4e6f8102";
     let orphan_trace = "c8e3dab5f7a9201468ab3cd5f7a90213";
@@ -4033,37 +4287,39 @@ async fn release_checkout_burst(base: &str, label: &str, requests: u64) -> anyho
     Ok(())
 }
 
+const CORNER_CORPUS_SCENARIOS: &[&str] = &[
+    "traces:deep",
+    "traces:wide",
+    "traces:multi_root",
+    "traces:orphan",
+    "traces:clock_skew",
+    "traces:zero_duration",
+    "traces:cross_links",
+    "traces:long_names",
+    "traces:events",
+    "logs:burst",
+    "logs:bodies",
+    "logs:patterns",
+    "metrics:shapes",
+    "metrics:labels",
+    "attributes:bounded",
+    "issues:burst",
+    "issues:multi_language",
+    "protocols:grpc_errors",
+    "protocols:grpc_stream",
+    "protocols:graphql_errors",
+    "protocols:rabbitmq_lag",
+    "journeys:happy_path",
+    "journeys:error_path",
+    "journeys:outside_screen",
+    "journeys:reattach",
+    "journeys:parallel",
+    "ecosystem:external_edge",
+    "ecosystem:full",
+];
+
 async fn corpus_all() -> anyhow::Result<i32> {
-    for scenario in [
-        "traces:deep",
-        "traces:wide",
-        "traces:multi_root",
-        "traces:orphan",
-        "traces:clock_skew",
-        "traces:zero_duration",
-        "traces:cross_links",
-        "traces:long_names",
-        "traces:events",
-        "logs:burst",
-        "logs:bodies",
-        "logs:patterns",
-        "metrics:shapes",
-        "metrics:labels",
-        "attributes:bounded",
-        "issues:burst",
-        "issues:multi_language",
-        "protocols:grpc_errors",
-        "protocols:grpc_stream",
-        "protocols:graphql_errors",
-        "protocols:rabbitmq_lag",
-        "journeys:happy_path",
-        "journeys:error_path",
-        "journeys:outside_screen",
-        "journeys:reattach",
-        "journeys:parallel",
-        "ecosystem:external_edge",
-        "ecosystem:full",
-    ] {
+    for &scenario in CORNER_CORPUS_SCENARIOS {
         let code = match scenario {
             "traces:deep" => run_shape("t-deep").await?,
             "traces:wide" => run_shape("t-wide").await?,
@@ -4083,9 +4339,9 @@ async fn corpus_all() -> anyhow::Result<i32> {
             "issues:burst" => run_shape("e-burst").await?,
             "issues:multi_language" => run_shape("e-multi-lang").await?,
             "protocols:grpc_errors" => grpc_error_corpus().await?,
-            "protocols:grpc_stream" => pricing_stream().await?,
+            "protocols:grpc_stream" => protocols_grpc_stream().await?,
             "protocols:graphql_errors" => graphql_shapes().await?,
-            "protocols:rabbitmq_lag" => synthetic_poison_retry().await?,
+            "protocols:rabbitmq_lag" => rabbitmq_lag_replay().await?,
             "journeys:happy_path" => journey(&["--seconds", "6"]).await?,
             "journeys:error_path" => expected_journey_failure().await?,
             "journeys:outside_screen" => journey(&["--seconds", "6", "--outside-error"]).await?,
@@ -4093,16 +4349,24 @@ async fn corpus_all() -> anyhow::Result<i32> {
             "journeys:parallel" => parallel_journeys().await?,
             "ecosystem:external_edge" => run_shape("eco-external").await?,
             "ecosystem:full" => ecosystem_full().await?,
-            _ => unreachable!("corpus registry is fixed"),
+            _ => unreachable!("corner corpus registry is fixed"),
         };
         ensure!(code == 0, "corpus member {scenario} failed");
     }
+    println!(
+        "corner corpus executed {} proofs; public A/B/C inventory mapped: {} scenarios",
+        CORNER_CORPUS_SCENARIOS.len(),
+        SCENARIO_NAMES.len()
+    );
     Ok(0)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SCENARIO_NAMES, hex_id};
+    use super::{
+        CORNER_CORPUS_SCENARIOS, SCENARIO_NAMES, SCENARIO_PROOF_IDS, hex_id, scenario_dispatch_id,
+        scenario_proof_id,
+    };
 
     #[test]
     fn semantic_names_are_unique_and_grouped() {
@@ -4128,5 +4392,64 @@ mod tests {
     fn generated_ids_have_expected_hex_width() {
         assert_eq!(hex_id(16).len(), 32);
         assert_eq!(hex_id(8).len(), 16);
+    }
+
+    #[test]
+    fn public_inventory_has_one_unique_executable_proof_per_scenario() {
+        assert_eq!(SCENARIO_NAMES.len(), SCENARIO_PROOF_IDS.len());
+        let mut proof_ids = SCENARIO_PROOF_IDS.to_vec();
+        proof_ids.sort_unstable();
+        proof_ids.dedup();
+        assert_eq!(proof_ids.len(), SCENARIO_PROOF_IDS.len());
+        for name in SCENARIO_NAMES {
+            assert!(
+                scenario_proof_id(name).is_some(),
+                "public scenario has no proof mapping: {name}"
+            );
+            assert!(
+                scenario_dispatch_id(name).is_some(),
+                "public scenario has no dispatch mapping: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn formerly_aliased_scenarios_have_distinct_proofs_and_dispatches() {
+        for (left, right) in [
+            ("grpc:pricing_stream", "protocols:grpc_stream"),
+            (
+                "messaging:java_fulfillment_replay",
+                "messaging:seeded_order_replay",
+            ),
+            ("traces:wide_trace", "traces:wide"),
+        ] {
+            assert_ne!(
+                scenario_proof_id(left),
+                scenario_proof_id(right),
+                "proof IDs must stay distinct for {left} and {right}"
+            );
+            assert_ne!(
+                scenario_dispatch_id(left),
+                scenario_dispatch_id(right),
+                "dispatch IDs must stay distinct for {left} and {right}"
+            );
+        }
+        assert_eq!(
+            scenario_dispatch_id("protocols:rabbitmq_lag"),
+            Some("dispatch:protocols:rabbitmq_lag_replay")
+        );
+    }
+
+    #[test]
+    fn corner_corpus_entries_are_public_and_unique() {
+        let mut entries = CORNER_CORPUS_SCENARIOS.to_vec();
+        entries.sort_unstable();
+        entries.dedup();
+        assert_eq!(entries.len(), CORNER_CORPUS_SCENARIOS.len());
+        assert!(
+            CORNER_CORPUS_SCENARIOS
+                .iter()
+                .all(|scenario| SCENARIO_NAMES.contains(scenario))
+        );
     }
 }
