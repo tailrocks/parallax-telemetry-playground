@@ -30,3 +30,42 @@ run = "cargo clippy --locked --workspace --all-targets --all-features -- -D warn
 [tasks."quality:fmt"]
 description = "Check Rust formatting across the workspace"
 run = "cargo fmt --all -- --check"
+
+[tasks."quality:java_catalog"]
+description = "Run the Catalog Spring test suite"
+dir = "services/catalog"
+run = "java -cp gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain --no-daemon test -Dorg.gradle.native=false"
+
+[tasks."quality:java_payment"]
+description = "Run the Payment Spring test suite"
+dir = "services/payment"
+run = "java -cp gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain --no-daemon test -Dorg.gradle.native=false"
+
+[tasks."quality:java_fulfillment"]
+description = "Run the Fulfillment Spring test suite"
+dir = "services/fulfillment"
+run = "java -cp gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain --no-daemon test -Dorg.gradle.native=false"
+
+[tasks."quality:java"]
+description = "Run all Spring service test suites"
+run = [
+  { task = "quality:java_catalog" },
+  { task = "quality:java_payment" },
+  { task = "quality:java_fulfillment" },
+]
+
+[tasks."quality:web"]
+description = "Run web tests, production build, and strict TypeScript checking"
+dir = "web"
+run = ["bun run test", "bun run build"]
+
+[tasks."quality:polyglot"]
+description = "Run Rust, Spring, and web quality gates"
+run = [
+  { task = "quality:ci" },
+  { task = "quality:test" },
+  { task = "quality:lint" },
+  { task = "quality:fmt" },
+  { task = "quality:java" },
+  { task = "quality:web" },
+]
