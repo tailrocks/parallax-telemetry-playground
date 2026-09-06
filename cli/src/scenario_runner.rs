@@ -737,6 +737,136 @@ async fn parallax_graphql(query: &str) -> anyhow::Result<Value> {
     Ok(body.get("data").cloned().unwrap_or(body))
 }
 
+fn scenario_traceparent(trace_id: &str) -> String {
+    format!("00-{trace_id}-{}-01", hex_id(8))
+}
+
+fn scenario_headers(trace_id: &str, tracestate: &str) -> anyhow::Result<HeaderMap> {
+    let mut headers = json_headers();
+    headers.insert("traceparent", scenario_traceparent(trace_id).parse()?);
+    headers.insert("tracestate", tracestate.parse()?);
+    headers.insert(
+        "baggage",
+        "tenant.id=tenant-acme,user.tier=standard,customer.segment=standard,region=us-east-1,request.priority=normal".parse()?,
+    );
+    Ok(headers)
+}
+
+fn trace_spans(data: &Value) -> Option<&[Value]> {
+    data.pointer("/trace/spans")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+}
+
+fn span_attributes(span: &Value) -> Option<serde_json::Map<String, Value>> {
+    match span.get("attributes")? {
+        Value::String(raw) => serde_json::from_str::<Value>(raw)
+            .ok()?
+            .as_object()
+            .cloned(),
+        Value::Object(attributes) => Some(attributes.clone()),
+        _ => None,
+    }
+}
+
+fn span_attribute_string(span: &Value, key: &str) -> Option<String> {
+    span_attributes(span)?.get(key)?.as_str().map(str::to_owned)
+}
+
+fn span_attribute_i64(span: &Value, key: &str) -> Option<i64> {
+    span_attributes(span)?.get(key)?.as_i64()
+}
+
+fn span_is(span: &Value, service: &str, name: &str) -> bool {
+    span.get("service").and_then(Value::as_str) == Some(service)
+        && span.get("name").and_then(Value::as_str) == Some(name)
+}
+
+fn span_parent_id(span: &Value) -> Option<&str> {
+    span.get("parentSpanId").and_then(Value::as_str)
+}
+
+fn child_of(child: &Value, parent: &Value) -> bool {
+    child.get("parentSpanId").and_then(Value::as_str)
+        == parent.get("spanId").and_then(Value::as_str)
+}
+
+fn linked_to(child: &Value, parent: &Value) -> bool {
+    let Some(parent_trace_id) = parent.get("traceId").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(parent_span_id) = parent.get("spanId").and_then(Value::as_str) else {
+        return false;
+    };
+    child
+        .get("typedLinks")
+        .and_then(Value::as_array)
+        .is_some_and(|links| {
+            links.iter().any(|link| {
+                link.get("traceId").and_then(Value::as_str) == Some(parent_trace_id)
+                    && link.get("spanId").and_then(Value::as_str) == Some(parent_span_id)
+            })
+        })
+}
+
+fn causally_after(child: &Value, parent: &Value) -> bool {
+    child_of(child, parent) || linked_to(child, parent)
+}
+
+async fn postgres_query(sql: &str) -> anyhow::Result<String> {
+    let root = repository_root();
+    let compose = root.join("deploy/docker-compose.yml");
+    let args = vec![
+        "compose".to_owned(),
+        "-f".to_owned(),
+        compose.display().to_string(),
+        "exec".to_owned(),
+        "-T".to_owned(),
+        "postgres".to_owned(),
+        "psql".to_owned(),
+        "-U".to_owned(),
+        "postgres".to_owned(),
+        "-d".to_owned(),
+        "playground".to_owned(),
+        "-At".to_owned(),
+        "-F".to_owned(),
+        "\t".to_owned(),
+        "-c".to_owned(),
+        sql.to_owned(),
+    ];
+    let (code, output) = capture_program(PathBuf::from("docker"), args, Some(root)).await?;
+    ensure!(code == 0, "PostgreSQL verification query failed: {output}");
+    Ok(output)
+}
+
+fn sql_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn tabular_row(output: &str) -> Option<Vec<String>> {
+    output
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("NOTICE:"))
+        .map(|line| line.split('\t').map(str::to_owned).collect())
+}
+
+async fn wait_for_postgres_row(sql: &str, label: &str) -> anyhow::Result<Vec<String>> {
+    let timeout = positive_env("ASYNC_VERIFY_TIMEOUT_SECONDS", 30)?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
+    loop {
+        let output = postgres_query(sql).await?;
+        if let Some(row) = tabular_row(&output) {
+            return Ok(row);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("{label} did not become durable before timeout: {output}");
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
 async fn emit_trace_request(request: ExportTraceServiceRequest) -> anyhow::Result<()> {
     let mut encoded = Vec::new();
     request.encode(&mut encoded)?;
@@ -1518,6 +1648,73 @@ async fn checkout_expected(
     Ok(body)
 }
 
+fn payment_failure_trace_matches(data: &Value) -> bool {
+    let Some(spans) = trace_spans(data) else {
+        return false;
+    };
+    let checkout_http = spans.iter().any(|span| {
+        span_is(span, "checkout", "http.server.request")
+            && span_attribute_i64(span, "http.response.status_code") == Some(402)
+    });
+    let checkout = spans
+        .iter()
+        .any(|span| span_is(span, "checkout", "checkout"));
+    let payment = spans.iter().any(|span| {
+        span.get("service").and_then(Value::as_str) == Some("payment")
+            && span
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.ends_with("/Authorize"))
+            && span_attribute_string(span, "payment.operation") == Some("authorize".to_owned())
+            && span_attribute_string(span, "payment.operation.status")
+                == Some("PAYMENT_OPERATION_STATUS_DECLINED".to_owned())
+    });
+    checkout_http && checkout && payment
+}
+
+async fn wait_for_payment_failure_trace(trace_id: &str) -> anyhow::Result<()> {
+    let timeout = positive_env("PARALLAX_TRACE_TIMEOUT_SECONDS", 30)?;
+    let poll = positive_env("PARALLAX_TRACE_POLL_SECONDS", 1)?;
+    let query = format!(
+        "{{ trace(traceId: {trace_id:?}) {{ spans {{ spanId parentSpanId service name statusCode attributes typedLinks {{ traceId spanId attributes }} }} }} }}"
+    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
+    let mut last = Value::Null;
+    loop {
+        if let Ok(data) = parallax_graphql(&query).await {
+            last = data;
+            if payment_failure_trace_matches(&last) {
+                println!("Parallax payment failure trace PASS: {trace_id}");
+                return Ok(());
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("Parallax payment failure trace FAIL: {trace_id}; last response: {last}");
+        }
+        tokio::time::sleep(Duration::from_secs(poll)).await;
+    }
+}
+
+async fn wait_for_payment_failure_state(request_id: &str) -> anyhow::Result<Vec<String>> {
+    let request = sql_literal(request_id);
+    let sql = format!(
+        "SELECT a.status, a.error_status, a.error_code, a.order_id, COALESCE(o.status, '<no-order>'), COALESCE(p.status, '<no-payment>'), COALESCE(p.failure_code, '<no-failure>') FROM checkout_attempts a LEFT JOIN orders o ON o.tenant_id=a.tenant_id AND o.id=a.order_id LEFT JOIN LATERAL (SELECT status, failure_code FROM payments WHERE tenant_id=a.tenant_id AND order_id=a.order_id ORDER BY created_at DESC LIMIT 1) p ON TRUE WHERE a.tenant_id='tenant-acme' AND a.request_id={request}"
+    );
+    let row = wait_for_postgres_row(&sql, "payment failure state").await?;
+    ensure!(
+        row.len() == 7
+            && row[0] == "failed"
+            && row[1] == "402"
+            && row[2] == "payment_declined"
+            && !row[3].is_empty()
+            && row[4] == "cancelled"
+            && row[5] == "failed"
+            && row[6] == "payment_failure_reason_declined",
+        "payment failure durable state is incomplete for {request_id}: {row:?}"
+    );
+    Ok(row)
+}
+
 async fn delayed_checkout_burst(label: &str, legacy_prefix: &str) -> anyhow::Result<i32> {
     let requests_name = if legacy_prefix == "B5" {
         "B5_REQUESTS"
@@ -1648,15 +1845,36 @@ async fn request_metric_shapes() -> anyhow::Result<i32> {
 }
 
 async fn payment_failure_latency() -> anyhow::Result<i32> {
-    checkout_expected(
-        "handled payment decline",
+    let parallax_required = validate_parallax_mode()?;
+    let trace_id = hex_id(16);
+    let request_id = format!(
+        "payment-decline-{}-{}",
+        invocation::invocation_id(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let controls = [("request_id", json!(request_id.clone()))];
+    let (status, body) = checkout_http(
         "WIDGET-1",
+        1,
         "tok_decline",
         "payment-decline",
-        &[],
-        StatusCode::PAYMENT_REQUIRED,
+        scenario_headers(&trace_id, "playground=payment-failure")?,
+        &controls,
     )
     .await?;
+    ensure!(
+        status == StatusCode::PAYMENT_REQUIRED
+            && body.get("error").and_then(Value::as_str) == Some("payment_declined"),
+        "handled payment decline: expected typed HTTP 402, got {status}: {body}"
+    );
+    let state = wait_for_payment_failure_state(&request_id).await?;
+    if parallax_required {
+        wait_for_payment_failure_trace(&trace_id).await?;
+    }
+    println!(
+        "handled payment decline: HTTP {status} traceparent={} durable={state:?}",
+        scenario_traceparent(&trace_id)
+    );
     let controls = [("slow", json!(500_u64))];
     checkout_expected(
         "payment latency",
@@ -2429,20 +2647,144 @@ async fn wait_for_inventory_trace(
     }
 }
 
+fn inventory_failure_trace_matches(data: &Value) -> bool {
+    let Some(spans) = trace_spans(data) else {
+        return false;
+    };
+    let Some(http) = spans.iter().find(|span| {
+        span_is(span, "inventory", "http.server.request")
+            && span_attribute_i64(span, "http.response.status_code") == Some(503)
+            && span.get("statusCode").and_then(Value::as_str) == Some("STATUS_CODE_ERROR")
+            && span_attribute_string(span, "error.type") == Some("http.server.error".to_owned())
+    }) else {
+        return false;
+    };
+    let Some(reserve) = spans.iter().find(|span| {
+        span_is(span, "inventory", "inventory.reserve")
+            && span.get("statusCode").and_then(Value::as_str) == Some("STATUS_CODE_ERROR")
+            && span_attribute_string(span, "error.type") == Some("reservation_rejected".to_owned())
+    }) else {
+        return false;
+    };
+    let database = spans.iter().find(|span| {
+        span_is(span, "inventory", "postgres.query")
+            && span_attribute_string(span, "db.query.summary")
+                == Some("reserve inventory row".to_owned())
+            && span_attribute_string(span, "db.system.name") == Some("postgresql".to_owned())
+    });
+    database.is_some_and(|database| {
+        span_parent_id(reserve) == span_parent_id(http) && child_of(database, reserve)
+    })
+}
+
+async fn wait_for_inventory_failure_trace(trace_id: &str) -> anyhow::Result<()> {
+    let timeout = positive_env("PARALLAX_TRACE_TIMEOUT_SECONDS", 30)?;
+    let poll = positive_env("PARALLAX_TRACE_POLL_SECONDS", 1)?;
+    let query = format!(
+        "{{ trace(traceId: {trace_id:?}) {{ spans {{ spanId parentSpanId service name statusCode attributes typedLinks {{ traceId spanId attributes }} }} }} }}"
+    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
+    let mut last = Value::Null;
+    loop {
+        if let Ok(data) = parallax_graphql(&query).await {
+            last = data;
+            if inventory_failure_trace_matches(&last) {
+                println!("Parallax inventory failure trace PASS: {trace_id}");
+                return Ok(());
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("Parallax inventory failure trace FAIL: {trace_id}; last response: {last}");
+        }
+        tokio::time::sleep(Duration::from_secs(poll)).await;
+    }
+}
+
 async fn inventory_failure() -> anyhow::Result<i32> {
     let base = url_env("INVENTORY_URL", "http://localhost:8089");
     let tenant = std::env::var("INVENTORY_TENANT_ID").unwrap_or_else(|_| "tenant-acme".to_owned());
     let run_id =
         std::env::var("B2_RUN_ID").unwrap_or_else(|_| format!("b2-{}", std::process::id()));
-    let url = format!(
-        "{base}/reserve?tenant_id={tenant}&reservation_id={run_id}-failure&sku=WIDGET-1&quantity=1&fail=1"
+    let reservation_id = format!("{run_id}-failure");
+    let fence_request_id = format!(
+        "inventory-failure-fence-{}-{}",
+        invocation::invocation_id(),
+        uuid::Uuid::new_v4().simple()
     );
-    let (status, body) = request_json(Method::GET, &url, HeaderMap::new(), None).await?;
+    let fence_trace_id = hex_id(16);
+    let fence_controls = [("request_id", json!(fence_request_id.clone()))];
+    let (fence_status, fence_body) = checkout_http(
+        "WIDGET-1",
+        1,
+        "tok_decline",
+        "inventory-failure-fence",
+        scenario_headers(&fence_trace_id, "playground=inventory-failure-fence")?,
+        &fence_controls,
+    )
+    .await?;
     ensure!(
-        status == StatusCode::SERVICE_UNAVAILABLE,
+        fence_status == StatusCode::PAYMENT_REQUIRED,
+        "inventory failure fence did not create a failed checkout: HTTP {fence_status}: {fence_body}"
+    );
+    let fence_row = wait_for_postgres_row(
+        &format!(
+            "SELECT status, lease_token FROM checkout_attempts WHERE tenant_id={} AND request_id={}",
+            sql_literal(&tenant),
+            sql_literal(&fence_request_id)
+        ),
+        "inventory failure checkout fence",
+    )
+    .await?;
+    ensure!(
+        fence_row.len() == 2 && fence_row[0] == "failed" && !fence_row[1].is_empty(),
+        "inventory failure fence is not failed and durable: {fence_row:?}"
+    );
+    let trace_id = hex_id(16);
+    let url = url_with_query(
+        &base,
+        "/reserve",
+        &[
+            ("tenant_id".to_owned(), tenant.clone()),
+            ("reservation_id".to_owned(), reservation_id.clone()),
+            ("sku".to_owned(), "WIDGET-1".to_owned()),
+            ("quantity".to_owned(), "1".to_owned()),
+            ("fail".to_owned(), "1".to_owned()),
+            ("checkout_request_id".to_owned(), fence_request_id),
+            ("checkout_lease_token".to_owned(), fence_row[1].clone()),
+        ],
+    )?;
+    let (status, body) = request_json(
+        Method::GET,
+        &url,
+        scenario_headers(&trace_id, "playground=inventory-failure")?,
+        None,
+    )
+    .await?;
+    ensure!(
+        status == StatusCode::SERVICE_UNAVAILABLE
+            && body.get("error").and_then(Value::as_str) == Some("reservation_rejected"),
         "expected inventory 503, got {status}: {body}"
     );
-    println!("inventory reservation failure: HTTP {status} {body}");
+    let parallax_required = validate_parallax_mode()?;
+    if parallax_required {
+        wait_for_inventory_failure_trace(&trace_id).await?;
+    }
+    let reservation_count = postgres_query(&format!(
+        "SELECT count(*) FROM inventory_reservations WHERE tenant_id={} AND reservation_id={}",
+        sql_literal(&tenant),
+        sql_literal(&reservation_id)
+    ))
+    .await?;
+    ensure!(
+        tabular_row(&reservation_count)
+            .and_then(|row| row.first().cloned())
+            .as_deref()
+            == Some("0"),
+        "inventory fault created a durable reservation unexpectedly: {reservation_count}"
+    );
+    println!(
+        "inventory reservation failure: HTTP {status} trace_id={trace_id} durable reservation_count=0 {body}"
+    );
     Ok(0)
 }
 
@@ -2750,7 +3092,7 @@ async fn browser_journey() -> anyhow::Result<i32> {
     let root = repository_root();
     let parallax_required = validate_parallax_mode()?;
     let trace_id = hex_id(16);
-    let traceparent = format!("00-{trace_id}-{}-01", hex_id(8));
+    let traceparent = scenario_traceparent(&trace_id);
     let tracestate =
         std::env::var("TRACESTATE").unwrap_or_else(|_| "playground=browser".to_owned());
     let baggage = std::env::var("BAGGAGE").unwrap_or_else(|_| {
@@ -2788,36 +3130,181 @@ async fn browser_journey() -> anyhow::Result<i32> {
     .await?;
     if parallax_required {
         wait_for_browser_trace(&trace_id).await?;
+        wait_for_browser_durable_state(&trace_id).await?;
     }
     Ok(0)
+}
+
+fn browser_trace_matches(data: &Value) -> bool {
+    let Some(spans) = trace_spans(data) else {
+        return false;
+    };
+    let browser_test = spans.iter().any(|span| {
+        span_is(span, "playground-web-tests", "test.case")
+            && span_attribute_string(span, "test.case.result.status") == Some("pass".to_owned())
+    });
+    let Some(web_request) = spans.iter().find(|span| {
+        span_is(span, "web", "POST")
+            && span_attribute_string(span, "http.request.method") == Some("POST".to_owned())
+            && span_attribute_string(span, "url.full")
+                .is_some_and(|url| url.contains("/__storefront/graphql"))
+    }) else {
+        return false;
+    };
+    let Some(web_server) = spans.iter().find(|span| {
+        span_is(span, "playground-web", "web.ssr.request")
+            && span_attribute_string(span, "http.request.method") == Some("POST".to_owned())
+            && span_attribute_string(span, "url.path") == Some("/__storefront/graphql".to_owned())
+            && causally_after(span, web_request)
+    }) else {
+        return false;
+    };
+    let Some(storefront_http) = spans.iter().find(|span| {
+        span_is(span, "storefront", "http.server.request")
+            && span_attribute_string(span, "http.request.method") == Some("POST".to_owned())
+            && span_attribute_string(span, "http.route") == Some("/graphql".to_owned())
+            && span_attribute_i64(span, "http.response.status_code") == Some(200)
+            && causally_after(span, web_server)
+    }) else {
+        return false;
+    };
+    let Some(storefront_checkout) = spans.iter().find(|span| {
+        span_is(span, "storefront", "graphql.resolver")
+            && span_attribute_string(span, "graphql.field.name")
+                == Some("Mutation.checkout".to_owned())
+            && child_of(span, storefront_http)
+    }) else {
+        return false;
+    };
+    let Some(checkout) = spans
+        .iter()
+        .find(|span| span_is(span, "checkout", "checkout") && child_of(span, storefront_checkout))
+    else {
+        return false;
+    };
+    let payment = spans.iter().any(|span| {
+        span.get("service").and_then(Value::as_str) == Some("payment")
+            && span
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.ends_with("/Authorize"))
+            && span_attribute_string(span, "payment.operation") == Some("authorize".to_owned())
+            && span_attribute_string(span, "payment.operation.status")
+                == Some("PAYMENT_OPERATION_STATUS_SUCCEEDED".to_owned())
+            && causally_after(span, checkout)
+    });
+    let inventory = spans.iter().any(|span| {
+        span_is(span, "inventory", "inventory.reserve") && causally_after(span, checkout)
+    });
+    let Some(producer) = spans.iter().find(|span| {
+        span_is(span, "checkout", "checkout.outbox.publish")
+            && span_attribute_string(span, "messaging.system") == Some("rabbitmq".to_owned())
+            && span_attribute_string(span, "messaging.destination.name")
+                == Some("commerce.events".to_owned())
+            && span_attribute_string(span, "messaging.operation.name") == Some("send".to_owned())
+            && span_attribute_string(span, "commerce.event.type") == Some("order.paid".to_owned())
+            && causally_after(span, checkout)
+    }) else {
+        return false;
+    };
+    let fulfillment = spans.iter().any(|span| {
+        span_is(span, "fulfillment", "order.paid process")
+            && span_attribute_string(span, "messaging.system") == Some("rabbitmq".to_owned())
+            && span_attribute_string(span, "messaging.destination.name")
+                == Some("fulfillment.orders".to_owned())
+            && span_attribute_string(span, "messaging.operation.name") == Some("process".to_owned())
+            && span_attribute_string(span, "commerce.event.type") == Some("order.paid".to_owned())
+            && causally_after(span, producer)
+    });
+    let analytics = spans.iter().any(|span| {
+        span_is(span, "fulfillment", "order.paid process")
+            && span_attribute_string(span, "messaging.system") == Some("rabbitmq".to_owned())
+            && span_attribute_string(span, "messaging.destination.name")
+                == Some("analytics.events".to_owned())
+            && span_attribute_string(span, "messaging.operation.name") == Some("process".to_owned())
+            && span_attribute_string(span, "commerce.event.type") == Some("order.paid".to_owned())
+            && causally_after(span, producer)
+    });
+    browser_test && payment && inventory && fulfillment && analytics
 }
 
 async fn wait_for_browser_trace(trace_id: &str) -> anyhow::Result<()> {
     let timeout = positive_env("PARALLAX_TRACE_TIMEOUT_SECONDS", 30)?;
     let poll = positive_env("PARALLAX_TRACE_POLL_SECONDS", 1)?;
     let query = format!(
-        "{{ trace(traceId: {trace_id:?}) {{ spans {{ service name attributes resource }} }} }}"
+        "{{ trace(traceId: {trace_id:?}) {{ spans {{ traceId spanId parentSpanId service name statusCode attributes resource typedLinks {{ traceId spanId attributes }} }} }} }}"
     );
     let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
     let mut last = Value::Null;
     loop {
         if let Ok(data) = parallax_graphql(&query).await {
             last = data;
-            if let Some(spans) = last.pointer("/trace/spans").and_then(Value::as_array) {
-                let has = |service: &str| {
-                    spans
-                        .iter()
-                        .any(|span| span.get("service").and_then(Value::as_str) == Some(service))
-                };
-                if has("playground-web-tests") && has("web") && has("storefront") && has("checkout")
-                {
-                    println!("Parallax browser trace PASS: {trace_id}");
-                    return Ok(());
-                }
+            if browser_trace_matches(&last) {
+                println!("Parallax browser trace PASS: {trace_id}");
+                return Ok(());
             }
         }
         if tokio::time::Instant::now() >= deadline {
             bail!("Parallax browser trace FAIL: {trace_id}; last response: {last}");
+        }
+        tokio::time::sleep(Duration::from_secs(poll)).await;
+    }
+}
+
+async fn wait_for_browser_durable_state(trace_id: &str) -> anyhow::Result<()> {
+    let timeout = positive_env("ASYNC_VERIFY_TIMEOUT_SECONDS", 30)?;
+    let poll = positive_env("PARALLAX_TRACE_POLL_SECONDS", 1)?;
+    let base = url_env("STOREFRONT_URL", "http://localhost:8094");
+    let query = "query BrowserCommerceEvidence { analyticsEvents(tenantId: \"tenant-acme\", eventName: \"order.paid\", limit: 100) { eventKey eventName source entityId traceId } }";
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
+    let mut last = Value::Null;
+    loop {
+        let headers = scenario_headers(trace_id, "playground=browser-proof")?;
+        if let Ok((status, body)) = request_json(
+            Method::POST,
+            &format!("{base}/graphql"),
+            headers,
+            Some(json!({"query": query})),
+        )
+        .await
+        {
+            last = body;
+            if status.is_success()
+                && last
+                    .get("errors")
+                    .is_none_or(|errors| errors.as_array().is_none_or(Vec::is_empty))
+                && let Some(event) = last
+                    .pointer("/data/analyticsEvents")
+                    .and_then(Value::as_array)
+                    .and_then(|events| {
+                        events.iter().find(|event| {
+                            event.get("eventName").and_then(Value::as_str) == Some("order.paid")
+                                && event.get("source").and_then(Value::as_str)
+                                    == Some("fulfillment")
+                                && event.get("traceId").and_then(Value::as_str) == Some(trace_id)
+                                && event
+                                    .get("entityId")
+                                    .and_then(Value::as_str)
+                                    .is_some_and(|entity_id| !entity_id.is_empty())
+                        })
+                    })
+            {
+                println!(
+                    "browser durable commerce PASS: trace={trace_id} event_key={} order_id={}",
+                    event
+                        .get("eventKey")
+                        .and_then(Value::as_str)
+                        .unwrap_or("<missing>"),
+                    event
+                        .get("entityId")
+                        .and_then(Value::as_str)
+                        .unwrap_or("<missing>")
+                );
+                return Ok(());
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("browser durable commerce FAIL: trace={trace_id}; last response: {last}");
         }
         tokio::time::sleep(Duration::from_secs(poll)).await;
     }
@@ -4526,9 +5013,33 @@ async fn corpus_all() -> anyhow::Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CORNER_CORPUS_SCENARIOS, SCENARIO_NAMES, SCENARIO_PROOF_IDS, corpus_scenarios, hex_id,
+        CORNER_CORPUS_SCENARIOS, SCENARIO_NAMES, SCENARIO_PROOF_IDS, browser_trace_matches,
+        corpus_scenarios, hex_id, inventory_failure_trace_matches, payment_failure_trace_matches,
         scenario_dispatch_id, scenario_evidence_id, scenario_proof_id, validate_scenario_registry,
     };
+    use serde_json::{Value, json};
+
+    fn span(
+        span_id: &str,
+        parent_span_id: &str,
+        service: &str,
+        name: &str,
+        attributes: Value,
+    ) -> Value {
+        json!({
+            "spanId": span_id,
+            "parentSpanId": parent_span_id,
+            "service": service,
+            "name": name,
+            "statusCode": "STATUS_CODE_UNSET",
+            "attributes": attributes.to_string(),
+            "typedLinks": [],
+        })
+    }
+
+    fn trace(spans: Vec<Value>) -> Value {
+        json!({"trace": {"spans": spans}})
+    }
 
     #[test]
     fn semantic_names_are_unique_and_grouped() {
@@ -4650,5 +5161,192 @@ mod tests {
                 .iter()
                 .all(|scenario| SCENARIO_NAMES.contains(scenario))
         );
+    }
+
+    #[test]
+    fn payment_failure_trace_requires_typed_decline_evidence() {
+        let mut data = trace(vec![
+            span(
+                "checkout-http",
+                "root",
+                "checkout",
+                "http.server.request",
+                json!({"http.response.status_code": 402}),
+            ),
+            span("checkout", "root", "checkout", "checkout", json!({})),
+            span(
+                "payment",
+                "checkout",
+                "payment",
+                "playground.payment.v1.Payment/Authorize",
+                json!({
+                    "payment.operation": "authorize",
+                    "payment.operation.status": "PAYMENT_OPERATION_STATUS_DECLINED",
+                }),
+            ),
+        ]);
+        assert!(payment_failure_trace_matches(&data));
+        data["trace"]["spans"][2]["attributes"] = json!(
+            r#"{"payment.operation":"authorize","payment.operation.status":"PAYMENT_OPERATION_STATUS_SUCCEEDED"}"#
+        );
+        assert!(!payment_failure_trace_matches(&data));
+    }
+
+    #[test]
+    fn inventory_failure_trace_requires_error_topology_and_database_attempt() {
+        let mut data = trace(vec![
+            {
+                let mut value = span(
+                    "inventory-http",
+                    "root",
+                    "inventory",
+                    "http.server.request",
+                    json!({
+                        "http.response.status_code": 503,
+                        "error.type": "http.server.error",
+                    }),
+                );
+                value["statusCode"] = json!("STATUS_CODE_ERROR");
+                value
+            },
+            {
+                let mut value = span(
+                    "inventory-reserve",
+                    "root",
+                    "inventory",
+                    "inventory.reserve",
+                    json!({"error.type": "reservation_rejected"}),
+                );
+                value["statusCode"] = json!("STATUS_CODE_ERROR");
+                value
+            },
+            span(
+                "inventory-db",
+                "inventory-reserve",
+                "inventory",
+                "postgres.query",
+                json!({
+                    "db.query.summary": "reserve inventory row",
+                    "db.system.name": "postgresql",
+                }),
+            ),
+        ]);
+        assert!(inventory_failure_trace_matches(&data));
+        data["trace"]["spans"][2]["parentSpanId"] = json!("wrong-parent");
+        assert!(!inventory_failure_trace_matches(&data));
+    }
+
+    #[test]
+    fn browser_trace_requires_causal_commerce_and_rabbit_topology() {
+        let mut data = trace(vec![
+            span(
+                "browser-test",
+                "root",
+                "playground-web-tests",
+                "test.case",
+                json!({"test.case.result.status": "pass"}),
+            ),
+            span(
+                "browser-fetch",
+                "root",
+                "web",
+                "POST",
+                json!({
+                    "http.request.method": "POST",
+                    "url.full": "http://localhost:5173/__storefront/graphql",
+                }),
+            ),
+            span(
+                "web-ssr",
+                "browser-fetch",
+                "playground-web",
+                "web.ssr.request",
+                json!({
+                    "http.request.method": "POST",
+                    "url.path": "/__storefront/graphql",
+                }),
+            ),
+            span(
+                "storefront-http",
+                "web-ssr",
+                "storefront",
+                "http.server.request",
+                json!({
+                    "http.request.method": "POST",
+                    "http.route": "/graphql",
+                    "http.response.status_code": 200,
+                }),
+            ),
+            span(
+                "storefront-checkout",
+                "storefront-http",
+                "storefront",
+                "graphql.resolver",
+                json!({"graphql.field.name": "Mutation.checkout"}),
+            ),
+            span(
+                "checkout",
+                "storefront-checkout",
+                "checkout",
+                "checkout",
+                json!({}),
+            ),
+            span(
+                "payment",
+                "checkout",
+                "payment",
+                "playground.payment.v1.Payment/Authorize",
+                json!({
+                    "payment.operation": "authorize",
+                    "payment.operation.status": "PAYMENT_OPERATION_STATUS_SUCCEEDED",
+                }),
+            ),
+            span(
+                "inventory",
+                "checkout",
+                "inventory",
+                "inventory.reserve",
+                json!({}),
+            ),
+            span(
+                "producer",
+                "checkout",
+                "checkout",
+                "checkout.outbox.publish",
+                json!({
+                    "messaging.system": "rabbitmq",
+                    "messaging.destination.name": "commerce.events",
+                    "messaging.operation.name": "send",
+                    "commerce.event.type": "order.paid",
+                }),
+            ),
+            span(
+                "fulfillment",
+                "producer",
+                "fulfillment",
+                "order.paid process",
+                json!({
+                    "messaging.system": "rabbitmq",
+                    "messaging.destination.name": "fulfillment.orders",
+                    "messaging.operation.name": "process",
+                    "commerce.event.type": "order.paid",
+                }),
+            ),
+            span(
+                "analytics",
+                "producer",
+                "fulfillment",
+                "order.paid process",
+                json!({
+                    "messaging.system": "rabbitmq",
+                    "messaging.destination.name": "analytics.events",
+                    "messaging.operation.name": "process",
+                    "commerce.event.type": "order.paid",
+                }),
+            ),
+        ]);
+        assert!(browser_trace_matches(&data));
+        data["trace"]["spans"][10]["parentSpanId"] = json!("wrong-parent");
+        assert!(!browser_trace_matches(&data));
     }
 }
