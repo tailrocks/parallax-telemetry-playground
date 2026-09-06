@@ -1269,7 +1269,12 @@ impl StoreContext {
         let request = self
             .clickhouse_request(
                 self.http
-                    .post(url_with_query(&self.clickhouse_url, &params)?),
+                    .post(url_with_query(&self.clickhouse_url, &params)?)
+                    // ClickHouse requires Content-Length or chunked encoding for every POST.
+                    // The parameterized INSERT has no row payload, so send an explicit empty
+                    // body and header instead of leaving reqwest with no Content-Length.
+                    .header(reqwest::header::CONTENT_LENGTH, "0")
+                    .body(Vec::<u8>::new()),
             )?
             .headers(self.outbound_headers());
         let response = self.send_http(request, "analytics insert").await?;
@@ -1651,7 +1656,7 @@ mod tests {
     use super::*;
     use axum::{
         Json, Router,
-        http::HeaderMap,
+        http::{HeaderMap, StatusCode},
         routing::{get, post},
     };
     use opentelemetry::{Context as OtelContext, KeyValue, baggage::BaggageExt};
@@ -1844,6 +1849,64 @@ mod tests {
             seen.lock().await.as_deref(),
             Some("Basic YW5hbHl0aWNzOnNlY3JldA==")
         );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn analytics_insert_sends_explicit_empty_body() {
+        let seen = Arc::new(tokio::sync::Mutex::new(None::<(Option<String>, Vec<u8>)>));
+        let seen_for_handler = Arc::clone(&seen);
+        let fixture = Router::new().route(
+            "/",
+            post(move |headers: HeaderMap, body: axum::body::Bytes| {
+                let seen = Arc::clone(&seen_for_handler);
+                async move {
+                    *seen.lock().await = Some((
+                        headers
+                            .get("content-length")
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_owned),
+                        body.to_vec(),
+                    ));
+                    StatusCode::NO_CONTENT
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ClickHouse fixture");
+        let address = listener.local_addr().expect("ClickHouse fixture address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, fixture)
+                .await
+                .expect("serve ClickHouse fixture");
+        });
+
+        let context = StoreContext {
+            clickhouse_url: format!("http://{address}"),
+            clickhouse_user: None,
+            clickhouse_password: None,
+            ..StoreContext::default()
+        };
+        context
+            .record_analytics(&AnalyticsInput {
+                tenant_id: TEST_TENANT.to_owned(),
+                event_key: "analytics-test".to_owned(),
+                event_name: "browser.analytics.test".to_owned(),
+                entity_type: "test".to_owned(),
+                entity_id: "entity-1".to_owned(),
+                customer_id: None,
+                session_id: Some("session-1".to_owned()),
+                occurred_at: "2026-09-06T19:50:00Z".to_owned(),
+                properties: None,
+                context: None,
+            })
+            .await
+            .expect("analytics insert fixture response");
+
+        let (content_length, body) = seen.lock().await.take().expect("ClickHouse request");
+        assert_eq!(content_length.as_deref(), Some("0"));
+        assert!(body.is_empty());
         server.abort();
     }
 
