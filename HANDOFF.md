@@ -2,64 +2,80 @@
 
 Branch: `fix/current-verification-readiness`
 
-This branch contains the commerce-telemetry playground migration from the
-pasted DOD at:
-`/Users/donbeave/.codex-chainargos2/attachments/fccc78a4-9bae-4704-9da1-739f2046b860/pasted-text-1.txt`.
+Source DOD:
+`/Users/donbeave/.codex-chainargos2/attachments/fccc78a4-9bae-4704-9da1-739f2046b860/pasted-text-1.txt`
 
 ## State at pause
 
 - DOD is not complete.
-- The current docs checkpoint records commits `20e929a`, `1f65a00`,
-  `3558ba0`, `c535e91`, and `632cbf4`.
+- `49bda81` is the final source integration commit and is pushed to
+  `origin/fix/current-verification-readiness`.
+- Recent pushed commits also include `44f1f48` (Checkout waits for healthy
+  RabbitMQ), `dbf036e` (CLI Parallax failure/browser assertions), and
+  `54a1a6a` (verification handoff/contracts). Earlier commerce, corpus,
+  baggage, pricing, and browser fixes are in the preceding history.
+- The tree was clean before this handoff edit. No source changes were left
+  intentionally uncommitted.
 - The Rust CLI plus `mise-scenarios.toml` owns scenario and verification
-  dispatch. The service-local `gradlew` and `gradlew.bat` scripts are removed;
-  Java quality tasks invoke `gradle/wrapper/gradle-wrapper.jar` directly.
+  dispatch. Java quality tasks invoke the Gradle wrapper JAR directly;
+  service-local `gradlew` and `gradlew.bat` scripts are removed.
 - `corpus:all` dispatches all 89 proofs exactly once: 61 A/B/C proofs plus 28
   corner proofs. `check:scenarios` validates the catalog and legacy-wrapper
   scan.
-- This docs commit intentionally preserves unrelated dirty source changes in
-  `cli/`, `deploy/`, `services/`, and `web/`. Do not reset or discard them.
 
-## Latest proven gates
+## Proven in the final integration tree
 
-- `mise run verify:commerce_stack` passed: Compose configuration, all 16
-  required running services healthy, all three required one-shot jobs exited
-  successfully, ten configured HTTP readiness surfaces, and PostgreSQL,
-  Redis, RabbitMQ, ClickHouse, flagd, Pricing gRPC, Payment HTTP/gRPC, and
-  Notifications probes.
-- `cd web && bun run e2e:compose` passed the canonical real-Compose browser
-  journey, including strict W3C carrier checks, commerce flow, browser
-  analytics, and refreshed durable orders projection.
-- The stack verifier and browser E2E are separate gates. Neither proves the
-  full Parallax failure corpus or every browser-to-backend causal assertion.
+- `git diff --check`: pass before commit.
+- `cargo fmt --all -- --check`: pass.
+- `cargo check --locked --workspace --all-targets --all-features`: pass.
+- `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`:
+  pass.
+- `cargo test --locked -p playground-cli`: 95 passed.
+- `mise run check:scenarios`: pass; 89 semantic tasks plus `corpus:all`.
+- `docker compose -f deploy/docker-compose.yml config --quiet`: pass.
+- `cd web && bun run test`: 33 passed.
+- `cd web && bun run build`: pass; Vite build and strict TypeScript check pass.
+- Earlier on the same integrated working-tree source, the real-Compose browser
+  E2E passed. It was not rerun after the final commit.
 
-## Remaining gates
+## Exact unresolved DOD
 
-1. Parallax-backed failure scenarios and the dedicated browser causal/Parallax
-   assertion work remain pending. Do not call DOD complete.
-2. Re-run `mise run verify:commerce_trace` and the full failure/topology gate
-   from a clean, integrated tree after the preserved source changes are
-   reviewed.
-3. Repeat the final DOD review: clean-volume migration/idempotence, all
-   language quality gates, canonical journeys and deterministic failures,
-   durable PostgreSQL/RabbitMQ/ClickHouse evidence, browser proof, forbidden
-   implementation scan, and fresh max-model review.
+1. Full Parallax-backed payment/inventory failure runtime proof and the
+   dedicated browser-to-backend Parallax causal assertion are not proven in
+   this final checkpoint. The CLI assertions exist and unit/compile gates pass;
+   runtime proof still requires a live Parallax session.
+2. Full clean-volume Compose boot, migration idempotence, deterministic
+   failure runs, topology/trace run, durable PostgreSQL/RabbitMQ/ClickHouse
+   evidence, and the final forbidden-implementation scan were not rerun in
+   this short integration checkpoint.
+3. `VERIFY_MANAGE_STACK=1 mise run verify:commerce_stack` now uses an isolated
+   project, bounded readiness, and cleanup, but that managed runtime path was
+   not rerun here.
+4. `demo:stack` and `demo:fresh` still use direct detached Compose startup
+   without the verifier's readiness/cleanup contract; this remains separate
+   hardening work.
+5. Parallax remains an external prerequisite, not a Compose service. Start it
+   before runtime proof at `127.0.0.1:4000` with OTLP on `127.0.0.1:4317`.
 
 ## Restart prompt
 
-Read this file, the pasted DOD, and `AGENTS.md`. Continue on the current branch
-from the latest commit; preserve the dirty source files. Use subagents only with
-`model: gpt-5.6-luna` and `reasoning_effort: max`. Start with:
+Read this file, the pasted DOD, and `AGENTS.md`. Continue from pushed commit
+`49bda81`. Preserve the branch. Use subagents only with
+`model: gpt-5.6-luna` and `reasoning_effort: max`.
 
 ```bash
-git status --short
-git log -1
+git status --short --branch
+git log -5 --oneline --decorate
 mise run check:scenarios
-mise run verify:commerce_stack
+parallax serve
+VERIFY_MANAGE_STACK=1 mise run verify:commerce_stack
+mise run verify:commerce_trace
+mise run failures:payment_latency
+mise run failures:inventory
 cd web && bun run e2e:compose
 ```
 
-Then close the remaining Parallax failure/browser assertion gates, run the full
-local Compose and Parallax proof, perform a fresh read-only review, and repeat
-all DOD gates until proven. Do not infer DOD completion from the stack verifier
-or browser E2E alone.
+Then close every unresolved item above. Do not infer DOD completion from the
+stack verifier, CLI tests, or browser E2E alone. Finish with all quality gates,
+runtime evidence, fresh read-only review, a clean tree, and
+`HEAD == origin/fix/current-verification-readiness`.
