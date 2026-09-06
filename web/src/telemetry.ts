@@ -55,7 +55,6 @@ import { webResourceAttributes } from "./resource";
 import {
   boundedBaggageEntries,
   sanitizePropagationHeaders,
-  sanitizePropagationHeadersInPlace,
 } from "./traceparent";
 import {
   safeWebAttributes,
@@ -205,14 +204,11 @@ export async function tracedFetch(
   input: RequestInfo | URL,
   init: RequestInit = {},
 ): Promise<Response> {
-  const headers = new Headers(init.headers);
-  propagation.inject(sessionContext(), headers, {
-    set(carrier, key, value) {
-      carrier.set(key, value);
-    },
-  });
-  sanitizePropagationHeadersInPlace(headers);
-  return fetch(input, { ...init, headers });
+  const requestContext = sessionContext();
+  // FetchInstrumentation is the sole W3C propagation owner. It creates the
+  // browser HTTP span and injects that span's context; manual injection here
+  // races it and can preserve a foreign active trace.
+  return context.with(requestContext, () => fetch(input, init));
 }
 
 export function emitTypedEvent(name: string, attributes: RumAttributes = {}) {
@@ -265,7 +261,14 @@ export function sessionContext(base: Context = context.active()): Context {
 function baseWithBrowserRoot(base: Context): Context {
   if (browserRootContext === undefined) return base;
   const activeSpan = trace.getSpan(base);
-  if (activeSpan !== undefined && isSpanContextValid(activeSpan.spanContext())) {
+  const browserRootSpan = trace.getSpan(browserRootContext);
+  if (
+    activeSpan !== undefined &&
+    isSpanContextValid(activeSpan.spanContext()) &&
+    (browserRootSpan === undefined ||
+      !isSpanContextValid(browserRootSpan.spanContext()) ||
+      activeSpan.spanContext().traceId === browserRootSpan.spanContext().traceId)
+  ) {
     return base;
   }
 
