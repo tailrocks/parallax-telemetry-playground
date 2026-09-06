@@ -7,8 +7,6 @@ use std::{
 use tonic::Status;
 
 pub(crate) const QUOTE_TTL_SECONDS: u64 = 45;
-pub(crate) const DEFAULT_CUSTOMER_SEGMENT: &str = "standard";
-pub(crate) const DEFAULT_CUSTOMER_TIER: &str = "free";
 pub(crate) const MAX_ITEMS: usize = 50;
 pub(crate) const MAX_QUANTITY: u32 = 100;
 pub(crate) const MAX_IDENTIFIER_LENGTH: usize = 128;
@@ -23,7 +21,7 @@ pub(crate) struct CachedQuote {
     pub(crate) grand_total_minor: i64,
     pub(crate) currency: String,
     pub(crate) pricing_version: String,
-    pub(crate) price_list_code: String,
+    pub(crate) price_source: String,
     pub(crate) expires_at_unix_ms: i64,
 }
 
@@ -382,7 +380,7 @@ mod tests {
             grand_total_minor: 1_999,
             currency: "USD".into(),
             pricing_version: "price-change-7".into(),
-            price_list_code: "standard-free".into(),
+            price_source: "default".into(),
             expires_at_unix_ms,
         }
     }
@@ -420,7 +418,13 @@ mod tests {
         let value = serde_json::to_value(&quote).expect("quote serializes");
 
         assert_eq!(value["expires_at_unix_ms"], 6_000);
-        assert_eq!(value["price_list_code"], "standard-free");
+        assert_eq!(value["price_source"], "default");
+        assert!(
+            !value
+                .as_object()
+                .expect("cached quote serializes as an object")
+                .contains_key("price_list_code")
+        );
     }
 
     #[test]

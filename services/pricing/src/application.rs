@@ -50,11 +50,11 @@ pub(crate) async fn calculate_quote(
                                 state.postgres.pricing_version(&request.tenant_id).await?;
                             if quote.pricing_version == pricing_version {
                                 tracing::Span::current()
-                                    .record("pricing.price_list", quote.price_list_code.as_str());
+                                    .record("pricing.price_source", quote.price_source.as_str());
                                 tracing::Span::current().record("cache.result", "hit");
                                 tracing::info!(
                                     cache = "hit",
-                                    price_list = %quote.price_list_code,
+                                    price_source = %quote.price_source,
                                     "pricing quote cache hit"
                                 );
                                 record_cache_metric("hit");
@@ -87,7 +87,7 @@ pub(crate) async fn calculate_quote(
     }
 
     let quote = state.postgres.calculate_quote(request).await?;
-    tracing::Span::current().record("pricing.price_list", quote.price_list_code.as_str());
+    tracing::Span::current().record("pricing.price_source", quote.price_source.as_str());
     if use_cache && let Some(result) = state.redis.set(&key, &quote).await {
         if let Err(error) = result {
             tracing::warn!(error = %error, "redis quote population failed");

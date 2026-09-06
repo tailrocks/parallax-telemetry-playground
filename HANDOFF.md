@@ -57,8 +57,8 @@ Fresh read-only audit of this checkpoint found:
    `messaging:java_fulfillment_replay`/`messaging:seeded_order_replay` and
    `grpc:pricing_stream`/`protocols:grpc_stream`.
 7. Review and test the outbox, pricing, Storefront, CLI, browser, and service
-   patches. Verify the single-snapshot pricing invariant, durable
-   price-list/segment/tier selection, absolute expiry, and expired-quote
+   patches. Verify the single-snapshot pricing invariant, durable default-price
+   selection, customer-context validation, absolute expiry, and expired-quote
    rejection.
 8. Run browser mock/Compose E2E, live payment integration/failure coverage,
    the full local live-Parallax verifier, and a fresh max-model review.

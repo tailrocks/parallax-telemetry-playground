@@ -1,7 +1,4 @@
-use crate::domain::{
-    CachedLine, CachedQuote, DEFAULT_CUSTOMER_SEGMENT, DEFAULT_CUSTOMER_TIER, QUOTE_TTL_SECONDS,
-    quote_expiry_from, request_id,
-};
+use crate::domain::{CachedLine, CachedQuote, QUOTE_TTL_SECONDS, quote_expiry_from, request_id};
 use anyhow::Context;
 use deadpool_postgres::{
     Config, GenericClient, ManagerConfig, Pool, PoolConfig, RecyclingMethod, Runtime,
@@ -108,16 +105,6 @@ impl PostgresRepository {
             .get("pricing_strategy")
             .map(String::as_str)
             .unwrap_or("standard");
-        let segment = request
-            .context
-            .get("customer_segment")
-            .map(String::as_str)
-            .unwrap_or(DEFAULT_CUSTOMER_SEGMENT);
-        let tier = request
-            .context
-            .get("customer_tier")
-            .map(String::as_str)
-            .unwrap_or(DEFAULT_CUSTOMER_TIER);
         let skus = request
             .items
             .iter()
@@ -130,7 +117,7 @@ impl PostgresRepository {
                     product.id,
                     p.amount_minor,
                     p.currency,
-                    pl.code
+                    'default'
                  FROM unnest($1::text[]) AS requested(sku)
                  JOIN product_variants v
                    ON v.tenant_id = $2
@@ -150,26 +137,10 @@ impl PostgresRepository {
                   AND p.currency = $4
                   AND p.valid_from <= CURRENT_TIMESTAMP
                   AND (p.valid_to IS NULL OR p.valid_to > CURRENT_TIMESTAMP)
-                 JOIN price_lists pl
-                   ON pl.tenant_id = p.tenant_id
-                  AND pl.id = p.price_list_id
-                  AND pl.active
-                  AND (
-                      (pl.customer_segment = $5 AND pl.customer_tier = $6)
-                      OR (
-                          pl.customer_segment = $7
-                          AND pl.customer_tier = $8
-                      )
-                  )
+                  AND p.is_default
                  WHERE v.tenant_id = $2
                  ORDER BY
                     v.sku,
-                    CASE
-                        WHEN pl.customer_segment = $5 AND pl.customer_tier = $6
-                            THEN 0
-                        ELSE 1
-                    END,
-                    pl.priority DESC,
                     p.valid_from DESC,
                     p.id",
                 &[
@@ -177,10 +148,6 @@ impl PostgresRepository {
                     &request.tenant_id,
                     &request.customer_id,
                     &request.currency_code,
-                    &segment,
-                    &tier,
-                    &DEFAULT_CUSTOMER_SEGMENT,
-                    &DEFAULT_CUSTOMER_TIER,
                 ],
             )
             .await
@@ -194,13 +161,13 @@ impl PostgresRepository {
                         product_id: row.get(1),
                         unit_minor: i64::from(row.get::<_, i32>(2)),
                         currency: row.get(3),
-                        price_list_code: row.get(4),
+                        price_source: row.get(4),
                     },
                 )
             })
             .collect::<HashMap<_, _>>();
         let mut lines = Vec::with_capacity(request.items.len());
-        let mut selected_price_list = None;
+        let mut selected_price_source = None;
         for item in &request.items {
             let Some(price) = selected_prices.get(&item.sku) else {
                 return Err(Status::not_found(format!(
@@ -227,8 +194,8 @@ impl PostgresRepository {
                 unit_minor,
                 line_minor,
             });
-            if selected_price_list.is_none() {
-                selected_price_list = Some(price.price_list_code.clone());
+            if selected_price_source.is_none() {
+                selected_price_source = Some(price.price_source.clone());
             }
         }
         let subtotal_minor = lines.iter().try_fold(0_i64, |subtotal, line| {
@@ -261,15 +228,14 @@ impl PostgresRepository {
             grand_total_minor,
             currency: request.currency_code.clone(),
             pricing_version,
-            price_list_code: selected_price_list.ok_or_else(|| {
-                Status::internal("pricing batch query returned no selected price list")
-            })?,
+            price_source: selected_price_source
+                .ok_or_else(|| Status::internal("pricing batch query returned no price source"))?,
             expires_at_unix_ms,
         };
         tracing::info!(
             pricing_strategy = strategy,
             promotion_code = %promotion_code,
-            price_list = %quote.price_list_code,
+            price_source = %quote.price_source,
             subtotal_minor,
             discount_minor,
             "pricing rules applied"
@@ -286,7 +252,7 @@ struct SelectedPrice {
     product_id: String,
     unit_minor: i64,
     currency: String,
-    price_list_code: String,
+    price_source: String,
 }
 
 async fn pricing_version_in<C>(client: &C, tenant_id: &str) -> Result<String, Status>

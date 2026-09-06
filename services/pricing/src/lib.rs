@@ -1,4 +1,4 @@
-//! Pricing owns quote calculation. It reads the seeded price lists and active
+//! Pricing owns quote calculation. It reads the seeded default prices and active
 //! promotions from PostgreSQL, caches complete quotes in Redis, and exposes
 //! the result over a reusable tonic service.
 
