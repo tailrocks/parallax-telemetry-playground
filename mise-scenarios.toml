@@ -492,7 +492,7 @@ description = "Validate strict TypeScript-only source policy"
 run = "cargo run --locked -p playground-cli -- check-typescript-policy"
 
 ["verify:commerce_stack"]
-description = "Validate Compose configuration and core commerce service health"
+description = "Validate Compose configuration, service readiness, and dependency surfaces"
 run = "cargo run --locked -p playground-cli -- verify-stack"
 
 ["verify:commerce_trace"]

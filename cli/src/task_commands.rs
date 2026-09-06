@@ -20,8 +20,7 @@ use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use crate::commerce_verify;
-use crate::scenario_runner;
+use crate::{commerce_verify, scenario_runner, test_verify};
 
 fn root() -> PathBuf {
     let compiled_root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -63,13 +62,28 @@ async fn status_with_env(
     cwd: &Path,
     env: &[(&str, &str)],
 ) -> anyhow::Result<()> {
-    let status = Command::new(program)
+    status_with_env_clearing(program, args, cwd, env, &[]).await
+}
+
+async fn status_with_env_clearing(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    env: &[(&str, &str)],
+    clear_env: &[&str],
+) -> anyhow::Result<()> {
+    let mut command = Command::new(program);
+    command
         .args(args)
         .current_dir(cwd)
         .envs(env.iter().copied())
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    for name in clear_env {
+        command.env_remove(name);
+    }
+    let status = command
         .status()
         .await
         .with_context(|| format!("failed to start {program}"))?;
@@ -829,6 +843,295 @@ fn validate_traceparent(value: &str) -> anyhow::Result<String> {
     Ok(parts[1].to_owned())
 }
 
+const REQUIRED_RUNNING_COMPOSE_SERVICES: &[&str] = &[
+    "postgres",
+    "redis",
+    "rabbitmq",
+    "clickhouse",
+    "flagd",
+    "catalog",
+    "payment",
+    "fulfillment",
+    "checkout",
+    "pricing",
+    "inventory",
+    "recommendation",
+    "notifications",
+    "orders",
+    "storefront",
+    "web",
+];
+
+const REQUIRED_COMPLETED_COMPOSE_SERVICES: &[&str] =
+    &["flagd-health-tools", "postgres-migrate", "clickhouse-init"];
+
+const POSTGRES_PROBE: &[&str] = &["pg_isready", "-U", "postgres", "-d", "playground"];
+const REDIS_PROBE: &[&str] = &["redis-cli", "-h", "127.0.0.1", "-p", "6379", "ping"];
+const RABBITMQ_PROBE: &[&str] = &["su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"];
+const CLICKHOUSE_PROBE: &[&str] = &[
+    "sh",
+    "-ec",
+    "clickhouse-client --host localhost --user \"${CLICKHOUSE_USER:-default}\" --password \"${CLICKHOUSE_PASSWORD:-}\" --query 'SELECT 1' >/dev/null",
+];
+const FLAGD_PROBE: &[&str] = &[
+    "/health-tools/busybox",
+    "wget",
+    "-q",
+    "-O",
+    "/dev/null",
+    "http://127.0.0.1:8014/healthz",
+];
+const PRICING_GRPC_PROBE: &[&str] = &[
+    "/usr/local/bin/grpc_health_probe",
+    "-addr=127.0.0.1:50051",
+    "-service=playground.pricing.v1.Pricing",
+    "-connect-timeout=2s",
+    "-rpc-timeout=2s",
+];
+const PAYMENT_HTTP_PROBE: &[&str] = &[
+    "curl",
+    "--fail",
+    "--silent",
+    "--show-error",
+    "http://127.0.0.1:8080/actuator/health",
+];
+const PAYMENT_GRPC_PROBE: &[&str] = &[
+    "/usr/local/bin/grpc_health_probe",
+    "-addr=127.0.0.1:9090",
+    "-service=playground.payment.v1.Payment",
+    "-connect-timeout=2s",
+    "-rpc-timeout=2s",
+];
+const NOTIFICATIONS_HTTP_PROBE: &[&str] = &[
+    "sh",
+    "-ec",
+    "printf 'GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' | nc -w 2 127.0.0.1 8091 | grep -q ' 200 '",
+];
+
+const WEB_ACCEPTANCE_COMMAND: &[&str] = &["run", "e2e:compose"];
+const WEB_ACCEPTANCE_ENV: &[(&str, &str)] = &[("PLAYGROUND_COMPOSE_E2E", "1")];
+const WEB_ACCEPTANCE_CLEAR_ENV: &[&str] = &["PLAYGROUND_MOCK_E2E"];
+const WEB_MOCK_COMMAND: &[&str] = &[
+    "./node_modules/@playwright/test/cli.js",
+    "test",
+    "--project=chromium",
+];
+const WEB_MOCK_ENV: &[(&str, &str)] = &[("PLAYGROUND_MOCK_E2E", "1")];
+
+#[derive(Debug, PartialEq, Eq)]
+struct ComposeServiceStatus {
+    service: String,
+    state: String,
+    health: Option<String>,
+    exit_code: Option<i64>,
+}
+
+struct WebObservablePlan {
+    command: &'static [&'static str],
+    env: &'static [(&'static str, &'static str)],
+    clear_env: &'static [&'static str],
+}
+
+fn web_observable_plan(acceptance: bool) -> WebObservablePlan {
+    if acceptance {
+        WebObservablePlan {
+            command: WEB_ACCEPTANCE_COMMAND,
+            env: WEB_ACCEPTANCE_ENV,
+            clear_env: WEB_ACCEPTANCE_CLEAR_ENV,
+        }
+    } else {
+        WebObservablePlan {
+            command: WEB_MOCK_COMMAND,
+            env: WEB_MOCK_ENV,
+            clear_env: &[],
+        }
+    }
+}
+
+fn stack_http_defaults() -> [(&'static str, &'static str, &'static str); 10] {
+    [
+        (
+            "Parallax",
+            "PARALLAX_API_URL",
+            "http://127.0.0.1:4000/health",
+        ),
+        ("Checkout", "CHECKOUT_URL", "http://127.0.0.1:8088/readyz"),
+        (
+            "Catalog",
+            "CATALOG_URL",
+            "http://127.0.0.1:8080/actuator/health/readiness",
+        ),
+        (
+            "Inventory",
+            "INVENTORY_URL",
+            "http://127.0.0.1:8089/healthz",
+        ),
+        (
+            "Recommendation",
+            "RECOMMENDATION_URL",
+            "http://127.0.0.1:8090/readyz",
+        ),
+        ("Orders", "ORDERS_URL", "http://127.0.0.1:8092/healthz"),
+        (
+            "Fulfillment",
+            "FULFILLMENT_URL",
+            "http://127.0.0.1:8093/actuator/health",
+        ),
+        (
+            "Storefront",
+            "STOREFRONT_URL",
+            "http://127.0.0.1:8094/readyz",
+        ),
+        (
+            "Storefront analytics",
+            "STOREFRONT_ANALYTICS_URL",
+            "http://127.0.0.1:8094/analytics/readyz",
+        ),
+        ("Web", "WEB_URL", "http://127.0.0.1:5173/healthz"),
+    ]
+}
+
+fn parse_compose_statuses(output: &str) -> anyhow::Result<Vec<ComposeServiceStatus>> {
+    let trimmed = output.trim();
+    ensure!(
+        !trimmed.is_empty(),
+        "Compose stack returned no container status"
+    );
+    let values = if trimmed.starts_with('[') {
+        serde_json::from_str::<Vec<Value>>(trimmed).context("invalid Compose status array")?
+    } else {
+        trimmed
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str::<Value>(line).context("invalid Compose status row"))
+            .collect::<anyhow::Result<Vec<_>>>()?
+    };
+    values
+        .into_iter()
+        .map(|value| {
+            Ok(ComposeServiceStatus {
+                service: value
+                    .get("Service")
+                    .and_then(Value::as_str)
+                    .context("Compose status row has no Service")?
+                    .to_owned(),
+                state: value
+                    .get("State")
+                    .and_then(Value::as_str)
+                    .context("Compose status row has no State")?
+                    .to_owned(),
+                health: value
+                    .get("Health")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .map(str::to_owned),
+                exit_code: value.get("ExitCode").and_then(Value::as_i64),
+            })
+        })
+        .collect()
+}
+
+fn verify_compose_state(output: &str) -> anyhow::Result<()> {
+    let statuses = parse_compose_statuses(output)?;
+    ensure!(!statuses.is_empty(), "Compose stack has no containers");
+    for service in REQUIRED_RUNNING_COMPOSE_SERVICES {
+        let status = statuses
+            .iter()
+            .find(|status| status.service == *service)
+            .with_context(|| format!("Compose service is missing: {service}"))?;
+        ensure!(
+            status.state == "running",
+            "Compose service {service} is not running: state={}",
+            status.state
+        );
+        ensure!(
+            status.health.as_deref() == Some("healthy"),
+            "Compose service {service} is not healthy: health={:?}",
+            status.health
+        );
+    }
+    for service in REQUIRED_COMPLETED_COMPOSE_SERVICES {
+        let status = statuses
+            .iter()
+            .find(|status| status.service == *service)
+            .with_context(|| format!("Compose job is missing: {service}"))?;
+        ensure!(
+            status.state == "exited" && status.exit_code == Some(0),
+            "Compose job {service} did not complete successfully: state={}, exit_code={:?}",
+            status.state,
+            status.exit_code
+        );
+    }
+    Ok(())
+}
+
+fn compose_command(compose: &Path, args: &[&str]) -> Vec<String> {
+    let mut command = vec![
+        "compose".to_owned(),
+        "-f".to_owned(),
+        compose.display().to_string(),
+    ];
+    command.extend(args.iter().map(|arg| (*arg).to_owned()));
+    command
+}
+
+async fn compose_exec(
+    compose: &Path,
+    repository: &Path,
+    service: &str,
+    command: &[&str],
+) -> anyhow::Result<()> {
+    let mut args = compose_command(compose, &["exec", "-T", service]);
+    args.extend(command.iter().map(|arg| (*arg).to_owned()));
+    status("docker", &args, repository)
+        .await
+        .with_context(|| format!("Compose probe failed for {service}"))
+}
+
+async fn verify_compose_dependency_surfaces(
+    compose: &Path,
+    repository: &Path,
+) -> anyhow::Result<()> {
+    for (name, service, command) in [
+        ("PostgreSQL", "postgres", POSTGRES_PROBE),
+        ("Redis", "redis", REDIS_PROBE),
+        ("RabbitMQ", "rabbitmq", RABBITMQ_PROBE),
+        ("ClickHouse", "clickhouse", CLICKHOUSE_PROBE),
+        ("flagd", "flagd", FLAGD_PROBE),
+        ("Pricing gRPC", "pricing", PRICING_GRPC_PROBE),
+        ("Payment HTTP", "payment", PAYMENT_HTTP_PROBE),
+        ("Payment gRPC", "payment", PAYMENT_GRPC_PROBE),
+        (
+            "Notifications HTTP",
+            "notifications",
+            NOTIFICATIONS_HTTP_PROBE,
+        ),
+    ] {
+        compose_exec(compose, repository, service, command)
+            .await
+            .with_context(|| format!("{name} dependency surface is unavailable"))?;
+    }
+    Ok(())
+}
+
+async fn check_http_endpoint(
+    client: &reqwest::Client,
+    name: &str,
+    url: &str,
+) -> anyhow::Result<()> {
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("{name} health request failed at {url}"))?;
+    ensure!(
+        response.status().is_success(),
+        "{name} health failed at {url}: HTTP {}",
+        response.status()
+    );
+    Ok(())
+}
+
 pub(crate) async fn verify_stack(_args: Vec<String>) -> anyhow::Result<i32> {
     let repository = root();
     let compose = repository.join("deploy/docker-compose.yml");
@@ -850,20 +1153,26 @@ pub(crate) async fn verify_stack(_args: Vec<String>) -> anyhow::Result<i32> {
     if std::env::var("VERIFY_MANAGE_STACK").unwrap_or_else(|_| "0".into()) == "1" {
         status(
             "docker",
-            &[
-                "compose".into(),
-                "-f".into(),
-                compose.display().to_string(),
-                "--profile".into(),
-                "demo".into(),
-                "up".into(),
-                "--build".into(),
-                "-d".into(),
-            ],
+            &compose_command(
+                compose.as_path(),
+                &["--profile", "demo", "up", "--build", "-d"],
+            ),
             &repository,
         )
         .await?;
     }
+    let compose_status = output(
+        "docker",
+        &compose_command(compose.as_path(), &["ps", "--all", "--format", "json"]),
+        &repository,
+    )
+    .await?;
+    ensure!(
+        compose_status.status.success(),
+        "docker compose ps failed: {}",
+        String::from_utf8_lossy(&compose_status.stderr).trim()
+    );
+    verify_compose_state(&String::from_utf8_lossy(&compose_status.stdout))?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(
             std::env::var("VERIFY_HTTP_TIMEOUT_SECONDS")
@@ -872,42 +1181,14 @@ pub(crate) async fn verify_stack(_args: Vec<String>) -> anyhow::Result<i32> {
                 .unwrap_or(20),
         ))
         .build()?;
-    for (name, url) in [
-        (
-            "Parallax",
-            std::env::var("PARALLAX_API_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:4000/health".into()),
-        ),
-        (
-            "Checkout",
-            std::env::var("CHECKOUT_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:8088/healthz".into()),
-        ),
-        (
-            "Catalog",
-            std::env::var("CATALOG_URL").unwrap_or_else(|_| "http://127.0.0.1:8080/healthz".into()),
-        ),
-        (
-            "Inventory",
-            std::env::var("INVENTORY_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:8089/healthz".into()),
-        ),
-        (
-            "Recommendation",
-            std::env::var("RECOMMENDATION_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:8090/healthz".into()),
-        ),
-    ] {
-        let response = client
-            .get(&url)
-            .send()
-            .await
-            .with_context(|| format!("{name} health request failed"))?;
-        if !response.status().is_success() {
-            bail!("{name} health failed at {url}: HTTP {}", response.status());
-        }
+    for (name, env_name, default_url) in stack_http_defaults() {
+        let url = nonempty_env(env_name).unwrap_or_else(|| default_url.to_owned());
+        check_http_endpoint(&client, name, &url).await?;
     }
-    println!("commerce stack verification passed");
+    verify_compose_dependency_surfaces(&compose, &repository).await?;
+    println!(
+        "commerce stack verification passed: Compose state, HTTP readiness, and dependency probes"
+    );
     Ok(0)
 }
 
@@ -919,9 +1200,12 @@ pub(crate) async fn observable_test(args: Vec<String>) -> anyhow::Result<i32> {
     {
         bail!("usage: mise run test:observable -- <rust|java|web> [--acceptance]");
     }
-    if std::env::var("CLI_INVOCATION_ID").is_err() || std::env::var("TRACEPARENT").is_err() {
-        bail!("run through parallax invocation start");
-    }
+    let invocation_id = std::env::var("CLI_INVOCATION_ID")
+        .context("CLI_INVOCATION_ID is required; run through parallax invocation start")?;
+    ensure!(
+        std::env::var("TRACEPARENT").is_ok(),
+        "TRACEPARENT is required; run through parallax invocation start"
+    );
     let repository = root();
     match stack {
         "rust" => {
@@ -986,23 +1270,34 @@ pub(crate) async fn observable_test(args: Vec<String>) -> anyhow::Result<i32> {
                 &repository.join("web"),
             )
             .await?;
-            status_with_env(
-                "bun",
-                &[
-                    "./node_modules/@playwright/test/cli.js".into(),
-                    "test".into(),
-                    "--project=chromium".into(),
-                ],
-                &repository.join("web"),
-                &[("PLAYGROUND_MOCK_E2E", "1")],
-            )
-            .await?;
+            let plan = web_observable_plan(acceptance == Some("--acceptance"));
+            let command = plan
+                .command
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect::<Vec<_>>();
+            if plan.clear_env.is_empty() {
+                status_with_env("bun", &command, &repository.join("web"), plan.env).await?;
+            } else {
+                status_with_env_clearing(
+                    "bun",
+                    &command,
+                    &repository.join("web"),
+                    plan.env,
+                    plan.clear_env,
+                )
+                .await?;
+            }
         }
         _ => unreachable!(),
     }
     if acceptance == Some("--acceptance") {
+        let api_url =
+            nonempty_env("PARALLAX_API_URL").unwrap_or_else(|| "http://127.0.0.1:4000".to_owned());
+        let summary = test_verify::verify(&api_url, &invocation_id, stack).await?;
         println!(
-            "observable acceptance extension requested; use the stack-specific acceptance task when configured"
+            "observable acceptance passed: {} trace(s), {} test attempt(s), {} application descendant(s)",
+            summary.traces, summary.test_attempts, summary.app_descendants
         );
     }
     Ok(0)
@@ -1425,7 +1720,12 @@ pub(crate) async fn demo_fresh(args: Vec<String>) -> anyhow::Result<i32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_semantic_name, validate_traceparent};
+    use serde_json::json;
+
+    use super::{
+        REQUIRED_COMPLETED_COMPOSE_SERVICES, REQUIRED_RUNNING_COMPOSE_SERVICES, is_semantic_name,
+        stack_http_defaults, validate_traceparent, verify_compose_state, web_observable_plan,
+    };
 
     #[test]
     fn semantic_name_contract_accepts_lower_snake_case_segments() {
@@ -1468,5 +1768,82 @@ mod tests {
             validate_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn acceptance_web_plan_uses_real_compose_and_clears_mock_mode() {
+        let plan = web_observable_plan(true);
+        assert_eq!(plan.command, &["run", "e2e:compose"]);
+        assert_eq!(plan.env, &[("PLAYGROUND_COMPOSE_E2E", "1")]);
+        assert_eq!(plan.clear_env, &["PLAYGROUND_MOCK_E2E"]);
+
+        let mock_plan = web_observable_plan(false);
+        assert_eq!(
+            mock_plan.command[0],
+            "./node_modules/@playwright/test/cli.js"
+        );
+        assert_eq!(mock_plan.env, &[("PLAYGROUND_MOCK_E2E", "1")]);
+    }
+
+    #[test]
+    fn stack_http_defaults_use_compose_readiness_contracts() {
+        let defaults = stack_http_defaults();
+        let endpoint = |name: &str| {
+            defaults
+                .iter()
+                .find(|(service, _, _)| *service == name)
+                .map(|(_, _, url)| *url)
+                .expect("stack endpoint")
+        };
+        assert_eq!(endpoint("Checkout"), "http://127.0.0.1:8088/readyz");
+        assert_eq!(
+            endpoint("Catalog"),
+            "http://127.0.0.1:8080/actuator/health/readiness"
+        );
+        assert_eq!(endpoint("Recommendation"), "http://127.0.0.1:8090/readyz");
+        assert_eq!(
+            endpoint("Storefront analytics"),
+            "http://127.0.0.1:8094/analytics/readyz"
+        );
+    }
+
+    #[test]
+    fn compose_state_requires_all_services_and_successful_jobs() {
+        let mut rows = REQUIRED_RUNNING_COMPOSE_SERVICES
+            .iter()
+            .map(|service| {
+                json!({
+                    "Service": service,
+                    "State": "running",
+                    "Health": "healthy",
+                    "ExitCode": 0
+                })
+                .to_string()
+            })
+            .collect::<Vec<_>>();
+        rows.extend(REQUIRED_COMPLETED_COMPOSE_SERVICES.iter().map(|service| {
+            json!({
+                "Service": service,
+                "State": "exited",
+                "Health": "",
+                "ExitCode": 0
+            })
+            .to_string()
+        }));
+        let healthy = rows.join("\n");
+        assert!(verify_compose_state(&healthy).is_ok());
+
+        let unhealthy = healthy.replacen("\"Health\":\"healthy\"", "\"Health\":\"starting\"", 1);
+        assert!(verify_compose_state(&unhealthy).is_err());
+
+        let mut failed_rows = rows;
+        failed_rows[REQUIRED_RUNNING_COMPOSE_SERVICES.len()] = json!({
+            "Service": REQUIRED_COMPLETED_COMPOSE_SERVICES[0],
+            "State": "exited",
+            "Health": "",
+            "ExitCode": 1
+        })
+        .to_string();
+        assert!(verify_compose_state(&failed_rows.join("\n")).is_err());
     }
 }
