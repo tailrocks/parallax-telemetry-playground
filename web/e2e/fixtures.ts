@@ -23,6 +23,16 @@ type CapturedRequest = Readonly<{
 }>;
 
 const TRACEPARENT_PATTERN = /^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/;
+const BAGGAGE_KEY_PATTERN =
+  /^[a-z0-9][a-z0-9._-]{0,255}(?:@[a-z0-9][a-z0-9._-]{0,13})?$/;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type BaggageMember = Readonly<{
+  key: string;
+  value: string;
+  metadata?: string | undefined;
+}>;
 
 export const test = base.extend<{ testTraceparent: string }>({
   testTraceparent: async ({}, use, testInfo) => {
@@ -138,40 +148,103 @@ async function assertHydratedPropagation(
       expectedTraceId,
     );
     expect(tracestate, `${request.url} tracestate`).toBe(E2E_TRACESTATE);
-    expect(normalizeBaggage(baggage), `${request.url} baggage`).toEqual(
-      normalizeBaggage(E2E_BAGGAGE),
-    );
+    expect(
+      baggageValidationError(baggage),
+      `${request.url} baggage`,
+    ).toBeUndefined();
   }
 }
 
-function normalizeBaggage(value: string | undefined): readonly string[] {
-  if (value === undefined) return [];
-  return value
-    .split(",")
-    .map((member) => {
-      const separator = member.indexOf("=");
-      if (separator <= 0) return member.trim();
-      const key = member.slice(0, separator).trim();
-      const [encodedValue, ...metadata] = member
-        .slice(separator + 1)
-        .split(";");
-      return `${key}=${decodeBaggageValue(encodedValue ?? "")}${metadata
-        .map((property) => {
-          const propertySeparator = property.indexOf("=");
-          if (propertySeparator <= 0) return property;
-          return `${property.slice(0, propertySeparator)}=${decodeBaggageValue(
-            property.slice(propertySeparator + 1),
-          )}`;
-        })
-        .join(";")}`;
-    })
-    .sort();
+export function baggageValidationError(
+  actual: string | undefined,
+  expected: string = E2E_BAGGAGE,
+): string | undefined {
+  let actualMembers: readonly BaggageMember[];
+  let expectedMembers: readonly BaggageMember[];
+  try {
+    actualMembers = parseBaggage(actual);
+    expectedMembers = parseBaggage(expected);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  const expectedStaticMembers = expectedMembers.filter(
+    ({ key }) => key !== "session.id",
+  );
+  const actualByKey = new Map(actualMembers.map((member) => [member.key, member]));
+
+  for (const expectedMember of expectedStaticMembers) {
+    const actualMember = actualByKey.get(expectedMember.key);
+    if (actualMember === undefined) {
+      return `missing canonical member ${expectedMember.key}`;
+    }
+    if (
+      actualMember.value !== expectedMember.value ||
+      actualMember.metadata !== expectedMember.metadata
+    ) {
+      return `wrong canonical member ${expectedMember.key}`;
+    }
+  }
+
+  const expectedKeys = new Set(expectedStaticMembers.map(({ key }) => key));
+  for (const actualMember of actualMembers) {
+    if (expectedKeys.has(actualMember.key)) continue;
+    if (actualMember.key !== "session.id") {
+      return `unexpected member ${actualMember.key}`;
+    }
+    if (actualMember.metadata !== undefined) {
+      return "session.id must not have metadata";
+    }
+    if (!UUID_PATTERN.test(actualMember.value)) {
+      return "session.id must be a UUIDv4";
+    }
+  }
+
+  return undefined;
+}
+
+function parseBaggage(value: string | undefined): readonly BaggageMember[] {
+  if (value === undefined || value.trim().length === 0) return [];
+
+  const seen = new Set<string>();
+  return value.split(",").map((rawMember, index) => {
+    const member = rawMember.trim();
+    const separator = member.indexOf("=");
+    if (separator <= 0) {
+      throw new Error(`invalid baggage member at index ${index}`);
+    }
+
+    const key = member.slice(0, separator).trim();
+    if (!BAGGAGE_KEY_PATTERN.test(key)) {
+      throw new Error(`invalid baggage key ${key}`);
+    }
+    if (seen.has(key)) {
+      throw new Error(`duplicate baggage key ${key}`);
+    }
+    seen.add(key);
+
+    const valueAndMetadata = member.slice(separator + 1).split(";");
+    const encodedValue = valueAndMetadata.shift()?.trim() ?? "";
+    if (encodedValue.length === 0) {
+      throw new Error(`empty baggage value for ${key}`);
+    }
+    const metadata = valueAndMetadata.join(";").trim();
+    if (valueAndMetadata.length > 0 && metadata.length === 0) {
+      throw new Error(`invalid baggage metadata for ${key}`);
+    }
+
+    return {
+      key,
+      value: decodeBaggageValue(encodedValue),
+      ...(metadata.length > 0 ? { metadata } : {}),
+    };
+  });
 }
 
 function decodeBaggageValue(value: string): string {
   try {
     return decodeURIComponent(value.trim());
   } catch {
-    return value.trim();
+    throw new Error(`invalid encoded baggage value ${value}`);
   }
 }
