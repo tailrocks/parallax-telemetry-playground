@@ -137,6 +137,14 @@ test.describe("Compose-backed commerce", () => {
       }),
     ).toBeVisible();
 
+    await page.getByRole("link", { name: "All orders" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Follow the order after checkout." }),
+    ).toBeVisible();
+
+    // The detail route is nested under /orders, so the parent loader data is
+    // already cached when this link is clicked. Refresh explicitly to prove
+    // the browser reaches the durable REST projection.
     const ordersResponse = page.waitForResponse((response) => {
       const request = response.request();
       return (
@@ -144,11 +152,8 @@ test.describe("Compose-backed commerce", () => {
         request.method() === "GET"
       );
     });
-    await page.getByRole("link", { name: "All orders" }).click();
+    await page.getByRole("button", { name: "Refresh status" }).click();
     expect((await ordersResponse).ok()).toBe(true);
-    await expect(
-      page.getByRole("heading", { name: "Follow the order after checkout." }),
-    ).toBeVisible();
     await expect(page.locator(".order-card").first()).toBeVisible();
 
     const analyticsResponse = waitForStorefrontOperation(
