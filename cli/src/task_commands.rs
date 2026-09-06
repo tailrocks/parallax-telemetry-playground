@@ -535,23 +535,32 @@ fn validate_scenario_task(task: &Value, name: &str) -> anyhow::Result<()> {
 
 pub(crate) async fn check_scenarios() -> anyhow::Result<i32> {
     let repository = root();
+    scenario_runner::validate_scenario_registry()?;
     let scenarios = repository.join("scenarios");
-    let shell_files_output = output(
-        "git",
-        &[
-            "ls-files".into(),
-            "--cached".into(),
-            "--others".into(),
-            "--exclude-standard".into(),
-            "--".into(),
-            "*.sh".into(),
-        ],
-        &repository,
-    )
-    .await?;
+    let mut legacy_files_args = vec![
+        "ls-files".into(),
+        "--cached".into(),
+        "--others".into(),
+        "--exclude-standard".into(),
+        "--".into(),
+    ];
+    legacy_files_args.extend(
+        [
+            "*.sh",
+            "*.bash",
+            "*.zsh",
+            "*.bat",
+            "*.cmd",
+            "gradlew",
+            "**/gradlew",
+        ]
+        .into_iter()
+        .map(String::from),
+    );
+    let shell_files_output = output("git", &legacy_files_args, &repository).await?;
     ensure!(
         shell_files_output.status.success(),
-        "git ls-files shell scan failed"
+        "git ls-files legacy entrypoint scan failed"
     );
     let shell_files = String::from_utf8_lossy(&shell_files_output.stdout)
         .lines()
@@ -560,7 +569,7 @@ pub(crate) async fn check_scenarios() -> anyhow::Result<i32> {
         .collect::<Vec<_>>();
     if let Some(path) = shell_files.first() {
         bail!(
-            "repository shell entrypoint remains: {}; migrate it to Rust/mise",
+            "repository legacy script or wrapper remains: {}; migrate it to Rust/mise",
             path.display()
         );
     }

@@ -229,6 +229,101 @@ fn scenario_proof_id(name: &str) -> Option<&'static str> {
         .and_then(|index| SCENARIO_PROOF_IDS.get(index).copied())
 }
 
+fn scenario_evidence_id(name: &str) -> Option<&'static str> {
+    match name {
+        // These handlers share implementation code, so their emitted
+        // evidence must carry an explicit semantic identity.
+        "graphql:batching_errors" => Some("graphql-batching-errors"),
+        "protocols:graphql_errors" => Some("protocols-graphql-errors"),
+        "logs:field_spike" => Some("logs-field-spike"),
+        "logs:patterns" => Some("logs-patterns"),
+        _ => scenario_proof_id(name),
+    }
+}
+
+fn is_primary_corpus_proof(proof_id: &str) -> bool {
+    matches!(proof_id.as_bytes().first(), Some(b'a' | b'b' | b'c'))
+}
+
+fn corpus_scenarios() -> Vec<&'static str> {
+    SCENARIO_NAMES
+        .iter()
+        .copied()
+        .filter(|name| {
+            scenario_proof_id(name).is_some_and(is_primary_corpus_proof)
+                || CORNER_CORPUS_SCENARIOS.contains(name)
+        })
+        .collect()
+}
+
+pub(crate) fn validate_scenario_registry() -> anyhow::Result<()> {
+    ensure!(
+        SCENARIO_NAMES.len() == SCENARIO_PROOF_IDS.len(),
+        "semantic scenario and proof registries have different lengths"
+    );
+
+    let mut names = SCENARIO_NAMES.to_vec();
+    names.sort_unstable();
+    names.dedup();
+    ensure!(
+        names.len() == SCENARIO_NAMES.len(),
+        "semantic scenario registry contains duplicate names"
+    );
+
+    let mut proof_ids = SCENARIO_PROOF_IDS.to_vec();
+    proof_ids.sort_unstable();
+    proof_ids.dedup();
+    ensure!(
+        proof_ids.len() == SCENARIO_PROOF_IDS.len(),
+        "semantic scenario registry contains duplicate proof IDs"
+    );
+
+    let evidence_ids = SCENARIO_NAMES
+        .iter()
+        .map(|name| {
+            scenario_evidence_id(name)
+                .with_context(|| format!("semantic scenario has no evidence ID: {name}"))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let mut unique_evidence_ids = evidence_ids.clone();
+    unique_evidence_ids.sort_unstable();
+    unique_evidence_ids.dedup();
+    ensure!(
+        unique_evidence_ids.len() == evidence_ids.len(),
+        "semantic scenario registry contains duplicate evidence IDs"
+    );
+
+    let corpus = corpus_scenarios();
+    let mut unique_corpus = corpus.clone();
+    unique_corpus.sort_unstable();
+    unique_corpus.dedup();
+    ensure!(
+        unique_corpus.len() == corpus.len(),
+        "corpus registry contains duplicate scenarios"
+    );
+    ensure!(
+        corpus.len() == SCENARIO_NAMES.len(),
+        "corpus registry must cover every declared A/B/C and corner scenario"
+    );
+    for name in SCENARIO_NAMES {
+        ensure!(
+            corpus
+                .iter()
+                .filter(|candidate| **candidate == *name)
+                .count()
+                == 1,
+            "corpus registry must include {name} exactly once"
+        );
+    }
+    for name in &corpus {
+        ensure!(
+            SCENARIO_NAMES.contains(name),
+            "corpus registry contains undeclared scenario: {name}"
+        );
+    }
+    Ok(())
+}
+
 fn scenario_dispatch_id(name: &str) -> Option<&'static str> {
     match name {
         "grpc:pricing_stream" => Some("dispatch:grpc:pricing_stream"),
@@ -243,6 +338,7 @@ fn scenario_dispatch_id(name: &str) -> Option<&'static str> {
 }
 
 pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
+    validate_scenario_registry()?;
     let Some(name) = args.first().map(String::as_str) else {
         bail!("usage: playground scenario <group:semantic_case> [arguments]");
     };
@@ -263,19 +359,26 @@ pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
 async fn run_named(name: &str, extra: &[String]) -> anyhow::Result<i32> {
     let proof_id = scenario_proof_id(name).unwrap_or("corpus:all");
     let dispatch_id = scenario_dispatch_id(name).unwrap_or("dispatch:corpus:all");
-    println!("scenario {name} proof={proof_id} dispatch={dispatch_id}");
+    let evidence_id = scenario_evidence_id(name).unwrap_or("corpus:all");
+    println!("scenario {name} proof={proof_id} evidence={evidence_id} dispatch={dispatch_id}");
+    if name == "corpus:all" {
+        return corpus_all().await;
+    }
+    run_semantic_named(name, extra).await
+}
 
+async fn run_semantic_named(name: &str, extra: &[String]) -> anyhow::Result<i32> {
     match name {
         "commerce:checkout_saga" => checkout_saga().await,
         "messaging:checkout_outbox" => checkout_outbox().await,
         "metrics:exemplars" => catalog_queries("exemplars", positive_env("A2_REQUESTS", 12)?).await,
-        "graphql:batching_errors" => graphql_shapes().await,
+        "graphql:batching_errors" => graphql_shapes("graphql:batching_errors").await,
         "database:price_subscription" => run_bun_script("scenarios/a7-subscription.ts", &[]).await,
         "grpc:pricing_stream" => pricing_stream().await,
         "protocols:grpc_stream" => protocols_grpc_stream().await,
         "messaging:java_fulfillment_replay" => java_fulfillment_replay().await,
         "messaging:seeded_order_replay" => seeded_order_replay().await,
-        "logs:field_spike" => run_shape("l-patterns").await,
+        "logs:field_spike" => run_shape_with_proof("logs:field_spike", "l-patterns").await,
         "propagation:baggage" => baggage_checkout().await,
         "cli:checkout_invocation" => run_current(&[]).await,
         "deploy:release_regression" => release_regression().await,
@@ -338,14 +441,14 @@ async fn run_named(name: &str, extra: &[String]) -> anyhow::Result<i32> {
         "traces:events" => run_shape("t-events").await,
         "logs:burst" => run_shape("l-burst").await,
         "logs:bodies" => run_shape("l-bodies").await,
-        "logs:patterns" => run_shape("l-patterns").await,
+        "logs:patterns" => run_shape_with_proof("logs:patterns", "l-patterns").await,
         "metrics:shapes" => run_shape("m-shapes").await,
         "metrics:labels" => run_shape("m-labels").await,
         "attributes:bounded" => run_shape("f-attrs").await,
         "issues:burst" => run_shape("e-burst").await,
         "issues:multi_language" => run_shape("e-multi-lang").await,
         "protocols:grpc_errors" => grpc_error_corpus().await,
-        "protocols:graphql_errors" => graphql_shapes().await,
+        "protocols:graphql_errors" => graphql_shapes("protocols:graphql_errors").await,
         "protocols:rabbitmq_lag" => rabbitmq_lag_replay().await,
         "journeys:happy_path" => journey(&["--seconds", "6"]).await,
         "journeys:error_path" => expected_journey_failure().await,
@@ -365,7 +468,6 @@ async fn run_named(name: &str, extra: &[String]) -> anyhow::Result<i32> {
         "product:lifecycle_ops" => lifecycle_ops().await,
         "security:redaction_egress" => redaction_egress().await,
         "product:ui_agent_verify" => ui_agent_verify().await,
-        "corpus:all" => corpus_all().await,
         _ => unreachable!("registry and dispatch must stay in sync"),
     }
 }
@@ -901,9 +1003,27 @@ async fn graphql_request_payload(
     query: &str,
     variables: Option<Value>,
 ) -> anyhow::Result<(StatusCode, Value)> {
+    graphql_request_payload_with_proof(query, variables, None).await
+}
+
+async fn graphql_request_with_proof(
+    query: &str,
+    proof_id: &str,
+) -> anyhow::Result<(StatusCode, Value)> {
+    graphql_request_payload_with_proof(query, None, Some(proof_id)).await
+}
+
+async fn graphql_request_payload_with_proof(
+    query: &str,
+    variables: Option<Value>,
+    proof_id: Option<&str>,
+) -> anyhow::Result<(StatusCode, Value)> {
     let base = url_env("CATALOG_URL", "http://localhost:8080");
     let mut headers = json_headers();
     headers.insert("x-tenant-id", "tenant-acme".parse()?);
+    if let Some(proof_id) = proof_id {
+        headers.insert("x-scenario-proof", proof_id.parse()?);
+    }
     let body = match variables {
         Some(variables) => json!({"query": query, "variables": variables}),
         None => json!({"query": query}),
@@ -932,22 +1052,44 @@ fn ensure_graphql_success(label: &str, body: &Value) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn graphql_shapes() -> anyhow::Result<i32> {
+fn graphql_operation_suffix(evidence_id: &str) -> String {
+    evidence_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+async fn graphql_shapes(scenario_name: &str) -> anyhow::Result<i32> {
+    let evidence_id = scenario_evidence_id(scenario_name)
+        .with_context(|| format!("GraphQL scenario has no evidence ID: {scenario_name}"))?;
+    let suffix = graphql_operation_suffix(evidence_id);
     for (label, query) in [
         (
             "batched reviews",
-            "query batchedReviews { products { items { id sku name reviews { text stars } } } }",
+            format!(
+                "query scenario_{suffix}_batched_reviews {{ products {{ items {{ id sku name reviews {{ text stars }} }} }} }}"
+            ),
         ),
         (
             "slow reviews",
-            "query slowReviews { products { items { id sku name reviewsSlow { text stars } } } }",
+            format!(
+                "query scenario_{suffix}_slow_reviews {{ products {{ items {{ id sku name reviewsSlow {{ text stars }} }} }} }}"
+            ),
         ),
         (
             "risk score",
-            "query normalRisk { products { items { id sku name riskScore } } }",
+            format!(
+                "query scenario_{suffix}_normal_risk {{ products {{ items {{ id sku name riskScore }} }} }}"
+            ),
         ),
     ] {
-        let (status, body) = graphql_request(query).await?;
+        let (status, body) = graphql_request_with_proof(&query, evidence_id).await?;
         ensure!(status.is_success(), "{label} failed: HTTP {status}: {body}");
         ensure_graphql_success(label, &body)?;
         println!("[{label}] HTTP {status}\n{body}");
@@ -962,9 +1104,15 @@ async fn graphql_shapes() -> anyhow::Result<i32> {
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')),
             "CATALOG_SYNTHETIC_RISK_SCORE_FAILURE_SKU contains unsupported characters"
         );
-        let query =
-            "query partialRisk($sku: String!) { product(sku: $sku) { id sku name riskScore } }";
-        let (status, body) = graphql_request_payload(query, Some(json!({"sku": sku}))).await?;
+        let query = format!(
+            "query scenario_{suffix}_partial_risk($sku: String!) {{ product(sku: $sku) {{ id sku name riskScore }} }}"
+        );
+        let (status, body) = graphql_request_payload_with_proof(
+            &query,
+            Some(json!({"sku": sku})),
+            Some(evidence_id),
+        )
+        .await?;
         ensure!(
             status == StatusCode::OK,
             "partial riskScore failed: HTTP {status}: {body}"
@@ -981,9 +1129,10 @@ async fn graphql_shapes() -> anyhow::Result<i32> {
         );
         println!("[partial riskScore] HTTP {status}\n{body}");
     } else {
-        let (status, body) =
-            graphql_request("query normalRisk { products { items { id sku name riskScore } } }")
-                .await?;
+        let query = format!(
+            "query scenario_{suffix}_normal_risk_fallback {{ products {{ items {{ id sku name riskScore }} }} }}"
+        );
+        let (status, body) = graphql_request_with_proof(&query, evidence_id).await?;
         ensure!(
             status.is_success(),
             "normal riskScore failed: HTTP {status}: {body}"
@@ -992,15 +1141,15 @@ async fn graphql_shapes() -> anyhow::Result<i32> {
         println!("[normal riskScore] HTTP {status}\n{body}");
     }
 
-    let operation = format!("lookup_{}", uuid::Uuid::new_v4().simple());
+    let operation = format!("scenario_{suffix}_lookup_{}", uuid::Uuid::new_v4().simple());
     let query = format!("query {operation} {{ products {{ items {{ id }} }} }}");
-    let (status, body) = graphql_request(&query).await?;
+    let (status, body) = graphql_request_with_proof(&query, evidence_id).await?;
     ensure!(
         status.is_success(),
         "high-cardinality operation failed: HTTP {status}: {body}"
     );
     ensure_graphql_success("high-cardinality operation", &body)?;
-    println!("[high-cardinality operation {operation}] HTTP {status}");
+    println!("[high-cardinality operation {operation} proof={evidence_id}] HTTP {status}");
     Ok(0)
 }
 
@@ -2911,6 +3060,41 @@ async fn run_shape(id: &str) -> anyhow::Result<i32> {
     shapes::run(vec![id.to_owned()]).await
 }
 
+async fn run_shape_with_proof(scenario_name: &str, shape_id: &str) -> anyhow::Result<i32> {
+    let evidence_id = scenario_evidence_id(scenario_name)
+        .with_context(|| format!("shape scenario has no evidence ID: {scenario_name}"))?;
+    let dispatch_id = scenario_dispatch_id(scenario_name).unwrap_or("unknown");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock is before Unix epoch")?
+        .as_nanos() as u64;
+    let marker = shapes::SpanSpec {
+        trace: uuid::Uuid::new_v4().into_bytes().to_vec(),
+        id: uuid::Uuid::new_v4().into_bytes().to_vec(),
+        parent: None,
+        name: format!("scenario.proof.{evidence_id}"),
+        kind: 1,
+        start: now,
+        end: now + 1_000_000,
+        error: false,
+        status_message: None,
+        attrs: vec![
+            shapes::kv("scenario.name", scenario_name),
+            shapes::kv("scenario.proof_id", evidence_id),
+            shapes::kv("scenario.dispatch_id", dispatch_id),
+        ],
+        events: Vec::new(),
+        links: Vec::new(),
+        service: Some("playground-scenario-proof".to_owned()),
+    };
+    emit_trace_request(shapes::traces_request(vec![marker])).await?;
+    let code = run_shape(shape_id).await?;
+    println!(
+        "scenario evidence emitted: scenario={scenario_name} proof={evidence_id} shape={shape_id}"
+    );
+    Ok(code)
+}
+
 async fn wide_trace() -> anyhow::Result<i32> {
     let proof_id =
         scenario_proof_id("traces:wide_trace").context("wide trace proof is unmapped")?;
@@ -4319,44 +4503,22 @@ const CORNER_CORPUS_SCENARIOS: &[&str] = &[
 ];
 
 async fn corpus_all() -> anyhow::Result<i32> {
-    for &scenario in CORNER_CORPUS_SCENARIOS {
-        let code = match scenario {
-            "traces:deep" => run_shape("t-deep").await?,
-            "traces:wide" => run_shape("t-wide").await?,
-            "traces:multi_root" => run_shape("t-multiroot").await?,
-            "traces:orphan" => run_shape("t-orphan").await?,
-            "traces:clock_skew" => run_shape("t-skew").await?,
-            "traces:zero_duration" => run_shape("t-zero").await?,
-            "traces:cross_links" => run_shape("t-links").await?,
-            "traces:long_names" => run_shape("t-longnames").await?,
-            "traces:events" => run_shape("t-events").await?,
-            "logs:burst" => run_shape("l-burst").await?,
-            "logs:bodies" => run_shape("l-bodies").await?,
-            "logs:patterns" => run_shape("l-patterns").await?,
-            "metrics:shapes" => run_shape("m-shapes").await?,
-            "metrics:labels" => run_shape("m-labels").await?,
-            "attributes:bounded" => run_shape("f-attrs").await?,
-            "issues:burst" => run_shape("e-burst").await?,
-            "issues:multi_language" => run_shape("e-multi-lang").await?,
-            "protocols:grpc_errors" => grpc_error_corpus().await?,
-            "protocols:grpc_stream" => protocols_grpc_stream().await?,
-            "protocols:graphql_errors" => graphql_shapes().await?,
-            "protocols:rabbitmq_lag" => rabbitmq_lag_replay().await?,
-            "journeys:happy_path" => journey(&["--seconds", "6"]).await?,
-            "journeys:error_path" => expected_journey_failure().await?,
-            "journeys:outside_screen" => journey(&["--seconds", "6", "--outside-error"]).await?,
-            "journeys:reattach" => journey(&["--seconds", "9", "--reattach", "3"]).await?,
-            "journeys:parallel" => parallel_journeys().await?,
-            "ecosystem:external_edge" => run_shape("eco-external").await?,
-            "ecosystem:full" => ecosystem_full().await?,
-            _ => unreachable!("corner corpus registry is fixed"),
-        };
+    validate_scenario_registry()?;
+    let corpus = corpus_scenarios();
+    for scenario in corpus.iter().copied() {
+        println!(
+            "corpus member {scenario} proof={} evidence={} dispatch={}",
+            scenario_proof_id(scenario).unwrap_or("unknown"),
+            scenario_evidence_id(scenario).unwrap_or("unknown"),
+            scenario_dispatch_id(scenario).unwrap_or("unknown")
+        );
+        let code = run_semantic_named(scenario, &[]).await?;
         ensure!(code == 0, "corpus member {scenario} failed");
     }
     println!(
-        "corner corpus executed {} proofs; public A/B/C inventory mapped: {} scenarios",
-        CORNER_CORPUS_SCENARIOS.len(),
-        SCENARIO_NAMES.len()
+        "complete corpus executed {} proofs: declared A/B/C plus {} corner scenarios",
+        corpus.len(),
+        CORNER_CORPUS_SCENARIOS.len()
     );
     Ok(0)
 }
@@ -4364,8 +4526,8 @@ async fn corpus_all() -> anyhow::Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CORNER_CORPUS_SCENARIOS, SCENARIO_NAMES, SCENARIO_PROOF_IDS, hex_id, scenario_dispatch_id,
-        scenario_proof_id,
+        CORNER_CORPUS_SCENARIOS, SCENARIO_NAMES, SCENARIO_PROOF_IDS, corpus_scenarios, hex_id,
+        scenario_dispatch_id, scenario_evidence_id, scenario_proof_id, validate_scenario_registry,
     };
 
     #[test]
@@ -4438,6 +4600,43 @@ mod tests {
             scenario_dispatch_id("protocols:rabbitmq_lag"),
             Some("dispatch:protocols:rabbitmq_lag_replay")
         );
+    }
+
+    #[test]
+    fn shared_handlers_have_distinct_proof_evidence() {
+        for (left, right) in [
+            ("graphql:batching_errors", "protocols:graphql_errors"),
+            ("logs:field_spike", "logs:patterns"),
+        ] {
+            assert_ne!(
+                scenario_evidence_id(left),
+                scenario_evidence_id(right),
+                "shared handlers must emit distinct evidence: {left} vs {right}"
+            );
+        }
+    }
+
+    #[test]
+    fn declared_corpus_is_exhaustive_and_unique() {
+        validate_scenario_registry().expect("scenario registry is valid");
+        let corpus = corpus_scenarios();
+        assert_eq!(corpus.len(), SCENARIO_NAMES.len());
+        assert_eq!(
+            corpus
+                .iter()
+                .filter(|scenario| CORNER_CORPUS_SCENARIOS.contains(scenario))
+                .count(),
+            CORNER_CORPUS_SCENARIOS.len()
+        );
+        for name in SCENARIO_NAMES {
+            assert_eq!(
+                corpus
+                    .iter()
+                    .filter(|candidate| **candidate == *name)
+                    .count(),
+                1
+            );
+        }
     }
 
     #[test]
