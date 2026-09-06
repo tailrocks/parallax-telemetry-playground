@@ -36,7 +36,7 @@ tokio-stream = { version = "0.1", features = ["net"] }
 prost = "0.14"
 prost-types = "0.14"
 tonic-prost-build = "0.14"
-reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls", "http2"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls", "http2", "stream"] }
 # Rust services use the rust-postgres ecosystem directly. The playground does
 # not provide an in-memory durable-store fallback.
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
@@ -67,7 +67,9 @@ tower-http = { version = "0.6", features = ["cors"] }
 tower = { version = "0.5", features = ["util"] }
 futures = "0.3"
 futures-lite = "2"
+hmac = "0.12"
 juniper = "0.17.1"
 juniper_axum = { version = "0.3.0", features = ["subscriptions"] }
 juniper_graphql_ws = { version = "0.5.0", features = ["graphql-transport-ws", "graphql-ws"] }
 quick-xml = "0.38"
+sha2 = "0.10"

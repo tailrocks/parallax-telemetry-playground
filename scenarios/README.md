@@ -1,100 +1,101 @@
 # Scenarios
 
-Run `./scenarios/run.sh` for the full catalog or
-`./scenarios/run.sh <id>` for one bounded journey. Start the stack first unless
-the scenario says it owns Compose startup.
+Run `mise tasks ls --sort name` for the full catalog or `mise run <task>` for
+one bounded journey. IDs below are internal fixture references only; they are
+not public task names and have no aliases. Start the stack first unless the
+task says it owns Compose startup.
 
-| ID | Script | Current path |
+| ID (internal) | Mise task | Capability |
 |---|---|---|
-| `a1` | `a1-checkout.sh` | Catalog → Pricing → Payment → Inventory → outbox checkout saga |
-| `a2` | `a2-exemplars.sh` | Catalog exemplar traffic |
-| `a5` | `a5-rum-error.sh` | Browser catalog-to-checkout journey |
-| `a6` | `a6-graphql.sh` | GraphQL batch, N+1, and partial-error shapes |
-| `a7` | `a7-subscription.ts` | PostgreSQL-backed GraphQL price subscription |
-| `a7b` | `a7b-grpc-stream.sh` | Pricing server stream, rejection, and cancellation |
-| `a8` | `a8-java-async.sh` | Authenticated seeded-order replay through Java Fulfillment RabbitMQ |
-| `a9` | `a9-field-spike.sh` | CLI log-pattern corpus |
-| `a10` | `a10-baggage.sh` | Checkout W3C tenant/tier baggage |
-| `a3` | `a3-async.sh` | Checkout transactional outbox → RabbitMQ → Fulfillment → Notifications |
-| `a4` | `a4-reverse.sh` | Authenticated seeded-order replay → Fulfillment RabbitMQ → Notifications HTTP |
-| `a12` | `a12-cli-run.sh` | Playground CLI checkout driver |
-| `a13` | `a13-deploy-regression.sh` | Release attribution comparison |
-| `a14` | `a14-flag-flip.sh` | Live OpenFeature checkoutFlow variants |
-| `a18` | `a18-canary.sh` | Sentry envelope redaction corpus |
-| `a19` | `a19-long-trace.sh` | CLI wide-trace corpus |
-| `a20-compare` | `a20-compare-pair.sh` | checkoutFlow topology comparison |
-| `a20` | `a20-batch-fanin.sh` | Concurrent synthetic orders-queue messages |
-| `a22` | `a22-tokio-saturation.sh` | Bounded delayed checkout pressure |
-| `a23` | `a23-storefront-grpc.sh` | Storefront GraphQL → Pricing gRPC |
-| `a24` | `a24-storefront-catalog.sh` | Storefront GraphQL → Catalog GraphQL |
-| `a25` | `a25-postgres.sh` | Inventory PostgreSQL query and pool behavior |
-| `a26` | `a26-cache.sh` | Catalog-backed recommendation stampede |
-| `a27` | `a27-execution-stack.sh` | CLI execution-stack corpus |
-| `a28` | `a28-rum-journey.sh` | Browser routes, RUM, and journey evidence |
-| `a29` | `a29-typed-events.sh` | Typed events across Rust, Java, and web |
-| `b-async-chaos` | `b-async-chaos.sh` | Synthetic orders-queue lag, retry, and dead letter |
-| `b2` | `b2-inventory-failure.sh` | Explicit inventory failure |
-| `b5` | `b5-cpu-pressure.sh` | Bounded checkout latency pressure |
-| `b6` | `b6-cache-leak.sh` | Recommendation cache-leak traffic |
-| `b10` | `b10-lock-contention.sh` | Concurrent delayed checkout |
-| `b13` | `b13-slow-recommendation.sh` | Bounded recommendation slowness |
-| `b15` | `b15-rage-click.sh` | Browser order and analytics journeys |
-| `b16` | `b16-load.sh` | k6 checkout load |
-| `b-chaos` | `b-chaos.sh` | Payment failure and latency |
-| `b-checkout-chaos` | `b-checkout-chaos.sh` | Pricing retry/timeout and delayed checkout |
-| `b3b` | `b3b-grpc-deadline.sh` | gRPC deadline and retry spans |
-| `a-breach-error-rate` | `a-breach-error-rate.sh` | Sustained checkout failure alert |
-| `a-breach-p95` | `a-breach-p95.sh` | Sustained recommendation latency alert |
-| `a-recover` | `a-recover.sh` | Healthy traffic incident recovery |
-| `b-degradation` | `b-degradation.sh` | Provider-unavailable degradation |
-| `b17` | `b17-cron.sh` | Cron success/failure/stuck outcomes |
-| `b17b` | `b17b-cron-suite.sh` | Cron duplicate and missed-slot suite |
-| `b19` | `b19-jvm-gc-pressure.sh` | Catalog GraphQL workload |
-| `b20` | `b20-container-oom.sh` | Bounded recommendation memory pressure |
-| `b21` | `b21-orphan-consumer.sh` | Linked/orphan synthetic orders consumers |
-| `b22` | `b22-sampling-gap.sh` | Low-sample checkout evidence |
-| `b23` | `b23-uncorrelated-log.sh` | Correlated checkout logs |
-| `t-deep` | `corner-cases.sh` | Deep trace corpus |
-| `t-wide` | `corner-cases.sh` | Wide trace corpus |
-| `t-multiroot` | `corner-cases.sh` | Multi-root trace corpus |
-| `t-orphan` | `corner-cases.sh` | Orphan trace corpus |
-| `t-skew` | `corner-cases.sh` | Clock-skew trace corpus |
-| `t-zero` | `corner-cases.sh` | Zero-duration trace corpus |
-| `t-links` | `corner-cases.sh` | Cross-linked traces |
-| `t-longnames` | `corner-cases.sh` | Long-name trace corpus |
-| `t-events` | `corner-cases.sh` | Span-event trace corpus |
-| `l-burst` | `corner-cases.sh` | Log burst corpus |
-| `l-bodies` | `corner-cases.sh` | Log body corpus |
-| `l-patterns` | `corner-cases.sh` | Log pattern corpus |
-| `m-shapes` | `corner-cases.sh` | Metric shape corpus |
-| `m-labels` | `corner-cases.sh` | Metric label corpus |
-| `f-attrs` | `corner-cases.sh` | Trace/log attribute corpus |
-| `eco-external` | `corner-cases.sh` | External-edge corpus |
-| `e-burst` | `corner-cases.sh` | Issue burst corpus |
-| `e-multi-lang` | `corner-cases.sh` | Multi-language issue corpus |
-| `p-grpc-err` | `corner-cases.sh` | gRPC error corpus |
-| `p-grpc-stream` | `corner-cases.sh` | gRPC stream corpus |
-| `p-graphql-err` | `corner-cases.sh` | GraphQL error corpus |
-| `p-rabbitmq-lag` | `corner-cases.sh` | RabbitMQ lag corpus |
-| `j-happy` | `corner-cases.sh` | Successful CLI journey corpus |
-| `j-error` | `corner-cases.sh` | Failed CLI journey corpus |
-| `j-outside` | `corner-cases.sh` | Unattributed CLI journey corpus |
-| `j-reattach` | `corner-cases.sh` | Reattached CLI sessions |
-| `j-parallel` | `corner-cases.sh` | Parallel CLI invocations |
-| `eco-full` | `corner-cases.sh` | Full ecosystem corpus |
-| `c1` | `c1-issue-context.sh` | Issue context and evidence |
-| `c2` | `c2-invocation-lifecycle.sh` | Invocation lifecycle |
-| `c3` | `c3-live-tail.sh` | Live logs/traces tail |
-| `c4` | `c4-alerting.sh` | Alert and incident flow |
-| `c5` | `c5-saved-state.sh` | Saved dashboard/investigation state |
-| `c6` | `c6-github-ingest.sh` | GitHub deploy webhook |
-| `c7` | `c7-agent-session.sh` | Agent session import |
-| `c8` | `c8-sentry-envelope.sh` | SDK envelope ingestion |
-| `c9` | `c9-lifecycle-ops.sh` | CLI lifecycle operations |
-| `c10` | `c10-redaction-egress.sh` | Redaction across egress paths |
-| `c11` | `c11-ui-agent-verify.sh` | Agent-browser snapshots for every core surface while health is green |
-| `a30` | `a30-metric-shapes.sh` | Checkout request metrics |
-| `a31` | `a31-handled-unhandled.sh` | Typed handled/unhandled failures |
+| `a1` | `commerce:checkout_saga` | Checkout saga across Catalog, Pricing, Payment, Inventory, outbox, and fulfillment |
+| `a2` | `metrics:exemplars` | Trace-linked catalog metric exemplars |
+| `a5` | `browser:rum_error` | Browser catalog-to-checkout journey with a rendered error |
+| `a6` | `graphql:batching_errors` | GraphQL batching, N+1, partial data, and operation-name telemetry |
+| `a7` | `database:price_subscription` | Catalog GraphQL price subscription over PostgreSQL notifications |
+| `a7b` | `grpc:pricing_stream` | Pricing gRPC stream messages, rejection, and cancellation |
+| `a8` | `messaging:java_fulfillment_replay` | Authenticated seeded-order replay through Java fulfillment and RabbitMQ |
+| `a9` | `logs:field_spike` | CLI log-pattern corpus with a late spike |
+| `a10` | `propagation:baggage` | W3C baggage propagation for tenant and user tier |
+| `a3` | `messaging:checkout_outbox` | Checkout transactional outbox linked to Java fulfillment consumer |
+| `a4` | `messaging:seeded_order_replay` | Seeded-order replay with Java fulfillment and Rust notification hops |
+| `a12` | `cli:checkout_invocation` | Playground CLI checkout driver with invocation telemetry |
+| `a13` | `deploy:release_regression` | Compare valid checkout traffic across v1 and v2 releases |
+| `a14` | `feature_flags:checkout_variants` | Flip checkoutFlow feature variants without restarting services |
+| `a18` | `security:redaction_canary` | Sentry envelope redaction corpus with fake PII and credentials |
+| `a19` | `traces:wide_trace` | CLI 521-span trace for waterfall and minimap stress |
+| `a20-compare` | `feature_flags:topology_compare` | Compare checkoutFlow recommendation topology variants |
+| `a20` | `messaging:batch_fanin` | Synthetic orders producer and consumer links across concurrent messages |
+| `a22` | `runtime:request_saturation` | Concurrent delayed checkout spans and active-request pressure |
+| `a23` | `grpc:storefront_pricing` | Storefront GraphQL resolver calling Pricing gRPC |
+| `a24` | `graphql:storefront_catalog` | Storefront GraphQL resolver calling Catalog GraphQL |
+| `a25` | `postgres:query_pressure` | PostgreSQL queries, fan-out, row locks, and pool pressure |
+| `a26` | `cache:recommendation_stampede` | Catalog-backed recommendation fan-out and cache stampede |
+| `a27` | `agent:execution_stack` | CLI, daemon, capsule, and agent execution-stack story |
+| `a28` | `browser:rum_journey` | Browser routes, web vitals, sessions, and backend stitching |
+| `a29` | `events:typed_business_events` | Typed business events across checkout, orders, catalog, and web |
+| `b-async-chaos` | `messaging:poison_retry` | Synthetic orders lag, poison message, retry, and dead letter |
+| `b2` | `failures:inventory` | Deterministic inventory failure correlated with checkout impact |
+| `b5` | `runtime:cpu_pressure` | Checkout latency, active requests, and slow spans under pressure |
+| `b6` | `memory:cache_leak` | Recommendation cache growth with feature-flag evidence |
+| `b10` | `postgres:lock_contention` | Concurrent checkout spans through bounded lock delay |
+| `b13` | `recommendation:slow_query` | Bounded slow recommendation latency |
+| `b15` | `browser:rage_click` | Browser order and analytics route evidence |
+| `b16` | `load:checkout` | Sustained checkout load from k6 |
+| `b-chaos` | `failures:payment_latency` | Checkout payment failure and latency rendering |
+| `b-checkout-chaos` | `failures:checkout_chaos` | Pricing retry, timeout, and delayed checkout paths |
+| `b3b` | `grpc:deadline_retry` | Pricing gRPC deadline and retry spans |
+| `a-breach-error-rate` | `alerts:error_rate_breach` | Sustained provider declines opening a checkout error-rate incident |
+| `a-breach-p95` | `alerts:p95_breach` | Sustained recommendation latency opening a p95 incident |
+| `a-recover` | `alerts:recovery` | Healthy traffic resolving alert incidents |
+| `b-degradation` | `failures:provider_degradation` | Provider-unavailable degradation and delayed checkout |
+| `b17` | `cron:outcomes` | Cron success, failure, and stuck outcomes |
+| `b17b` | `cron:duplicate_missed` | Cron duplicate, missed-slot, and invocation identity outcomes |
+| `b19` | `jvm:memory_pressure` | JVM catalog workload for garbage-collection and memory pressure |
+| `b20` | `container:recommendation_oom_probe` | Destructive recommendation container OOM probe; requires `--yes` |
+| `b21` | `messaging:orphan_consumer` | Linked and orphan synthetic orders consumers |
+| `b22` | `sampling:low_sample_gap` | Low-rate root sampling with complete log evidence |
+| `b23` | `logs:trace_correlation` | Checkout rows retaining trace and span correlation |
+| `t-deep` | `traces:deep` | Fourteen-span linear trace depth corpus |
+| `t-wide` | `traces:wide` | 521-span fan-out trace virtualization corpus |
+| `t-multiroot` | `traces:multi_root` | Multi-root trace rendering corpus |
+| `t-orphan` | `traces:orphan` | Detached child span rendering corpus |
+| `t-skew` | `traces:clock_skew` | Clock-skew span timing corpus |
+| `t-zero` | `traces:zero_duration` | Zero-duration and one-microsecond span corpus |
+| `t-links` | `traces:cross_links` | Bidirectional span-link navigation corpus |
+| `t-longnames` | `traces:long_names` | Long Unicode span name and value corpus |
+| `t-events` | `traces:events` | Span-event and stacktrace rendering corpus |
+| `l-burst` | `logs:burst` | Five-thousand-log burst and live-tail corpus |
+| `l-bodies` | `logs:bodies` | JSON, large-body, ANSI, blank, and equal-time log corpus |
+| `l-patterns` | `logs:patterns` | Drain log clustering and late-spike corpus |
+| `m-shapes` | `metrics:shapes` | Counter reset, gauge gap, and exemplar histogram corpus |
+| `m-labels` | `metrics:labels` | Metric label grouping by region corpus |
+| `f-attrs` | `attributes:bounded` | Trace and log HTTP method facet corpus |
+| `e-burst` | `issues:burst` | Recurring and distinct error fingerprint corpus |
+| `e-multi-lang` | `issues:multi_language` | Cross-language issue fingerprint corpus |
+| `p-grpc-err` | `protocols:grpc_errors` | Pricing success, validation, and deadline error corpus |
+| `p-grpc-stream` | `protocols:grpc_stream` | Streaming RPC per-message event corpus |
+| `p-graphql-err` | `protocols:graphql_errors` | GraphQL partial-data and request-error corpus |
+| `p-rabbitmq-lag` | `protocols:rabbitmq_lag` | RabbitMQ lag, retry, and dead-letter corpus |
+| `j-happy` | `journeys:happy_path` | Successful CLI home-to-checkout journey corpus |
+| `j-error` | `journeys:error_path` | Failed CLI checkout journey with widget context |
+| `j-outside` | `journeys:outside_screen` | Unattributed CLI journey error corpus |
+| `j-reattach` | `journeys:reattach` | Reattached CLI session chain corpus |
+| `j-parallel` | `journeys:parallel` | Concurrent CLI invocation isolation corpus |
+| `eco-external` | `ecosystem:external_edge` | External client edge without an invented server node |
+| `eco-full` | `ecosystem:full` | Complete CLI, browser, and service ecosystem corpus |
+| `c1` | `product:issue_context` | Issue context, evidence bundle, and resolution |
+| `c2` | `product:invocation_lifecycle` | CLI invocation lifecycle and bundle |
+| `c3` | `product:live_tail` | Live logs and traces over SSE |
+| `c4` | `product:alerting` | Alert rule, incident, and webhook flow |
+| `c5` | `product:saved_state` | Saved dashboard and investigation state |
+| `c6` | `product:github_ingest` | GitHub deploy webhook with HMAC verification |
+| `c7` | `product:agent_session` | Claude session import and MCP agent context |
+| `c8` | `sentry:envelopes` | Real Rust, Java, and JavaScript Sentry envelopes |
+| `c9` | `product:lifecycle_ops` | Isolated HOME lifecycle, prune, context, and argument forwarding |
+| `c10` | `security:redaction_egress` | Redaction across bundle, MCP, UI, webhook, and Sentry |
+| `c11` | `product:ui_agent_verify` | Agent-browser verification for every core UI surface |
+| `a30` | `metrics:request_shapes` | Active requests, request latency, and checkout metrics |
+| `a31` | `errors:handled_unhandled` | Handled payment decline versus provider-internal failure |
 
 Scenario inputs use only seeded tenants/customers/SKUs for normal paths:
 
@@ -106,7 +107,9 @@ Scenario inputs use only seeded tenants/customers/SKUs for normal paths:
 Synthetic `delay`, `fail`, `leak`, `stampede`, poison, and similar controls
 are bounded and explicit. They are not product data or normal success paths.
 
-The real checkout/outbox/fulfillment proof is `a1` or `a3`. The orders
-`/order` endpoint is deliberately isolated on the private `orders.synthetic`
-exchange; `a20`, `b-async-chaos`, `b21`, and the order leg of `a29` use it only
-for messaging-shape fixtures. They do not prove checkout outbox delivery.
+The real checkout/outbox/fulfillment proof is `commerce:checkout_saga` or
+`messaging:checkout_outbox`. The `/order` endpoint is deliberately isolated on
+the private `orders.synthetic` exchange; `messaging:batch_fanin`,
+`messaging:poison_retry`, `messaging:orphan_consumer`, and the order leg of
+`events:typed_business_events` use it only for messaging-shape fixtures. They
+do not prove checkout outbox delivery.

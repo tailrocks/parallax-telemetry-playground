@@ -1,4 +1,4 @@
--- Versioned commerce migration applied by deploy/postgres/migrate.sh.
+-- Versioned commerce migration applied by `mise run infra:postgres_migrate`.
 -- Re-running this file is safe: schema objects use IF NOT EXISTS and seed
 -- records use stable IDs with conflict updates.
 -- The runner supplies the transaction; keep transaction control out of files.

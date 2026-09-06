@@ -99,7 +99,7 @@ class JdbcPaymentStore implements PaymentStore {
             || !schema.pendingReconciliationColumns()
             || !schema.checkoutReconciliationColumns()) {
             throw new IllegalStateException(
-                "deploy/postgres/migrate.sh must apply checkout migration 011 and payment migration 012 before payment starts"
+                "mise run infra:postgres_migrate must apply checkout migration 011 and payment migration 012 before payment starts"
             );
         }
     }

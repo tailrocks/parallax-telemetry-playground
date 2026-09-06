@@ -1,4 +1,4 @@
-# Optional destructive demo overlay. Use only with scenarios/b20-container-oom.sh.
+# Optional destructive demo overlay. Use only with `mise run container:recommendation_oom_probe -- --yes`.
 services:
   recommendation:
     mem_limit: 128m

@@ -86,7 +86,7 @@ class FulfillmentRepository {
         );
         if (table == null) {
             throw new IllegalStateException(
-                "deploy/postgres/migrate.sh must create fulfillment_processed_events before fulfillment starts"
+                "mise run infra:postgres_migrate must create fulfillment_processed_events before fulfillment starts"
             );
         }
         Long leaseColumns = jdbc.queryForObject("""
@@ -98,7 +98,7 @@ class FulfillmentRepository {
             """, Long.class);
         if (leaseColumns == null || leaseColumns != 2) {
             throw new IllegalStateException(
-                "deploy/postgres/migrate.sh must add fulfillment claim lease columns before fulfillment starts"
+                "mise run infra:postgres_migrate must add fulfillment claim lease columns before fulfillment starts"
             );
         }
         Long terminalColumns = jdbc.queryForObject("""
@@ -110,7 +110,7 @@ class FulfillmentRepository {
             """, Long.class);
         if (terminalColumns == null || terminalColumns != 1) {
             throw new IllegalStateException(
-                "deploy/postgres/migrate.sh must add fulfillment terminal retry state before fulfillment starts"
+                "mise run infra:postgres_migrate must add fulfillment terminal retry state before fulfillment starts"
             );
         }
         String effectsTable = jdbc.queryForObject(
@@ -119,7 +119,7 @@ class FulfillmentRepository {
         );
         if (effectsTable == null) {
             throw new IllegalStateException(
-                "deploy/postgres/migrate.sh must create fulfillment_effects before fulfillment starts"
+                "mise run infra:postgres_migrate must create fulfillment_effects before fulfillment starts"
             );
         }
         Long effectColumns = jdbc.queryForObject("""
@@ -131,7 +131,7 @@ class FulfillmentRepository {
             """, Long.class);
         if (effectColumns == null || effectColumns != 4) {
             throw new IllegalStateException(
-                "deploy/postgres/migrate.sh must add fulfillment effect fencing columns before fulfillment starts"
+                "mise run infra:postgres_migrate must add fulfillment effect fencing columns before fulfillment starts"
             );
         }
         if (claimLeaseSeconds <= 0) {

@@ -2,7 +2,7 @@ use playground_proto::pricing::v1::{Money, QuoteLine, QuoteRequest, QuoteRespons
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tonic::Status;
 
@@ -37,10 +37,7 @@ pub(crate) struct CachedLine {
 }
 
 impl CachedQuote {
-    pub(crate) fn remaining_validity_seconds(
-        &self,
-        now: SystemTime,
-    ) -> Result<u32, Status> {
+    pub(crate) fn remaining_validity_seconds(&self, now: SystemTime) -> Result<u32, Status> {
         let now_unix_ms = unix_millis(now)?;
         if self.expires_at_unix_ms <= now_unix_ms {
             return Ok(0);
@@ -266,6 +263,7 @@ fn to_proto_at(quote: &CachedQuote, now: SystemTime) -> Result<QuoteResponse, St
 mod tests {
     use super::*;
     use playground_proto::pricing::v1::QuoteItem;
+    use std::time::Duration;
 
     #[test]
     fn rejects_empty_or_invalid_quote_requests() {
@@ -307,10 +305,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(request_id(&request), "request-1");
-        assert_eq!(
-            cache_key(&request),
-            cache_key(&request)
-        );
+        assert_eq!(cache_key(&request), cache_key(&request));
     }
 
     #[test]
@@ -330,10 +325,7 @@ mod tests {
             customer_id: "customer-nova-mia".into(),
             ..acme.clone()
         };
-        assert_ne!(
-            cache_key(&acme),
-            cache_key(&nova)
-        );
+        assert_ne!(cache_key(&acme), cache_key(&nova));
         assert_ne!(
             stable_request_fingerprint(&acme),
             stable_request_fingerprint(&nova)

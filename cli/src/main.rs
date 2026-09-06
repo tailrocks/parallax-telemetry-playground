@@ -13,7 +13,9 @@
 
 mod commerce_verify;
 mod console_sim;
+mod scenario_runner;
 mod shapes;
+mod task_commands;
 mod test_report;
 mod test_verify;
 
@@ -42,7 +44,18 @@ async fn main() -> anyhow::Result<()> {
     // the endpoint for the observable path.
     let telemetry = if matches!(
         mode.as_str(),
-        "test-report" | "test-verify" | "commerce-verify"
+        "test-report"
+            | "test-verify"
+            | "commerce-verify"
+            | "check-scenarios"
+            | "check-typescript"
+            | "check-typescript-policy"
+            | "postgres-migrate"
+            | "postgres-verify"
+            | "postgres-idempotence"
+            | "webhook-listener"
+            | "demo-stack"
+            | "demo-fresh"
     ) && std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .ok()
         .is_none_or(|endpoint| endpoint.trim().is_empty())
@@ -68,11 +81,23 @@ async fn main() -> anyhow::Result<()> {
             "test-report" => test_report_command(&rest),
             "test-verify" => test_verify_command(&rest).await,
             "commerce-verify" => commerce_verify_command(&rest).await,
+            "scenario" => scenario_runner::run(rest).await,
+            "check-scenarios" => task_commands::check_scenarios().await,
+            "check-typescript" => task_commands::check_typescript().await,
+            "check-typescript-policy" => task_commands::check_typescript_policy().await,
+            "verify-stack" => task_commands::verify_stack(rest).await,
+            "verify-trace" => task_commands::verify_trace(rest).await,
+            "observable-test" => task_commands::observable_test(rest).await,
+            "postgres-migrate" => task_commands::postgres_migrate(rest).await,
+            "postgres-verify" => task_commands::postgres_verify(rest).await,
+            "postgres-idempotence" => task_commands::postgres_idempotence(rest).await,
+            "webhook-listener" => task_commands::webhook_listener(rest).await,
+            "demo-stack" => task_commands::demo_stack(rest).await,
+            "demo-fresh" => task_commands::demo_fresh(rest).await,
             "cron" => cron(rest).await,
             "daemon" => daemon(rest).await,
             "enter" => enter(rest).await,
             "console" => console_sim::run(rest).await,
-            "shapes" => shapes::run(rest).await,
             _ => drive().await,
         }
     }
@@ -109,6 +134,18 @@ fn command_name(mode: &str) -> &'static str {
         "test-report" => "playground.test.report",
         "test-verify" => "playground.test.verify",
         "commerce-verify" => "playground.commerce.verify",
+        "scenario" => "playground.scenario",
+        "check-scenarios" => "playground.check.scenarios",
+        "check-typescript" => "playground.check.typescript",
+        "check-typescript-policy" => "playground.check.typescript",
+        "verify-stack" => "playground.verify.stack",
+        "verify-trace" => "playground.verify.trace",
+        "observable-test" => "playground.test.observable",
+        "postgres-migrate" => "playground.postgres.migrate",
+        "postgres-verify" => "playground.postgres.verify",
+        "postgres-idempotence" => "playground.postgres.idempotence",
+        "webhook-listener" => "playground.tools.webhook_listener",
+        "demo-stack" => "playground.demo.stack",
         _ => "playground.drive",
     }
 }

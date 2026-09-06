@@ -95,10 +95,7 @@ pub(crate) async fn calculate_quote(
             let ttl_seconds = quote
                 .remaining_validity_seconds(SystemTime::now())
                 .unwrap_or_default();
-            tracing::info!(
-                ttl_seconds,
-                "pricing quote cached"
-            );
+            tracing::info!(ttl_seconds, "pricing quote cached");
         }
     }
     Ok(quote)

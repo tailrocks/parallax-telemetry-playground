@@ -1,6 +1,6 @@
 // Real @sentry/node envelope for c8 (same Sentry JS SDK family as the
 // TanStack Start browser app; Node transport works under Bun).
-// Run from web/: SENTRY_DSN=... bun ../scenarios/c8-emit-js.ts
+// Run through `mise run sentry:envelopes`; the Rust task owns Rust, Java, and JavaScript emission.
 import * as Sentry from "@sentry/node"
 
 const dsn = process.env["SENTRY_DSN"]

@@ -85,17 +85,11 @@ pub(crate) struct BusinessContextInput<'a> {
 impl ValidatedBusinessContext {
     pub(crate) fn pricing_context(&self) -> HashMap<String, String> {
         let mut context = HashMap::from([
-            (
-                "customer_segment".to_owned(),
-                self.segment.clone(),
-            ),
+            ("customer_segment".to_owned(), self.segment.clone()),
             ("customer_tier".to_owned(), self.tier.clone()),
             ("region".to_owned(), self.region.clone()),
             ("request_priority".to_owned(), self.priority.clone()),
-            (
-                "pricing_strategy".to_owned(),
-                self.pricing_strategy.clone(),
-            ),
+            ("pricing_strategy".to_owned(), self.pricing_strategy.clone()),
             (
                 "payment_method_type".to_owned(),
                 self.payment_method_type_name().to_owned(),
@@ -410,20 +404,10 @@ impl StoreContext {
             "standard",
             "segment",
         )?;
-        let tier = validated_context_value(
-            input.tier,
-            context,
-            semconv::USER_TIER,
-            "standard",
-            "tier",
-        )?;
-        let region = validated_context_value(
-            input.region,
-            context,
-            "region",
-            "us-east-1",
-            "region",
-        )?;
+        let tier =
+            validated_context_value(input.tier, context, semconv::USER_TIER, "standard", "tier")?;
+        let region =
+            validated_context_value(input.region, context, "region", "us-east-1", "region")?;
         let priority = validated_context_value(
             input.priority,
             context,
@@ -465,9 +449,8 @@ impl StoreContext {
                 "promotion_code is required for promotional pricing_strategy"
             ));
         }
-        let payment_method_type = parse_payment_method_type(
-            input.payment_method_type.unwrap_or("card"),
-        )?;
+        let payment_method_type =
+            parse_payment_method_type(input.payment_method_type.unwrap_or("card"))?;
         Ok(ValidatedBusinessContext {
             segment,
             tier,

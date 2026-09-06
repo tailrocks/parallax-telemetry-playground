@@ -608,6 +608,10 @@ mod tests {
 
     #[tokio::test]
     async fn direct_query_tenant_identity_reaches_catalog_headers_and_baggage() {
+        global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
+            Box::new(TraceContextPropagator::new()),
+            Box::new(BaggagePropagator::new()),
+        ]));
         let captured_headers = Arc::new(Mutex::new(HeaderMap::new()));
         let captured_for_server = Arc::clone(&captured_headers);
         let mock = Router::new().route(

@@ -1,0 +1,534 @@
+# Public scenario contract.
+#
+# Every scenario uses the same shape:
+#   <capability-group>:<semantic_name>
+#   description = "what it proves"
+#   raw = true
+#   run = "Rust scenario runner"
+#
+# Old letter/number identifiers are internal fixture names only. They are not
+# mise aliases and are intentionally absent from this public task catalog.
+
+["commerce:checkout_saga"]
+description = "Checkout saga across Catalog, Pricing, Payment, Inventory, outbox, and fulfillment"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario commerce:checkout_saga"
+
+["metrics:exemplars"]
+description = "Trace-linked catalog metric exemplars"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario metrics:exemplars"
+
+["browser:rum_error"]
+description = "Browser catalog-to-checkout journey with a rendered error"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario browser:rum_error"
+
+["graphql:batching_errors"]
+description = "GraphQL batching, N+1, partial data, and operation-name telemetry"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario graphql:batching_errors"
+
+["database:price_subscription"]
+description = "Catalog GraphQL price subscription over PostgreSQL notifications"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario database:price_subscription"
+
+["grpc:pricing_stream"]
+description = "Pricing gRPC stream messages, rejection, and cancellation"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario grpc:pricing_stream"
+
+["messaging:java_fulfillment_replay"]
+description = "Authenticated seeded-order replay through Java fulfillment and RabbitMQ"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario messaging:java_fulfillment_replay"
+
+["logs:field_spike"]
+description = "CLI log-pattern corpus with a late spike"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario logs:field_spike"
+
+["propagation:baggage"]
+description = "W3C baggage propagation for tenant and user tier"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario propagation:baggage"
+
+["messaging:checkout_outbox"]
+description = "Checkout transactional outbox linked to Java fulfillment consumer"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario messaging:checkout_outbox"
+
+["messaging:seeded_order_replay"]
+description = "Seeded-order replay with Java fulfillment and Rust notification hops"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario messaging:seeded_order_replay"
+
+["cli:checkout_invocation"]
+description = "Playground CLI checkout driver with invocation telemetry"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario cli:checkout_invocation"
+
+["deploy:release_regression"]
+description = "Compare valid checkout traffic across v1 and v2 releases"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario deploy:release_regression"
+
+["feature_flags:checkout_variants"]
+description = "Flip checkoutFlow feature variants without restarting services"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario feature_flags:checkout_variants"
+
+["security:redaction_canary"]
+description = "Sentry envelope redaction corpus with fake PII and credentials"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario security:redaction_canary"
+
+["traces:wide_trace"]
+description = "CLI 521-span trace for waterfall and minimap stress"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario traces:wide_trace"
+
+["feature_flags:topology_compare"]
+description = "Compare checkoutFlow recommendation topology variants"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario feature_flags:topology_compare"
+
+["messaging:batch_fanin"]
+description = "Synthetic orders producer and consumer links across concurrent messages"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario messaging:batch_fanin"
+
+["runtime:request_saturation"]
+description = "Concurrent delayed checkout spans and active-request pressure"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario runtime:request_saturation"
+
+["grpc:storefront_pricing"]
+description = "Storefront GraphQL resolver calling Pricing gRPC"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario grpc:storefront_pricing"
+
+["graphql:storefront_catalog"]
+description = "Storefront GraphQL resolver calling Catalog GraphQL"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario graphql:storefront_catalog"
+
+["postgres:query_pressure"]
+description = "PostgreSQL queries, fan-out, row locks, and pool pressure"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario postgres:query_pressure"
+
+["cache:recommendation_stampede"]
+description = "Catalog-backed recommendation fan-out and cache stampede"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario cache:recommendation_stampede"
+
+["agent:execution_stack"]
+description = "CLI, daemon, capsule, and agent execution-stack story"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario agent:execution_stack"
+
+["browser:rum_journey"]
+description = "Browser routes, web vitals, sessions, and backend stitching"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario browser:rum_journey"
+
+["events:typed_business_events"]
+description = "Typed business events across checkout, orders, catalog, and web"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario events:typed_business_events"
+
+["metrics:request_shapes"]
+description = "Active requests, request latency, and checkout metrics"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario metrics:request_shapes"
+
+["errors:handled_unhandled"]
+description = "Handled payment decline versus provider-internal failure"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario errors:handled_unhandled"
+
+["messaging:poison_retry"]
+description = "Synthetic orders lag, poison message, retry, and dead letter"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario messaging:poison_retry"
+
+["failures:inventory"]
+description = "Deterministic inventory failure correlated with checkout impact"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario failures:inventory"
+
+["runtime:cpu_pressure"]
+description = "Checkout latency, active requests, and slow spans under pressure"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario runtime:cpu_pressure"
+
+["memory:cache_leak"]
+description = "Recommendation cache growth with feature-flag evidence"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario memory:cache_leak"
+
+["postgres:lock_contention"]
+description = "Concurrent checkout spans through bounded lock delay"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario postgres:lock_contention"
+
+["recommendation:slow_query"]
+description = "Bounded slow recommendation latency"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario recommendation:slow_query"
+
+["browser:rage_click"]
+description = "Browser order and analytics route evidence"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario browser:rage_click"
+
+["load:checkout"]
+description = "Sustained checkout load from k6"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario load:checkout"
+
+["failures:payment_latency"]
+description = "Checkout payment failure and latency rendering"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario failures:payment_latency"
+
+["failures:checkout_chaos"]
+description = "Pricing retry, timeout, and delayed checkout paths"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario failures:checkout_chaos"
+
+["grpc:deadline_retry"]
+description = "Pricing gRPC deadline and retry spans"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario grpc:deadline_retry"
+
+["alerts:error_rate_breach"]
+description = "Sustained provider declines opening a checkout error-rate incident"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario alerts:error_rate_breach"
+
+["alerts:p95_breach"]
+description = "Sustained recommendation latency opening a p95 incident"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario alerts:p95_breach"
+
+["alerts:recovery"]
+description = "Healthy traffic resolving alert incidents"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario alerts:recovery"
+
+["failures:provider_degradation"]
+description = "Provider-unavailable degradation and delayed checkout"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario failures:provider_degradation"
+
+["cron:outcomes"]
+description = "Cron success, failure, and stuck outcomes"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario cron:outcomes"
+
+["cron:duplicate_missed"]
+description = "Cron duplicate, missed-slot, and invocation identity outcomes"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario cron:duplicate_missed"
+
+["jvm:memory_pressure"]
+description = "JVM catalog workload for garbage-collection and memory pressure"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario jvm:memory_pressure"
+
+["container:recommendation_oom_probe"]
+description = "Destructive recommendation container OOM probe; requires --yes"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario container:recommendation_oom_probe"
+
+["messaging:orphan_consumer"]
+description = "Linked and orphan synthetic orders consumers"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario messaging:orphan_consumer"
+
+["sampling:low_sample_gap"]
+description = "Low-rate root sampling with complete log evidence"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario sampling:low_sample_gap"
+
+["logs:trace_correlation"]
+description = "Checkout rows retaining trace and span correlation"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario logs:trace_correlation"
+
+["traces:deep"]
+description = "Fourteen-span linear trace depth corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario traces:deep"
+
+["traces:wide"]
+description = "521-span fan-out trace virtualization corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario traces:wide"
+
+["traces:multi_root"]
+description = "Multi-root trace rendering corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario traces:multi_root"
+
+["traces:orphan"]
+description = "Detached child span rendering corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario traces:orphan"
+
+["traces:clock_skew"]
+description = "Clock-skew span timing corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario traces:clock_skew"
+
+["traces:zero_duration"]
+description = "Zero-duration and one-microsecond span corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario traces:zero_duration"
+
+["traces:cross_links"]
+description = "Bidirectional span-link navigation corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario traces:cross_links"
+
+["traces:long_names"]
+description = "Long Unicode span name and value corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario traces:long_names"
+
+["traces:events"]
+description = "Span-event and stacktrace rendering corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario traces:events"
+
+["logs:burst"]
+description = "Five-thousand-log burst and live-tail corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario logs:burst"
+
+["logs:bodies"]
+description = "JSON, large-body, ANSI, blank, and equal-time log corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario logs:bodies"
+
+["logs:patterns"]
+description = "Drain log clustering and late-spike corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario logs:patterns"
+
+["metrics:shapes"]
+description = "Counter reset, gauge gap, and exemplar histogram corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario metrics:shapes"
+
+["metrics:labels"]
+description = "Metric label grouping by region corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario metrics:labels"
+
+["attributes:bounded"]
+description = "Trace and log HTTP method facet corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario attributes:bounded"
+
+["issues:burst"]
+description = "Recurring and distinct error fingerprint corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario issues:burst"
+
+["issues:multi_language"]
+description = "Cross-language issue fingerprint corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario issues:multi_language"
+
+["protocols:grpc_errors"]
+description = "Pricing success, validation, and deadline error corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario protocols:grpc_errors"
+
+["protocols:grpc_stream"]
+description = "Streaming RPC per-message event corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario protocols:grpc_stream"
+
+["protocols:graphql_errors"]
+description = "GraphQL partial-data and request-error corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario protocols:graphql_errors"
+
+["protocols:rabbitmq_lag"]
+description = "RabbitMQ lag, retry, and dead-letter corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario protocols:rabbitmq_lag"
+
+["journeys:happy_path"]
+description = "Successful CLI home-to-checkout journey corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario journeys:happy_path"
+
+["journeys:error_path"]
+description = "Failed CLI checkout journey with widget context"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario journeys:error_path"
+
+["journeys:outside_screen"]
+description = "Unattributed CLI journey error corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario journeys:outside_screen"
+
+["journeys:reattach"]
+description = "Reattached CLI session chain corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario journeys:reattach"
+
+["journeys:parallel"]
+description = "Concurrent CLI invocation isolation corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario journeys:parallel"
+
+["ecosystem:external_edge"]
+description = "External client edge without an invented server node"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario ecosystem:external_edge"
+
+["ecosystem:full"]
+description = "Complete CLI, browser, and service ecosystem corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario ecosystem:full"
+
+["product:issue_context"]
+description = "Issue context, evidence bundle, and resolution"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:issue_context"
+
+["product:invocation_lifecycle"]
+description = "CLI invocation lifecycle and bundle"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:invocation_lifecycle"
+
+["product:live_tail"]
+description = "Live logs and traces over SSE"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:live_tail"
+
+["product:alerting"]
+description = "Alert rule, incident, and webhook flow"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:alerting"
+
+["product:saved_state"]
+description = "Saved dashboard and investigation state"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:saved_state"
+
+["product:github_ingest"]
+description = "GitHub deploy webhook with HMAC verification"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:github_ingest"
+
+["product:agent_session"]
+description = "Claude session import and MCP agent context"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:agent_session"
+
+["sentry:envelopes"]
+description = "Real Rust, Java, and JavaScript Sentry envelopes"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario sentry:envelopes"
+
+["product:lifecycle_ops"]
+description = "Isolated HOME lifecycle, prune, context, and argument forwarding"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:lifecycle_ops"
+
+["security:redaction_egress"]
+description = "Redaction across bundle, MCP, UI, webhook, and Sentry"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario security:redaction_egress"
+
+["product:ui_agent_verify"]
+description = "Agent-browser verification for every core UI surface"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:ui_agent_verify"
+
+["corpus:all"]
+description = "Run the complete synthetic corner-case corpus"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario corpus:all"
+
+["demo:full"]
+description = "Run the ordered Parallax capability demonstration"
+run = [
+  { task = "commerce:checkout_saga" },
+  { task = "graphql:batching_errors" },
+  { task = "grpc:pricing_stream" },
+  { task = "messaging:checkout_outbox" },
+  { task = "metrics:exemplars" },
+  { task = "logs:field_spike" },
+  { task = "postgres:query_pressure" },
+  { task = "browser:rum_journey" },
+  { task = "deploy:release_regression" },
+  { task = "failures:inventory" },
+  { task = "product:issue_context" },
+  { task = "product:agent_session" },
+  { task = "sentry:envelopes" },
+  { task = "security:redaction_egress" },
+  { task = "product:ui_agent_verify" },
+]
+
+["check:scenarios"]
+description = "Validate semantic scenario task metadata and Rust dispatch"
+run = "cargo run --locked -p playground-cli -- check-scenarios"
+
+["check:typescript"]
+description = "Type-check web, server, and load-generator TypeScript"
+run = "cargo run --locked -p playground-cli -- check-typescript"
+
+["check:typescript_policy"]
+description = "Validate strict TypeScript-only source policy"
+run = "cargo run --locked -p playground-cli -- check-typescript-policy"
+
+["verify:commerce_stack"]
+description = "Validate Compose configuration and core commerce service health"
+run = "cargo run --locked -p playground-cli -- verify-stack"
+
+["verify:commerce_trace"]
+description = "Run invocation-scoped commerce topology verification"
+run = "parallax invocation start -- cargo run --locked -p playground-cli -- verify-trace"
+
+["test:observable"]
+description = "Run an observable Rust, Java, or web test session"
+raw = true
+run = "cargo run --locked -p playground-cli -- observable-test"
+
+["infra:postgres_migrate"]
+description = "Apply PostgreSQL migrations and verify schema"
+raw = true
+run = "cargo run --locked -p playground-cli -- postgres-migrate"
+
+["infra:postgres_verify"]
+description = "Verify the PostgreSQL schema contract"
+raw = true
+run = "cargo run --locked -p playground-cli -- postgres-verify"
+
+["verify:postgres_idempotence"]
+description = "Start a fresh Compose project and prove migration idempotence"
+run = "cargo run --locked -p playground-cli -- postgres-idempotence"
+
+["tools:webhook_listener"]
+description = "Listen for and print alert webhook deliveries"
+raw = true
+run = "cargo run --locked -p playground-cli -- webhook-listener"
+
+["demo:stack"]
+description = "Start the playground Compose stack, preserving local volumes"
+raw = true
+run = "cargo run --locked -p playground-cli -- demo-stack"
+
+["demo:fresh"]
+description = "Reset Compose volumes and start a completely fresh playground"
+raw = true
+run = "cargo run --locked -p playground-cli -- demo-fresh"

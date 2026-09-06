@@ -6,75 +6,69 @@ Run it against the current checkout and a clean dependency stack.
 ## Static gates
 
 ```bash
-rtk cargo fmt --all -- --check
-rtk cargo check --workspace --all-targets --locked
-rtk cargo test --workspace --all-targets --locked
-rtk cargo clippy --workspace --all-targets --locked -- -D warnings
-rtk bash scripts/check-scenarios.sh
+mise run quality:fmt
+mise run quality:ci
+mise run quality:test
+mise run quality:lint
+mise run check:scenarios
+mise run check:typescript
+mise run verify:postgres_idempotence
+mise run verify:commerce_stack
 rtk git diff --check
-rtk proxy docker compose -f deploy/docker-compose.yml config --quiet
 ```
 
 ```bash
-(cd services/catalog && rtk proxy ./gradlew --no-daemon clean test)
-(cd services/payment && rtk proxy ./gradlew --no-daemon clean test)
-(cd services/fulfillment && rtk proxy ./gradlew --no-daemon clean test)
-(cd web && rtk bun run build)
-(cd web && rtk bun run typecheck)
-(cd web && rtk bun run test)
-(cd web && rtk bun run e2e)
+parallax invocation start -- mise run test:observable -- java
+parallax invocation start -- mise run test:observable -- web
 ```
 
 The Rust code uses `tokio-postgres`/`deadpool-postgres`; Java uses JDBC. The
 tests may use stubs at unit boundaries, but deployed journeys require the
 shared PostgreSQL, Redis, RabbitMQ, ClickHouse, flagd, and service containers.
 
-## Canonical executable verifier
+## Compose configuration and core health check
 
-Run the clean disposable-stack gate from the repository root:
+Run the Rust-backed Compose and core-health check from the repository root:
 
 ```bash
-rtk bash scripts/verify-commerce-stack.sh
+mise run verify:commerce_stack
 ```
 
-It creates a unique Compose project, builds the stack, applies PostgreSQL
-migrations, reruns them unchanged, and removes only that project's containers,
-volumes, and temporary files on exit. It then proves catalog cold/warm GraphQL,
-Storefront pricing GraphQL, W3C-header checkout, async fulfillment and
-notification delivery, direct Payment gRPC authorize/capture replay and
-changed-fingerprint rejection, PostgreSQL/Redis/RabbitMQ/ClickHouse state, a
-live checkout feature flip with behavior change without restart, the real
-Compose-backed Playwright browser journey, and checkout readiness failure/
-recovery.
-Managed mode runs PostgreSQL and Redis assertions through the Compose service
-containers; host `psql` and `redis-cli` are only required in external mode.
+The task validates `deploy/docker-compose.yml` with `docker compose config
+--quiet`. If `VERIFY_MANAGE_STACK=1`, it also starts the Compose `demo` profile
+with `--build -d`; otherwise it checks the already-running stack. It then
+requires HTTP-success responses from the configured health endpoints for
+Parallax, Checkout, Catalog, Inventory, and Recommendation. The defaults are
+`PARALLAX_API_URL=http://127.0.0.1:4000/health`,
+`CHECKOUT_URL=http://127.0.0.1:8088/healthz`,
+`CATALOG_URL=http://127.0.0.1:8080/healthz`,
+`INVENTORY_URL=http://127.0.0.1:8089/healthz`, and
+`RECOMMENDATION_URL=http://127.0.0.1:8090/healthz`.
 
-For an already-running external stack, skip lifecycle mutations and provide
-its endpoints:
+This task does not create a unique disposable Compose project, prove migration
+idempotence, execute business journeys, inspect storage or queue state, verify
+telemetry topology, run browser or feature-variant checks, inject readiness
+failures, or clean up Compose resources. Use the focused scenario tasks and
+`mise run verify:commerce_trace` for those proofs.
+
+For an already-running stack, leave `VERIFY_MANAGE_STACK=0` (the default) and
+override health endpoints only when needed:
 
 ```bash
 VERIFY_MANAGE_STACK=0 \
-  VERIFY_EXTERNAL_ALLOW_MUTATION=1 \
-  VERIFY_TENANT_ID=tenant-verification \
-  VERIFY_CUSTOMER_ID=customer-verification \
-  VERIFY_SKU=WIDGET-1 \
-  CATALOG_GRAPHQL_URL=http://127.0.0.1:8080/graphql \
-  STOREFRONT_GRAPHQL_URL=http://127.0.0.1:8094/graphql \
-  CHECKOUT_URL=http://127.0.0.1:8088 \
-  PAYMENT_GRPC_URL=http://127.0.0.1:9090 \
-  FULFILLMENT_URL=http://127.0.0.1:8093 \
-  rtk bash scripts/verify-commerce-stack.sh
+  PARALLAX_API_URL=http://127.0.0.1:4000/health \
+  CHECKOUT_URL=http://127.0.0.1:8088/healthz \
+  CATALOG_URL=http://127.0.0.1:8080/healthz \
+  INVENTORY_URL=http://127.0.0.1:8089/healthz \
+  RECOMMENDATION_URL=http://127.0.0.1:8090/healthz \
+  mise run verify:commerce_stack
 ```
 
-External mode skips stack start/build, migration rerun, managed cold-cache
-reset proof, browser E2E, feature-file mutation, and the stop/start readiness
-fault injection. It still runs the business, async, storage, queue, cache,
-and readiness-health assertions against the supplied stack; use an isolated
-tenant/customer fixture and explicitly acknowledge its durable mutations with
-`VERIFY_EXTERNAL_ALLOW_MUTATION=1`; external mode does not clean up data.
+The optional `VERIFY_HTTP_TIMEOUT_SECONDS` controls the health-request timeout
+and defaults to 20 seconds. The task does not tear down a managed stack.
 
 `deploy/postgres/migrations/*.sql` owns all commerce tables, constraints,
-indexes, and seed data. `deploy/postgres/migrate.sh` creates
+indexes, and seed data. `mise run infra:postgres_migrate` creates
 `public.schema_migrations`, applies pending versions under a transaction and
 advisory lock, and records a version only after its SQL succeeds.
 `deploy/clickhouse/init.sql` owns analytics tables. Services do not create lazy
@@ -82,40 +76,43 @@ replacement schemas at startup.
 
 ## Runtime journeys
 
-The canonical verifier covers the focused distributed commerce slice. Use the
-scenario drivers below for additional journeys:
+The stack task above only validates Compose configuration and five core HTTP
+health endpoints. It does not execute the journeys below; run each scenario
+task against a healthy dependency stack:
 
 | Journey | Proof |
 |---|---|
-| `a24` | Web/storefront product page delegates to Catalog GraphQL and returns seeded products, variants, prices, categories, and reviews. |
-| `a1` | Checkout crosses Catalog, Pricing gRPC, PostgreSQL order/cart, Payment gRPC, Inventory, Recommendation, analytics, and the outbox. |
-| `a4` | Fulfillment publishes seeded orders to RabbitMQ, consumes with a span link, persists shipment state, writes ClickHouse, and calls Notifications. |
-| `a7` | Catalog price change is committed in PostgreSQL's durable journal; LISTEN wakes the replayable GraphQL subscription. |
-| `a7b` | Pricing server stream emits per-message telemetry and distinct failure/cancellation paths. |
-| `a23` | Storefront GraphQL resolver calls the real Pricing gRPC contract. |
-| `a25` | Inventory uses real PostgreSQL row locks, slow query, bounded query fan-out, and pool limits. |
-| `a26` | Recommendation reads Catalog GraphQL; parallelism is explicit bounded chaos, not a normal fake cache. |
-| `a14` | flagd string variants change checkout behavior without restarting checkout and are recorded with business context. The managed verifier restarts only flagd after changing its bind-mounted file so the check is deterministic on Docker Desktop. |
-| `b-chaos` / `b2` | Provider decline and inventory failure are explicit typed failure paths using normal SKUs. |
-| `a-breach-error-rate` / `a-recover` | Decline traffic then healthy traffic demonstrate error-rate recovery. |
-| `a29` | Shared typed business event names appear across Rust, Java, and web telemetry. |
-| `c11` | Browser smoke, when the Parallax CLI/browser harness is available. |
+| `graphql:storefront_catalog` | Web/storefront product page delegates to Catalog GraphQL and returns seeded products, variants, prices, categories, and reviews. |
+| `commerce:checkout_saga` | Checkout crosses Catalog, Pricing gRPC, PostgreSQL order/cart, Payment gRPC, Inventory, Recommendation, analytics, and the outbox. |
+| `messaging:seeded_order_replay` | Fulfillment publishes seeded orders to RabbitMQ, consumes with a span link, persists shipment state, writes ClickHouse, and calls Notifications. |
+| `database:price_subscription` | Catalog price change is committed in PostgreSQL's durable journal; LISTEN wakes the replayable GraphQL subscription. |
+| `grpc:pricing_stream` | Pricing server stream emits per-message telemetry and distinct failure/cancellation paths. |
+| `grpc:storefront_pricing` | Storefront GraphQL resolver calls the real Pricing gRPC contract. |
+| `postgres:query_pressure` | Inventory uses real PostgreSQL row locks, slow query, bounded query fan-out, and pool limits. |
+| `cache:recommendation_stampede` | Recommendation reads Catalog GraphQL; parallelism is explicit bounded chaos, not a normal fake cache. |
+| `feature_flags:checkout_variants` | With a configured flagd variant, checkout behavior and business context are observable; flag configuration changes and restart behavior are outside the stack health task. |
+| `failures:payment_latency` / `failures:inventory` | Provider decline and inventory failure are explicit typed failure paths using normal SKUs. |
+| `alerts:error_rate_breach` / `alerts:recovery` | Decline traffic then healthy traffic demonstrate error-rate recovery. |
+| `events:typed_business_events` | Shared typed business event names appear across Rust, Java, and web telemetry. |
+| `product:ui_agent_verify` | Browser smoke, when the Parallax CLI/browser harness is available. |
 
 The real distributed topology has an executable Parallax assertion. With the
 stack and Parallax server running, execute:
 
 ```bash
-parallax invocation start -- scripts/verify-commerce-trace.sh
+mise run verify:commerce_trace
 ```
 
-The script sends a real checkout carrying all three W3C headers, then runs
+The Rust verifier task sends a real checkout carrying all three W3C headers, then runs
 `playground commerce-verify`. That verifier queries Parallax GraphQL, follows
 linked RabbitMQ traces, and fails unless Catalog, Pricing, Inventory, Payment,
 Fulfillment/RabbitMQ, Notifications, and analytics evidence are present.
 
 ## Storage assertions
 
-After `a1` and `a4`, verify directly through SQL/ClickHouse/RabbitMQ tooling:
+After `mise run commerce:checkout_saga` and
+`mise run messaging:seeded_order_replay`, verify directly through
+SQL/ClickHouse/RabbitMQ tooling:
 
 - PostgreSQL has a paid order, order items, payment lifecycle row, analytics
   event, outbox event, shipment/processing claim with lease, and notification

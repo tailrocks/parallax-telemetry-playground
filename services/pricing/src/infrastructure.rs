@@ -1,6 +1,6 @@
 use crate::domain::{
-    CachedLine, CachedQuote, DEFAULT_CUSTOMER_SEGMENT, DEFAULT_CUSTOMER_TIER,
-    QUOTE_TTL_SECONDS, quote_expiry_from, request_id,
+    CachedLine, CachedQuote, DEFAULT_CUSTOMER_SEGMENT, DEFAULT_CUSTOMER_TIER, QUOTE_TTL_SECONDS,
+    quote_expiry_from, request_id,
 };
 use anyhow::Context;
 use deadpool_postgres::{
@@ -237,8 +237,14 @@ impl PostgresRepository {
                 .ok_or_else(|| Status::out_of_range("quote subtotal overflowed"))
         })?;
         let discount_minor = if strategy == "promotional" && !promotion_code.is_empty() {
-            promotion_discount(&transaction, request, promotion_code, &lines, subtotal_minor)
-                .await?
+            promotion_discount(
+                &transaction,
+                request,
+                promotion_code,
+                &lines,
+                subtotal_minor,
+            )
+            .await?
         } else {
             0
         };
@@ -299,67 +305,66 @@ where
 }
 
 async fn promotion_discount<C>(
-        client: &C,
-        request: &QuoteRequest,
-        code: &str,
-        lines: &[CachedLine],
-        subtotal_minor: i64,
-    ) -> Result<i64, Status>
+    client: &C,
+    request: &QuoteRequest,
+    code: &str,
+    lines: &[CachedLine],
+    subtotal_minor: i64,
+) -> Result<i64, Status>
 where
     C: GenericClient + Sync,
 {
-        let row = client.query_opt(
+    let row = client.query_opt(
             "SELECT id, discount_type, discount_value::double precision, currency FROM promotions WHERE tenant_id = $1 AND code = $2 AND active AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now()) AND (max_redemptions IS NULL OR redemption_count < max_redemptions) AND (currency IS NULL OR currency = $3) AND minimum_subtotal_minor <= $4",
             &[&request.tenant_id, &code, &request.currency_code, &subtotal_minor],
         ).await.map_err(|error| Status::unavailable(format!("promotion query failed: {error}")))?;
-        let Some(row) = row else {
-            return Ok(0);
-        };
-        let promotion_id: String = row.get(0);
-        let product_ids = client
-            .query(
-                "SELECT product_id FROM promotion_products WHERE tenant_id=$1 AND promotion_id=$2",
-                &[&request.tenant_id, &promotion_id],
-            )
-            .await
-            .map_err(|error| Status::unavailable(format!("promotion scope query failed: {error}")))?
-            .into_iter()
-            .map(|scope| scope.get::<_, String>(0))
-            .collect::<HashSet<_>>();
-        if product_ids.is_empty() {
-            return Ok(0);
-        }
-        let eligible_subtotal = lines
-            .iter()
-            .filter(|line| product_ids.contains(&line.product_id))
-            .try_fold(0_i64, |subtotal, line| {
-                subtotal
-                    .checked_add(line.line_minor)
-                    .ok_or_else(|| Status::out_of_range("promotion subtotal overflowed"))
-            })?;
-        if eligible_subtotal == 0 {
-            return Ok(0);
-        }
-        let kind: &str = row.get(1);
-        let value: f64 = row.get(2);
-        if !value.is_finite() || value <= 0.0 {
-            return Err(Status::internal("promotion value is invalid"));
-        }
-        let raw_discount = if kind == "percentage" {
-            if value > 100.0 {
-                return Err(Status::internal("promotion percentage is invalid"));
-            }
-            eligible_subtotal as f64 * value / 100.0
-        } else if kind == "fixed" {
-            value
-        } else {
-            return Err(Status::internal("promotion type is invalid"));
-        };
-        if !raw_discount.is_finite() || raw_discount > i64::MAX as f64 {
-            return Err(Status::out_of_range("promotion discount overflowed"));
-        }
-        Ok((raw_discount.round() as i64).min(eligible_subtotal))
+    let Some(row) = row else {
+        return Ok(0);
+    };
+    let promotion_id: String = row.get(0);
+    let product_ids = client
+        .query(
+            "SELECT product_id FROM promotion_products WHERE tenant_id=$1 AND promotion_id=$2",
+            &[&request.tenant_id, &promotion_id],
+        )
+        .await
+        .map_err(|error| Status::unavailable(format!("promotion scope query failed: {error}")))?
+        .into_iter()
+        .map(|scope| scope.get::<_, String>(0))
+        .collect::<HashSet<_>>();
+    if product_ids.is_empty() {
+        return Ok(0);
     }
+    let eligible_subtotal = lines
+        .iter()
+        .filter(|line| product_ids.contains(&line.product_id))
+        .try_fold(0_i64, |subtotal, line| {
+            subtotal
+                .checked_add(line.line_minor)
+                .ok_or_else(|| Status::out_of_range("promotion subtotal overflowed"))
+        })?;
+    if eligible_subtotal == 0 {
+        return Ok(0);
+    }
+    let kind: &str = row.get(1);
+    let value: f64 = row.get(2);
+    if !value.is_finite() || value <= 0.0 {
+        return Err(Status::internal("promotion value is invalid"));
+    }
+    let raw_discount = if kind == "percentage" {
+        if value > 100.0 {
+            return Err(Status::internal("promotion percentage is invalid"));
+        }
+        eligible_subtotal as f64 * value / 100.0
+    } else if kind == "fixed" {
+        value
+    } else {
+        return Err(Status::internal("promotion type is invalid"));
+    };
+    if !raw_discount.is_finite() || raw_discount > i64::MAX as f64 {
+        return Err(Status::out_of_range("promotion discount overflowed"));
+    }
+    Ok((raw_discount.round() as i64).min(eligible_subtotal))
 }
 
 #[derive(Clone)]
@@ -504,7 +509,7 @@ pub async fn init_state() -> anyhow::Result<AppState> {
     client
         .query_one("SELECT count(*) FROM prices", &[])
         .await
-        .context("pricing schema missing; run deploy/postgres/migrate.sh")?;
+        .context("pricing schema missing; run mise run infra:postgres_migrate")?;
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| DEFAULT_REDIS_URL.to_owned());
     let redis = match redis::Client::open(redis_url) {
         Ok(client) => {

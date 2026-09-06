@@ -6,7 +6,7 @@ software; breaking changes are expected.
 
 ## Architecture
 
-```text
+```bash
 TanStack web
     │ HTTP / GraphQL
     ▼
@@ -31,8 +31,8 @@ shipments are seeded by the versioned PostgreSQL migrations in
 [`deploy/postgres/migrations/`](deploy/postgres/migrations/), starting with
   [`001-commerce.sql`](deploy/postgres/migrations/001-commerce.sql), plus
   additive durable checkout and compensation migrations.
-[`deploy/postgres/migrate.sh`](deploy/postgres/migrate.sh) applies each
-migration once, verifies the required schema, and records it in
+The `mise run infra:postgres_migrate` task applies each migration once,
+verifies the required schema, and records it in
 `public.schema_migrations` before database clients start.
 ClickHouse tables are initialized by [`deploy/clickhouse/init.sql`](deploy/clickhouse/init.sql).
 Redis is a catalog/pricing cache, not a source of truth. RabbitMQ is durable;
@@ -42,16 +42,22 @@ the application path.
 
 ## Run
 
-Start the telemetry receiver first (`parallax serve`, or another OTLP listener
-on host ports 4317/4318), then boot the complete stack:
+Install the pinned toolchain, start the telemetry receiver, then boot the stack:
 
 ```bash
-docker compose -f deploy/docker-compose.yml up --build
+mise install
+parallax serve
+mise run demo:fresh -- --yes
 ```
 
+`demo:fresh` destroys only this playground's Compose volumes before rebuilding.
+Use `mise run demo:stack` when existing local data should remain.
+
 Compose gates services that depend on the PostgreSQL migration job. The
-verification runner waits for ClickHouse initialization before asserting
-analytics state; a plain `up` is not itself an analytics-readiness proof.
+`mise run verify:commerce_stack` task checks Compose configuration and core
+HTTP health only; a plain `up` is not itself an analytics-readiness proof.
+Use `mise run verify:commerce_trace` for collected service, RabbitMQ, and
+analytics evidence.
 
 Useful surfaces:
 
@@ -80,26 +86,11 @@ curl --fail-with-body -X POST http://localhost:8088/checkout \
   --data '{"tenant_id":"tenant-acme","customer_id":"customer-acme-ava","items":[{"sku":"WIDGET-1","quantity":1}],"currency_code":"USD","payment_method_token":"tok_visa","payment_method_type":"card","request_id":"readme-1"}'
 ```
 
-For clean-volume bootstrap, use an isolated Compose project that has not been
-used before. The second runner invocation proves the named-volume path without
-resetting or deleting the volume:
+For clean-volume bootstrap and migration idempotence, use the Rust-owned
+disposable Compose proof:
 
 ```bash
-project=telemetry-playground-clean-$(date +%s)
-docker compose -p "$project" -f deploy/docker-compose.yml \
-  up -d postgres postgres-migrate redis rabbitmq clickhouse clickhouse-init
-docker compose -p "$project" -f deploy/docker-compose.yml exec -T postgres \
-  psql -U postgres -d playground -Atqc \
-  "SELECT version, count(*) FROM public.schema_migrations GROUP BY version;"
-before="$(docker compose -p "$project" -f deploy/docker-compose.yml exec -T postgres \
-  psql -U postgres -d playground -Atqc \
-  "SELECT string_agg(version || '=' || applied_at::text, ',' ORDER BY version) FROM public.schema_migrations;")"
-docker compose -p "$project" -f deploy/docker-compose.yml run --rm postgres-migrate
-after="$(docker compose -p "$project" -f deploy/docker-compose.yml exec -T postgres \
-  psql -U postgres -d playground -Atqc \
-  "SELECT string_agg(version || '=' || applied_at::text, ',' ORDER BY version) FROM public.schema_migrations;")"
-test "$before" = "$after"
-docker compose -p "$project" -f deploy/docker-compose.yml down
+mise run verify:postgres_idempotence
 ```
 
 ## Verification
@@ -107,35 +98,39 @@ docker compose -p "$project" -f deploy/docker-compose.yml down
 Rust gates:
 
 ```bash
-rtk cargo fmt --all -- --check
-rtk cargo check --workspace --all-targets --locked
-rtk cargo test --workspace --all-targets --locked
+mise run quality:fmt
+mise run quality:ci
+mise run quality:test
+mise run quality:lint
+mise run check:scenarios
+mise run check:typescript
 ```
 
-Java gates:
+Java observable gate:
+
+```text
+parallax invocation start -- mise run test:observable -- java
+```
+
+The Rust observable runner invokes Gradle's `GradleWrapperMain` directly for
+Catalog, Payment, and Fulfillment; service-local POSIX wrappers are not needed.
+
+Web observable gate:
 
 ```bash
-(cd services/catalog && rtk proxy ./gradlew --no-daemon clean test)
-(cd services/payment && rtk proxy ./gradlew --no-daemon clean test)
-(cd services/fulfillment && rtk proxy ./gradlew --no-daemon clean test)
+parallax invocation start -- mise run test:observable -- web
 ```
 
-Web gates:
-
-```bash
-(cd web && rtk bun run build)
-(cd web && rtk bun run test)
-```
-
-Then run `rtk git diff --check` and
-`rtk proxy docker compose -f deploy/docker-compose.yml config --quiet`.
+Then run rtk git diff --check and
+`mise run verify:commerce_stack` for Compose configuration and core service
+health.
 
 For the current verification contract, see [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
 
 For an automated Parallax topology assertion over one real checkout:
 
 ```bash
-parallax invocation start -- scripts/verify-commerce-trace.sh
+mise run verify:commerce_trace
 ```
 
 It checks the collected service, RabbitMQ, and analytics evidence through
@@ -146,28 +141,33 @@ causal span edge.
 ## Journeys and scenarios
 
 ```bash
-./scenarios/run.sh a1                 # checkout saga
-./scenarios/run.sh a6                 # GraphQL batch/N+1/partial error
-./scenarios/run.sh a7                 # Postgres NOTIFY price subscription
-./scenarios/run.sh a7b                # pricing stream/failure/cancel
-./scenarios/run.sh a23                # storefront → pricing gRPC
-./scenarios/run.sh a24                # storefront → catalog GraphQL
-./scenarios/run.sh a25                # Postgres slow/N+1/pool pressure
-./scenarios/run.sh a26                # Catalog-backed recommendation
-./scenarios/run.sh a14                # live checkoutFlow variant flip
-./scenarios/run.sh a3                 # checkout → transactional outbox → fulfillment
-./scenarios/run.sh a4                 # authenticated seeded-order replay → RabbitMQ → Rust
-./scenarios/run.sh b-chaos            # provider decline and delay
-./scenarios/run.sh b2                 # inventory failure
-./scenarios/run.sh c11                # browser smoke, when the Parallax CLI is available
+mise run commerce:checkout_saga       # checkout saga
+mise run graphql:batching_errors       # GraphQL batch/N+1/partial error
+mise run database:price_subscription   # PostgreSQL price subscription
+mise run grpc:pricing_stream           # pricing stream/failure/cancel
+mise run grpc:storefront_pricing       # storefront → pricing gRPC
+mise run graphql:storefront_catalog    # storefront → catalog GraphQL
+mise run postgres:query_pressure       # PostgreSQL slow/N+1/pool pressure; auto-creates a fence
+mise run cache:recommendation_stampede # catalog-backed recommendation
+mise run feature_flags:checkout_variants # live checkoutFlow variant flip
+mise run messaging:checkout_outbox     # checkout → outbox → fulfillment
+mise run messaging:seeded_order_replay # seeded-order replay → RabbitMQ → Rust
+mise run failures:payment_latency      # provider decline and delay
+mise run failures:inventory            # inventory failure
+mise run jvm:memory_pressure            # JVM GC/memory-pressure workload
+mise run container:recommendation_oom_probe -- --yes # explicit destructive OOM probe
+mise run product:ui_agent_verify       # browser smoke, Parallax CLI required
 ```
 
-`./scenarios/run.sh` prints the complete catalog. The corner-case corpus is
-documented in [`docs/corner-case-matrix.md`](docs/corner-case-matrix.md).
-Ambient k6 traffic uses the optional Compose `demo` profile:
+Tasks use stable `group:semantic_name` names; numeric IDs are internal fixture
+references, not public aliases. Run
+`mise tasks ls --sort name` to see every grouped task and description. Run
+`mise run demo:full` for the ordered capability tour. The corner-case corpus
+is documented in [`docs/corner-case-matrix.md`](docs/corner-case-matrix.md).
+With the stack running, use the load scenario for sustained k6 traffic:
 
-```bash
-docker compose -f deploy/docker-compose.yml --profile demo up loadgen
+```text
+mise run load:checkout
 ```
 
 ## Contracts

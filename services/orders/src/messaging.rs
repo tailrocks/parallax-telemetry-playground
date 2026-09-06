@@ -893,7 +893,7 @@ impl InboxStore {
         client
             .query_one("SELECT count(*) FROM orders_consumer_inbox", &[])
             .await
-            .context("orders durable inbox schema missing; run deploy/postgres/migrate.sh")?;
+            .context("orders durable inbox schema missing; run mise run infra:postgres_migrate")?;
         tracing::info!("orders connected to durable Postgres consumer inbox");
         Ok(store)
     }

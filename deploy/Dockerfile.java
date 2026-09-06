@@ -25,7 +25,7 @@ COPY services/${SERVICE} /src/services/${SERVICE}
 COPY services/semconv /src/services/semconv
 COPY proto /src/proto
 WORKDIR /src/services/${SERVICE}
-RUN ./gradlew --no-daemon bootJar
+RUN ["java", "-cp", "gradle/wrapper/gradle-wrapper.jar", "org.gradle.wrapper.GradleWrapperMain", "--no-daemon", "bootJar"]
 
 FROM eclipse-temurin:25-jre@sha256:f9e65324a37f28209ce7dd0e5149a7aa954520ed936fb87813cf6ded2400a112 AS run
 ARG SERVICE

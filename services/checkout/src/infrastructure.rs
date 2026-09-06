@@ -890,7 +890,7 @@ pub(crate) async fn init_state(
     client
         .query_one("SELECT count(*) FROM orders", &[])
         .await
-        .context("checkout schema missing; run deploy/postgres/migrate.sh")?;
+        .context("checkout schema missing; run mise run infra:postgres_migrate")?;
     drop(client);
     let rabbit = init_rabbit().await?;
     let state = AppState {

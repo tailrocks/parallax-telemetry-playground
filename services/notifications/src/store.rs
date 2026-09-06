@@ -824,7 +824,7 @@ pub(crate) async fn init_db() -> anyhow::Result<Pool> {
     client
         .query_one("SELECT count(*) FROM notification_deliveries", &[])
         .await
-        .context("notifications schema missing; run deploy/postgres/migrate.sh")?;
+        .context("notifications schema missing; run mise run infra:postgres_migrate")?;
     client
         .query_one("SELECT count(*) FROM notification_delivery_attempts", &[])
         .await

@@ -325,9 +325,10 @@ services:
     networks: [pg]
 
   postgres-migrate:
-    image: postgres:18@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
-    entrypoint: ["/bin/sh"]
-    command: ["/migrations/migrate.sh"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.migrations
+    command: ["postgres-migrate"]
     environment:
       PGHOST: "postgres"
       PGPORT: "5432"
@@ -336,9 +337,7 @@ services:
       PGPASSWORD: "${POSTGRES_PASSWORD:-playground}"
       MIGRATION_DIR: "/migrations/migrations"
     volumes:
-      - ./postgres/migrate.sh:/migrations/migrate.sh:ro
       - ./postgres/migrations:/migrations/migrations:ro
-      - ./postgres/verify-schema.sh:/migrations/verify-schema.sh:ro
     depends_on:
       postgres:
         condition: service_healthy

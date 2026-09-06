@@ -787,7 +787,7 @@ pub async fn init_db() -> anyhow::Result<Pool> {
     client
         .query_one("SELECT count(*) FROM inventory", &[])
         .await
-        .context("inventory schema missing; run deploy/postgres/migrate.sh")?;
+        .context("inventory schema missing; run mise run infra:postgres_migrate")?;
     tracing::info!("inventory connected to required postgres store");
     Ok(pool)
 }

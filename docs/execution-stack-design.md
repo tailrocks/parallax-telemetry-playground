@@ -38,7 +38,7 @@ Boundary flow:
 
 ## Invocation Stitching
 
-The scenario script sets `CLI_INVOCATION_ID` once and also ensures
+The Rust scenario task sets `CLI_INVOCATION_ID` once and also ensures
 `OTEL_RESOURCE_ATTRIBUTES` contains `cli.invocation.id=<invocation-id>`. The
 daemon inherits it and passes the same value to `playground enter`. The
 shared telemetry library surfaces `cli.invocation.id` from

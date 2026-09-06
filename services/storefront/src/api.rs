@@ -10,7 +10,9 @@ use axum::{
     routing::{get, post},
 };
 use futures::{StreamExt, stream::BoxStream};
-use juniper::{FieldError, FieldResult, RootNode, graphql_object, graphql_subscription, graphql_value};
+use juniper::{
+    FieldError, FieldResult, RootNode, graphql_object, graphql_subscription, graphql_value,
+};
 use juniper_axum::{extract::JuniperRequest, graphiql, response::JuniperResponse, subscriptions};
 use juniper_graphql_ws::{ConnectionConfig, Schema as GraphqlSchema};
 use opentelemetry::{Context as OtelContext, trace::TraceContextExt};

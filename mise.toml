@@ -12,14 +12,21 @@ java = "oracle-graalvm-25.0.4"
 [settings]
 lockfile = true
 
-[tasks.ci]
+[task_config]
+includes = ["mise-scenarios.toml"]
+
+[tasks."quality:ci"]
+description = "Compile the full Rust workspace with all targets and features"
 run = "cargo check --locked --workspace --all-targets --all-features"
 
-[tasks.test]
+[tasks."quality:test"]
+description = "Run the complete Rust workspace test suite"
 run = "cargo nextest run --locked --workspace --profile ci --no-tests=fail"
 
-[tasks.lint]
+[tasks."quality:lint"]
+description = "Run strict Rust Clippy checks across the workspace"
 run = "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings"
 
-[tasks.fmt]
+[tasks."quality:fmt"]
+description = "Check Rust formatting across the workspace"
 run = "cargo fmt --all -- --check"

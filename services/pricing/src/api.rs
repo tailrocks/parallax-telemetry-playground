@@ -160,7 +160,7 @@ impl Pricing for PricingSvc {
                 apply_scenario_delay(&request.context, &request_id(&request)).await?;
                 let quote = calculate_quote(&self.state, &request).await?;
                 tracing::info!(quote_id = %quote.quote_id, line_count = quote.lines.len(), total_minor = quote.grand_total_minor, "pricing quote calculated");
-                Ok(Response::new(to_proto(&quote)))
+                Ok(Response::new(to_proto(&quote)?))
             },
             span,
             parent,
@@ -228,6 +228,13 @@ impl Pricing for PricingSvc {
                             if *shutdown.borrow() {
                                 return;
                             }
+                            let response = match to_proto(&quote) {
+                                Ok(response) => response,
+                                Err(error) => {
+                                    let _ = sender.send(Err(error)).await;
+                                    return;
+                                }
+                            };
                             let send_span = tracing::info_span!(
                                 "pricing.quote_stream.send",
                                 otel.kind = semconv::SPAN_KIND_INTERNAL,
@@ -240,7 +247,7 @@ impl Pricing for PricingSvc {
                             );
                             let send_result = tokio::select! {
                                 result = async {
-                                    let result = sender.send(Ok(to_proto(&quote))).await;
+                                    let result = sender.send(Ok(response)).await;
                                     if result.is_ok() {
                                         tracing::info!(
                                             "rpc.message.type" = "SENT",
