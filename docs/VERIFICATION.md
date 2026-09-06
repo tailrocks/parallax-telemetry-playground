@@ -56,17 +56,32 @@ checkout-outbox coverage.
 
 ## Focused corpus gates
 
-`mise run verify:commerce_stack` is a separate Compose-configuration and core
-HTTP-health check. It does not execute the scenario proofs in this document.
+`mise run verify:commerce_stack` is a separate Compose-configuration,
+service-readiness, and dependency-surface check. It does not execute the
+scenario proofs in this document, browser E2E, or Parallax causal/failure
+assertions.
 
 ```text
 mise run check:scenarios
-rtk git diff --check
+git diff --check
 ```
+
+`mise run check:scenarios` validates the 89-proof catalog. `mise run corpus:all`
+dispatches those 89 proofs exactly once: 61 A/B/C proofs plus 28 corner
+proofs. Dispatch coverage is not runtime evidence for every proof.
 
 Run `mise run commerce:checkout_saga` or
 `mise run messaging:checkout_outbox` against a healthy stack
 for real checkout/outbox/fulfillment evidence. Set
 `FULFILLMENT_INTERNAL_TOKEN` when the stack does not use the local Compose
 value. A Parallax trace query is a separate evidence step; service and queue
-co-presence must not be treated as proof of causal span topology.
+co-presence must not be treated as proof of causal span topology. The
+canonical browser gate is:
+
+```bash
+cd web
+bun run e2e:compose
+```
+
+The dedicated Parallax failure corpus and browser causal assertion remain
+pending.

@@ -5,6 +5,12 @@ one bounded journey. IDs below are internal fixture references only; they are
 not public task names and have no aliases. Start the stack first unless the
 task says it owns Compose startup.
 
+`mise run check:scenarios` validates the public catalog and legacy-wrapper
+policy. `mise run corpus:all` dispatches all 89 proofs exactly once: 61 A/B/C
+proofs plus 28 corner proofs. This proves dispatch coverage only; it does not
+prove that every runtime journey, browser assertion, or Parallax failure gate
+has passed.
+
 | ID (internal) | Mise task | Capability |
 |---|---|---|
 | `a1` | `commerce:checkout_saga` | Checkout saga across Catalog, Pricing, Payment, Inventory, outbox, and fulfillment |
@@ -113,3 +119,16 @@ the private `orders.synthetic` exchange; `messaging:batch_fanin`,
 `messaging:poison_retry`, `messaging:orphan_consumer`, and the order leg of
 `events:typed_business_events` use it only for messaging-shape fixtures. They
 do not prove checkout outbox delivery.
+
+## Runtime verification
+
+```bash
+mise run verify:commerce_stack
+cd web && bun run e2e:compose
+mise run verify:commerce_trace
+```
+
+The stack verifier proves Compose/service/dependency readiness. The browser
+command is the canonical real-Compose journey. Parallax-backed failure
+scenarios and the dedicated browser causal assertion remain pending; these
+commands do not by themselves complete the DOD.

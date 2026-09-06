@@ -54,10 +54,12 @@ mise run demo:fresh -- --yes
 Use `mise run demo:stack` when existing local data should remain.
 
 Compose gates services that depend on the PostgreSQL migration job. The
-`mise run verify:commerce_stack` task checks Compose configuration and core
-HTTP health only; a plain `up` is not itself an analytics-readiness proof.
-Use `mise run verify:commerce_trace` for collected service, RabbitMQ, and
-analytics evidence.
+`mise run verify:commerce_stack` task checks Compose configuration, all required
+service/job states, ten HTTP readiness surfaces, and PostgreSQL, Redis,
+RabbitMQ, ClickHouse, flagd, gRPC, and internal HTTP dependency probes. It does
+not execute business journeys, browser E2E, or Parallax causal/failure
+assertions. Use `mise run verify:commerce_trace` for the separate Parallax
+topology gate.
 
 Useful surfaces:
 
@@ -102,6 +104,7 @@ mise run quality:fmt
 mise run quality:ci
 mise run quality:test
 mise run quality:lint
+mise run quality:polyglot
 mise run check:scenarios
 mise run check:typescript
 ```
@@ -113,7 +116,8 @@ parallax invocation start -- mise run test:observable -- java
 ```
 
 The Rust observable runner invokes Gradle's `GradleWrapperMain` directly for
-Catalog, Payment, and Fulfillment; service-local POSIX wrappers are not needed.
+Catalog, Payment, and Fulfillment. Service-local `gradlew` and `gradlew.bat`
+scripts are removed; the wrapper JAR remains the executable Gradle entrypoint.
 
 Web observable gate:
 
@@ -121,9 +125,14 @@ Web observable gate:
 parallax invocation start -- mise run test:observable -- web
 ```
 
-Then run rtk git diff --check and
-`mise run verify:commerce_stack` for Compose configuration and core service
-health.
+Then run `git diff --check` and `mise run verify:commerce_stack` for full
+Compose/service/dependency readiness. The canonical real-Compose browser gate
+is:
+
+```bash
+cd web
+bun run e2e:compose
+```
 
 For the current verification contract, see [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
 
@@ -134,9 +143,9 @@ mise run verify:commerce_trace
 ```
 
 It checks the collected service, RabbitMQ, and analytics evidence through
-`playground commerce-verify`. Inspect trace parent/link fields separately when
-causal topology is required; service and queue co-presence is not proof of a
-causal span edge.
+`playground commerce-verify`. Service and queue co-presence is not proof of a
+causal span edge. The Parallax failure corpus and dedicated browser causal
+assertion remain pending in this checkpoint.
 
 ## Journeys and scenarios
 
@@ -157,13 +166,16 @@ mise run failures:inventory            # inventory failure
 mise run jvm:memory_pressure            # JVM GC/memory-pressure workload
 mise run container:recommendation_oom_probe -- --yes # explicit destructive OOM probe
 mise run product:ui_agent_verify       # browser smoke, Parallax CLI required
+mise run corpus:all                    # all 89 corpus proofs, exactly once
 ```
 
 Tasks use stable `group:semantic_name` names; numeric IDs are internal fixture
 references, not public aliases. Run
 `mise tasks ls --sort name` to see every grouped task and description. Run
-`mise run demo:full` for the ordered capability tour. The corner-case corpus
-is documented in [`docs/corner-case-matrix.md`](docs/corner-case-matrix.md).
+`mise run demo:full` for the ordered capability tour. `mise run corpus:all`
+dispatches all 89 proofs exactly once: 61 A/B/C proofs plus 28 corner proofs.
+The corner-case corpus is documented in
+[`docs/corner-case-matrix.md`](docs/corner-case-matrix.md).
 With the stack running, use the load scenario for sustained k6 traffic:
 
 ```text

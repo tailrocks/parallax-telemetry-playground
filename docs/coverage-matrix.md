@@ -23,8 +23,9 @@ by the real dependency named in the row and its failure behavior is observable.
 | Propagation | all HTTP/gRPC/RabbitMQ edges | `commerce:checkout_saga`, `messaging:checkout_outbox`, `messaging:seeded_order_replay`, `propagation:baggage` | `traceparent`, `tracestate`, safe `baggage`, business attributes, producer/consumer links; async consumers receive authenticated tenant context at the HTTP verification seam. |
 | Typed telemetry | Rust/Java/TypeScript semantic conventions | `events:typed_business_events`; language gates | Common event names and resource identity; no hand-copied wire names. |
 | Failure paths | explicit token/delay/fail inputs | `failures:payment_latency`, `failures:inventory`, `failures:checkout_chaos` | Normal product data remains valid; failure code/status is typed and traceable. |
-| Browser RUM | TanStack routes, fetch instrumentation, Sentry RUM | web tests; `browser:rum_error`, `browser:rum_journey` when harness exists | Route/action spans, backend trace context, handled exception and web vitals. |
-| Compose | all service/dependency definitions | `verify:commerce_stack` | Compose configuration plus HTTP health for Parallax, Checkout, Catalog, Inventory, and Recommendation; dependency and full-service runtime evidence comes from the scenario and trace tasks. |
+| Browser RUM | TanStack routes, fetch instrumentation, Sentry RUM | web tests; `bun run e2e:compose`; `browser:rum_error`, `browser:rum_journey` when harness exists | Canonical real-Compose browser flow, strict W3C carriers, backend trace context, handled exception, analytics write, durable orders refresh, and web vitals. Dedicated Parallax causal assertions remain separate. |
+| Corpus dispatch | Rust scenario registry and Mise catalog | `check:scenarios`; `corpus:all` | 89 proofs exactly once: 61 A/B/C plus 28 corner proofs; unique public task names and no legacy wrapper scripts. This is dispatch evidence, not proof that every runtime journey passed. |
+| Compose | all service/dependency definitions | `verify:commerce_stack` | Compose configuration, 16 required healthy running services, 3 successful one-shot jobs, 10 HTTP readiness surfaces, and PostgreSQL/Redis/RabbitMQ/ClickHouse/flagd/gRPC/internal-HTTP probes. It does not prove business journeys, browser E2E, or Parallax failure/topology assertions. |
 
 ## Static completion gates
 
@@ -33,11 +34,13 @@ mise run quality:fmt
 mise run quality:ci
 mise run quality:test
 mise run quality:lint
+mise run quality:polyglot
 mise run check:scenarios
 mise run check:typescript
 parallax invocation start -- mise run test:observable -- java
 parallax invocation start -- mise run test:observable -- web
-mise run verify:commerce_stack  # Compose config + core HTTP health
+mise run verify:commerce_stack  # Compose, service, and dependency readiness
+cd web && bun run e2e:compose   # canonical real-Compose browser journey
 rtk git diff --check
 ```
 

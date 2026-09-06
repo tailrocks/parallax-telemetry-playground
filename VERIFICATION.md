@@ -10,6 +10,7 @@ mise run quality:fmt
 mise run quality:ci
 mise run quality:test
 mise run quality:lint
+mise run quality:polyglot
 mise run check:scenarios
 mise run check:typescript
 mise run verify:postgres_idempotence
@@ -26,9 +27,10 @@ The Rust code uses `tokio-postgres`/`deadpool-postgres`; Java uses JDBC. The
 tests may use stubs at unit boundaries, but deployed journeys require the
 shared PostgreSQL, Redis, RabbitMQ, ClickHouse, flagd, and service containers.
 
-## Compose configuration and core health check
+## Compose configuration, service, and dependency check
 
-Run the Rust-backed Compose and core-health check from the repository root:
+Run the Rust-backed Compose, service-readiness, and dependency check from the
+repository root:
 
 ```bash
 mise run verify:commerce_stack
@@ -36,20 +38,19 @@ mise run verify:commerce_stack
 
 The task validates `deploy/docker-compose.yml` with `docker compose config
 --quiet`. If `VERIFY_MANAGE_STACK=1`, it also starts the Compose `demo` profile
-with `--build -d`; otherwise it checks the already-running stack. It then
-requires HTTP-success responses from the configured health endpoints for
-Parallax, Checkout, Catalog, Inventory, and Recommendation. The defaults are
-`PARALLAX_API_URL=http://127.0.0.1:4000/health`,
-`CHECKOUT_URL=http://127.0.0.1:8088/healthz`,
-`CATALOG_URL=http://127.0.0.1:8080/healthz`,
-`INVENTORY_URL=http://127.0.0.1:8089/healthz`, and
-`RECOMMENDATION_URL=http://127.0.0.1:8090/healthz`.
+with `--build -d`; otherwise it checks the already-running stack. It requires
+all 16 Compose services to be running and healthy, and the `flagd-health-tools`,
+`postgres-migrate`, and `clickhouse-init` jobs to have exited with code 0. It
+then checks HTTP readiness for Parallax, Checkout, Catalog, Inventory,
+Recommendation, Orders, Fulfillment, Storefront, Storefront analytics, and
+Web, plus in-container PostgreSQL, Redis, RabbitMQ, ClickHouse, flagd, Pricing
+gRPC, Payment HTTP/gRPC, and Notifications probes.
 
 This task does not create a unique disposable Compose project, prove migration
-idempotence, execute business journeys, inspect storage or queue state, verify
-telemetry topology, run browser or feature-variant checks, inject readiness
-failures, or clean up Compose resources. Use the focused scenario tasks and
-`mise run verify:commerce_trace` for those proofs.
+idempotence, execute business journeys, inspect business storage state, verify
+Parallax causal topology, run browser E2E, inject readiness failures, or clean
+up Compose resources. Use the focused scenario tasks, `cd web && bun run
+e2e:compose`, and `mise run verify:commerce_trace` for those separate proofs.
 
 For an already-running stack, leave `VERIFY_MANAGE_STACK=0` (the default) and
 override health endpoints only when needed:
@@ -76,9 +77,9 @@ replacement schemas at startup.
 
 ## Runtime journeys
 
-The stack task above only validates Compose configuration and five core HTTP
-health endpoints. It does not execute the journeys below; run each scenario
-task against a healthy dependency stack:
+The stack task above validates readiness and dependency surfaces. It does not
+execute the journeys below; run each scenario task against a healthy dependency
+stack:
 
 | Journey | Proof |
 |---|---|
@@ -105,8 +106,10 @@ mise run verify:commerce_trace
 
 The Rust verifier task sends a real checkout carrying all three W3C headers, then runs
 `playground commerce-verify`. That verifier queries Parallax GraphQL, follows
-linked RabbitMQ traces, and fails unless Catalog, Pricing, Inventory, Payment,
-Fulfillment/RabbitMQ, Notifications, and analytics evidence are present.
+linked RabbitMQ traces, and checks Catalog, Pricing, Inventory, Payment,
+Fulfillment/RabbitMQ, Notifications, and analytics evidence. The dedicated
+Parallax failure corpus and browser causal assertion remain pending; a passing
+stack verifier or browser E2E does not close those gates.
 
 ## Storage assertions
 
@@ -153,3 +156,12 @@ durable Checkout-backed cart query/mutation, and checkout must submit actual
 JSON. The UI must render typed API failures, preserve trace context, and keep
 RUM spans/events. No demo-only SKU or retired endpoint is valid acceptance
 evidence.
+
+The canonical real-Compose browser gate is:
+
+```bash
+cd web
+bun run e2e:compose
+```
+
+It is separate from the Parallax topology and failure assertions.
