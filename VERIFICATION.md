@@ -10,7 +10,7 @@ mise run quality:fmt
 mise run quality:ci
 mise run quality:test
 mise run quality:lint
-mise run quality:polyglot
+mise run ci
 mise run check:scenarios
 mise run check:typescript
 mise run verify:postgres_idempotence
