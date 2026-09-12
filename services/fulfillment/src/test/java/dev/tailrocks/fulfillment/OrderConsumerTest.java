@@ -19,16 +19,22 @@ import com.rabbitmq.client.Channel;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.baggage.Baggage;
+import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.api.trace.SpanContext;
+import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.TraceFlags;
 import io.opentelemetry.api.trace.TraceState;
+import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -446,7 +452,14 @@ class OrderConsumerTest {
         RecordingSpan consumerSpan = new RecordingSpan(consumerSpanContext);
         Context source = Context.root()
             .with(Span.wrap(producer))
-            .with(Baggage.builder().put("tenant.id", "tenant-acme").build());
+            .with(Baggage.builder()
+                .put("tenant.id", "tenant-acme")
+                .put("user.tier", "standard")
+                .put("customer.segment", "standard")
+                .put("region", "us-east-1")
+                .put("request.priority", "normal")
+                .put("session.id", "session-order-7")
+                .build());
         Message message = message(event, 49);
         RabbitTraceContext.inject(source, message.getMessageProperties());
         AtomicReference<Context> downstream = new AtomicReference<>();
@@ -455,16 +468,57 @@ class OrderConsumerTest {
             return null;
         }).when(publisher).publish(any(), any());
 
-        try (MockedStatic<Span> spans = org.mockito.Mockito.mockStatic(
-            Span.class,
+        Tracer tracer = mock(Tracer.class);
+        SpanBuilder spanBuilder = mock(SpanBuilder.class);
+        Map<String, String> spanAttributes = new HashMap<>();
+        when(tracer.spanBuilder("fulfillment.orders process")).thenReturn(spanBuilder);
+        when(spanBuilder.setParent(any(Context.class))).thenReturn(spanBuilder);
+        when(spanBuilder.setSpanKind(SpanKind.CONSUMER)).thenReturn(spanBuilder);
+        doAnswer(invocation -> {
+            String key = invocation.getArgument(0);
+            String value = invocation.getArgument(1);
+            spanAttributes.put(key, value);
+            consumerSpan.setAttribute(AttributeKey.stringKey(key), value);
+            return spanBuilder;
+        }).when(spanBuilder).setAttribute(anyString(), anyString());
+        doAnswer(invocation -> {
+            consumerSpan.addLink(
+                invocation.getArgument(0),
+                invocation.getArgument(1)
+            );
+            return spanBuilder;
+        }).when(spanBuilder).addLink(any(SpanContext.class), any(Attributes.class));
+        when(spanBuilder.startSpan()).thenReturn(consumerSpan);
+        try (MockedStatic<GlobalOpenTelemetry> telemetry = org.mockito.Mockito.mockStatic(
+            GlobalOpenTelemetry.class,
             Answers.CALLS_REAL_METHODS
         )) {
-            spans.when(Span::current).thenReturn(consumerSpan);
+            telemetry.when(() -> GlobalOpenTelemetry.getTracer("dev.tailrocks.fulfillment"))
+                .thenReturn(tracer);
             consumer.onOrder(message, channel);
         }
 
         assertEquals(producer.getTraceId(), consumerSpan.linkedSpan().getTraceId());
         assertEquals(producer.getSpanId(), consumerSpan.linkedSpan().getSpanId());
+        assertEquals(6, spanAttributes.size());
+        assertEquals("tenant-acme", spanAttributes.get("tenant.id"));
+        assertEquals("standard", spanAttributes.get("user.tier"));
+        assertEquals("standard", spanAttributes.get("customer.segment"));
+        assertEquals("us-east-1", spanAttributes.get("region"));
+        assertEquals("normal", spanAttributes.get("request.priority"));
+        assertEquals("session-order-7", spanAttributes.get("session.id"));
+        assertEquals(
+            "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+            consumerSpan.linkAttributes().get(AttributeKey.stringKey("traceparent"))
+        );
+        assertEquals(
+            "vendor=state",
+            consumerSpan.linkAttributes().get(AttributeKey.stringKey("tracestate"))
+        );
+        assertEquals(
+            String.valueOf(message.getMessageProperties().getHeaders().get("baggage")),
+            consumerSpan.linkAttributes().get(AttributeKey.stringKey("baggage"))
+        );
         SpanContext downstreamSpan = Span.fromContext(downstream.get()).getSpanContext();
         assertEquals(consumerSpanContext.getTraceId(), downstreamSpan.getTraceId());
         assertEquals(consumerSpanContext.getSpanId(), downstreamSpan.getSpanId());
@@ -474,6 +528,8 @@ class OrderConsumerTest {
     private static final class RecordingSpan implements Span {
         private final SpanContext context;
         private SpanContext linkedSpan;
+        private Attributes linkAttributes = Attributes.empty();
+        private final Map<String, String> attributes = new HashMap<>();
 
         private RecordingSpan(SpanContext context) {
             this.context = context;
@@ -481,6 +537,9 @@ class OrderConsumerTest {
 
         @Override
         public <T> Span setAttribute(AttributeKey<T> key, T value) {
+            if (value != null) {
+                attributes.put(key.getKey(), String.valueOf(value));
+            }
             return this;
         }
 
@@ -523,6 +582,7 @@ class OrderConsumerTest {
         @Override
         public Span addLink(SpanContext link, Attributes attributes) {
             linkedSpan = link;
+            linkAttributes = attributes;
             return this;
         }
 
@@ -549,6 +609,10 @@ class OrderConsumerTest {
 
         private SpanContext linkedSpan() {
             return linkedSpan;
+        }
+
+        private Attributes linkAttributes() {
+            return linkAttributes;
         }
     }
 

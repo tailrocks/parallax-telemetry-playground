@@ -50,7 +50,6 @@ pub(crate) async fn checkout_request(
         "commerce.tenant_id" = %input.tenant_id,
     );
     playground_telemetry::set_parent_from_headers(&span, &headers);
-    playground_telemetry::stamp_business_baggage(&span, &parent);
     async move {
         let context = playground_telemetry::with_business_context_from_parent(
             &tracing::Span::current().context(),
@@ -62,6 +61,7 @@ pub(crate) async fn checkout_request(
             &input.priority,
         );
         let context = context_with_session_id(&context, input.session_id.as_deref());
+        playground_telemetry::stamp_business_baggage(&tracing::Span::current(), &context);
         checkout_inner(state, input, context).await
     }
     .instrument(span)
@@ -80,7 +80,6 @@ pub(crate) async fn quote_stream(
         otel.kind = semconv::SPAN_KIND_SERVER
     );
     playground_telemetry::set_parent_from_headers(&span, &headers);
-    playground_telemetry::stamp_business_baggage(&span, &parent);
     async move {
         let context = playground_telemetry::with_business_context_from_parent(
             &tracing::Span::current().context(),
@@ -92,6 +91,7 @@ pub(crate) async fn quote_stream(
             &input.priority,
         );
         let context = context_with_session_id(&context, input.session_id.as_deref());
+        playground_telemetry::stamp_business_baggage(&tracing::Span::current(), &context);
         let mut client = PricingClient::new(pricing_channel(&state).await?);
         let request = QuoteRequest {
             request_id: input

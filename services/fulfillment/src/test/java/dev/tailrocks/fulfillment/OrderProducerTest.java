@@ -8,20 +8,28 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.baggage.Baggage;
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.api.trace.SpanContext;
+import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.TraceFlags;
 import io.opentelemetry.api.trace.TraceState;
+import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.amqp.core.Message;
@@ -36,6 +44,8 @@ import org.springframework.amqp.rabbit.listener.RabbitListenerEndpoint;
 import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
 import org.springframework.amqp.listener.ListenerExecutionFailedException;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.mockito.Answers;
+import org.mockito.MockedStatic;
 
 class OrderProducerTest {
     @Test
@@ -365,7 +375,7 @@ class OrderProducerTest {
     }
 
     @Test
-    void publisher_sends_persistent_json_and_waits_for_a_positive_confirm() {
+    void publisher_sends_persistent_json_with_explicit_producer_semantics() {
         RabbitTemplate rabbit = mock(RabbitTemplate.class);
         doAnswer(invocation -> {
             CorrelationData correlation = invocation.getArgument(3);
@@ -401,9 +411,42 @@ class OrderProducerTest {
         );
         Context source = Context.root()
             .with(Span.wrap(parent))
-            .with(Baggage.builder().put("tenant.id", "tenant-acme").build());
+            .with(Baggage.builder()
+                .put("tenant.id", "tenant-acme")
+                .put("user.tier", "standard")
+                .put("customer.segment", "standard")
+                .put("region", "us-east-1")
+                .put("request.priority", "normal")
+                .put("session.id", "session-shipment-1")
+                .build());
 
-        new OrderEventPublisher(rabbit, new ObjectMapper()).publish(event, source);
+        Tracer tracer = mock(Tracer.class);
+        SpanBuilder spanBuilder = mock(SpanBuilder.class);
+        SpanContext producerSpanContext = SpanContext.createFromRemoteParent(
+            parent.getTraceId(),
+            "0f1e2d3c4b5a6978",
+            TraceFlags.getSampled(),
+            parent.getTraceState()
+        );
+        Span producerSpan = Span.wrap(producerSpanContext);
+        Map<String, String> producerAttributes = new HashMap<>();
+        when(tracer.spanBuilder("commerce.events publish")).thenReturn(spanBuilder);
+        when(spanBuilder.setParent(any(Context.class))).thenReturn(spanBuilder);
+        when(spanBuilder.setSpanKind(SpanKind.PRODUCER)).thenReturn(spanBuilder);
+        doAnswer(invocation -> {
+            producerAttributes.put(invocation.getArgument(0), invocation.getArgument(1));
+            return spanBuilder;
+        }).when(spanBuilder).setAttribute(anyString(), anyString());
+        when(spanBuilder.startSpan()).thenReturn(producerSpan);
+
+        try (MockedStatic<GlobalOpenTelemetry> telemetry = org.mockito.Mockito.mockStatic(
+            GlobalOpenTelemetry.class,
+            Answers.CALLS_REAL_METHODS
+        )) {
+            telemetry.when(() -> GlobalOpenTelemetry.getTracer("dev.tailrocks.fulfillment"))
+                .thenReturn(tracer);
+            new OrderEventPublisher(rabbit, new ObjectMapper()).publish(event, source);
+        }
 
         var sent = forClass(Message.class);
         verify(rabbit).send(
@@ -412,17 +455,45 @@ class OrderProducerTest {
             sent.capture(),
             any(CorrelationData.class)
         );
+        verify(spanBuilder).setSpanKind(SpanKind.PRODUCER);
+        assertEquals("producer", producerAttributes.get("otel.kind"));
+        assertEquals("rabbitmq", producerAttributes.get("messaging.system"));
+        assertEquals("commerce.events", producerAttributes.get("messaging.destination.name"));
+        assertEquals("send", producerAttributes.get("messaging.operation.name"));
+        assertEquals(event.eventId(), producerAttributes.get("messaging.message.id"));
+        assertEquals("fulfillment.shipment.created", producerAttributes.get("commerce.event.type"));
+        assertEquals("tenant-acme", producerAttributes.get("tenant.id"));
+        assertEquals("standard", producerAttributes.get("user.tier"));
+        assertEquals("standard", producerAttributes.get("customer.segment"));
+        assertEquals("us-east-1", producerAttributes.get("region"));
+        assertEquals("normal", producerAttributes.get("request.priority"));
+        assertEquals("session-shipment-1", producerAttributes.get("session.id"));
+        assertEquals(12, producerAttributes.size());
+        assertEquals(event.eventId(), sent.getValue().getMessageProperties().getMessageId());
         Context extracted = RabbitTraceContext.extract(sent.getValue().getMessageProperties());
         SpanContext extractedSpan = Span.fromContext(extracted).getSpanContext();
-        assertEquals(parent.getTraceId(), extractedSpan.getTraceId());
+        assertEquals(producerSpanContext.getTraceId(), extractedSpan.getTraceId());
         assertEquals("state", extractedSpan.getTraceState().get("vendor"));
+        assertEquals("tenant-acme", Baggage.fromContext(extracted).getEntryValue("tenant.id"));
+        assertEquals("standard", Baggage.fromContext(extracted).getEntryValue("user.tier"));
         assertEquals(
-            "tenant-acme",
-            Baggage.fromContext(extracted).getEntryValue("tenant.id")
+            "standard",
+            Baggage.fromContext(extracted).getEntryValue("customer.segment")
+        );
+        assertEquals("us-east-1", Baggage.fromContext(extracted).getEntryValue("region"));
+        assertEquals("normal", Baggage.fromContext(extracted).getEntryValue("request.priority"));
+        assertEquals(
+            "session-shipment-1",
+            Baggage.fromContext(extracted).getEntryValue("session.id")
         );
         assertTrue(sent.getValue().getMessageProperties().getHeaders().containsKey("traceparent"));
         assertTrue(sent.getValue().getMessageProperties().getHeaders().containsKey("tracestate"));
         assertTrue(sent.getValue().getMessageProperties().getHeaders().containsKey("baggage"));
+        assertEquals(
+            "customer.segment=standard,region=us-east-1,request.priority=normal,"
+                + "session.id=session-shipment-1,tenant.id=tenant-acme,user.tier=standard",
+            sent.getValue().getMessageProperties().getHeaders().get("baggage")
+        );
     }
 
     @Test

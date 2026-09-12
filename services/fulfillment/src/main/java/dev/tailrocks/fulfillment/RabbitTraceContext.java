@@ -3,11 +3,17 @@ package dev.tailrocks.fulfillment;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.baggage.Baggage;
 import io.opentelemetry.api.baggage.BaggageEntry;
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanBuilder;
+import io.opentelemetry.api.trace.SpanContext;
+import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.TextMapGetter;
 import io.opentelemetry.context.propagation.TextMapPropagator;
 import io.opentelemetry.context.propagation.TextMapSetter;
+import io.tailrocks.semconv.Semconv;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -51,6 +57,14 @@ final class RabbitTraceContext {
         "session.id",
         "cli.invocation.id"
     );
+    private static final Set<String> BUSINESS_BAGGAGE_KEYS = Set.of(
+        "tenant.id",
+        "user.tier",
+        "customer.segment",
+        "region",
+        "request.priority",
+        "session.id"
+    );
     private static final TextMapSetter<MessageProperties> MESSAGE_SETTER =
         (carrier, key, value) -> carrier.setHeader(key, value);
     private static final TextMapGetter<MessageProperties> MESSAGE_GETTER =
@@ -85,6 +99,94 @@ final class RabbitTraceContext {
         return sanitize(extracted);
     }
 
+    /**
+     * Preserve the exact validated Rabbit carrier on the async span link.
+     *
+     * The extracted context establishes propagation and the link identifies
+     * the producer. Keeping the carrier on the link lets downstream systems
+     * verify that the relationship came from the actual message headers,
+     * without copying those headers into the business event payload.
+     */
+    static Attributes linkAttributes(MessageProperties properties) {
+        require(properties);
+        return Attributes.builder()
+            .put(AttributeKey.stringKey("traceparent"), requiredHeader(properties, "traceparent"))
+            .put(AttributeKey.stringKey("tracestate"), requiredHeader(properties, "tracestate"))
+            .put(AttributeKey.stringKey("baggage"), requiredHeader(properties, "baggage"))
+            .build();
+    }
+
+    /**
+     * Own the span for the listener's business processing.
+     *
+     * Spring AMQP and the Java agent can create separate delivery and listener
+     * spans around the callback. The callback must not mutate whichever span
+     * happens to be current: create the application consumer span here, before
+     * entering its scope, so its name, parent, kind, and producer link belong
+     * to one span with a well-defined lifecycle.
+     */
+    static Span startConsumerSpan(
+        String destination,
+        Context extracted,
+        MessageProperties properties
+    ) {
+        if (destination == null || destination.isBlank()) {
+            throw new PermanentEventException("RabbitMQ consumer destination is required");
+        }
+        if (extracted == null) {
+            throw new PermanentEventException("RabbitMQ extracted trace context is required");
+        }
+        require(properties);
+        SpanContext producer = Span.fromContext(extracted).getSpanContext();
+        Attributes carrier = linkAttributes(properties);
+        SpanBuilder builder = GlobalOpenTelemetry
+            .getTracer("dev.tailrocks.fulfillment")
+            .spanBuilder(destination.trim() + " process")
+            .setParent(extracted)
+            .setSpanKind(SpanKind.CONSUMER);
+        Baggage.fromContext(extracted).forEach((key, entry) -> {
+            if (BUSINESS_BAGGAGE_KEYS.contains(key)) {
+                builder.setAttribute(key, entry.getValue());
+            }
+        });
+        if (producer.isValid()) {
+            builder.addLink(producer, carrier);
+        }
+        return builder.startSpan();
+    }
+
+    static Span startPublishSpan(
+        String destination,
+        String messageId,
+        String eventType,
+        Context parent
+    ) {
+        requireText(destination, "RabbitMQ producer destination");
+        requireText(messageId, "RabbitMQ producer message id");
+        requireText(eventType, "RabbitMQ producer event type");
+        if (parent == null || !Span.fromContext(parent).getSpanContext().isValid()) {
+            throw new PermanentEventException("RabbitMQ publisher requires a valid trace context");
+        }
+        String destinationName = destination.trim();
+        SpanBuilder builder = GlobalOpenTelemetry
+            .getTracer("dev.tailrocks.fulfillment")
+            .spanBuilder(destinationName + " publish")
+            .setParent(parent)
+            .setSpanKind(SpanKind.PRODUCER)
+            .setAttribute(Semconv.OTEL_KIND, Semconv.SPAN_KIND_PRODUCER)
+            .setAttribute(Semconv.MESSAGING_SYSTEM, "rabbitmq")
+            .setAttribute(Semconv.MESSAGING_DESTINATION_NAME, destinationName)
+            .setAttribute(Semconv.MESSAGING_OPERATION_NAME, "send")
+            .setAttribute(Semconv.MESSAGING_MESSAGE_ID, messageId.trim())
+            .setAttribute("commerce.event.type", eventType.trim());
+        Baggage.fromContext(parent).forEach((key, entry) -> {
+            if (BUSINESS_BAGGAGE_KEYS.contains(key)) {
+                builder.setAttribute(key, entry.getValue());
+            }
+        });
+        return builder.startSpan();
+    }
+
     static void inject(Context context, MessageProperties properties) {
         if (properties == null) {
             throw new PermanentEventException("RabbitMQ message properties are required");
@@ -103,6 +205,12 @@ final class RabbitTraceContext {
         }
         inject(context, properties);
         require(properties);
+    }
+
+    private static void requireText(String value, String label) {
+        if (value == null || value.isBlank()) {
+            throw new PermanentEventException(label + " is required");
+        }
     }
 
     static void require(MessageProperties properties) {

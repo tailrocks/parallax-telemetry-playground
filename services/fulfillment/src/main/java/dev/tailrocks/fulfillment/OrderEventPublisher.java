@@ -1,6 +1,8 @@
 package dev.tailrocks.fulfillment;
 
+import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -28,24 +30,38 @@ final class OrderEventPublisher {
     }
 
     void publish(CommerceEvent event, Context context) {
-        MessageProperties properties = new MessageProperties();
-        properties.setContentType("application/json");
-        properties.setContentEncoding(StandardCharsets.UTF_8.name());
-        properties.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
-        properties.setMessageId(event.eventId());
-        properties.setHeader("event-key", event.eventKey());
-        properties.setHeader("event-type", event.eventType());
-        properties.setHeader("tenant-id", event.tenantId());
-        RabbitTraceContext.injectRequired(context, properties);
-
-        CorrelationData correlation = new CorrelationData(event.eventKey());
-        send(
+        String messageId = event.eventId();
+        Span producer = RabbitTraceContext.startPublishSpan(
             RabbitMessagingConfiguration.EVENTS_EXCHANGE,
+            messageId,
             event.eventType(),
-            new Message(event.toJson(mapper).getBytes(StandardCharsets.UTF_8), properties),
-            correlation
+            context
         );
-        awaitConfirm(event.eventKey(), correlation);
+        Context producerContext = producer.getSpanContext().isValid()
+            ? context.with(producer)
+            : context;
+        try (Scope ignored = producerContext.makeCurrent()) {
+            MessageProperties properties = new MessageProperties();
+            properties.setContentType("application/json");
+            properties.setContentEncoding(StandardCharsets.UTF_8.name());
+            properties.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
+            properties.setMessageId(messageId);
+            properties.setHeader("event-key", event.eventKey());
+            properties.setHeader("event-type", event.eventType());
+            properties.setHeader("tenant-id", event.tenantId());
+            RabbitTraceContext.injectRequired(producerContext, properties);
+
+            CorrelationData correlation = new CorrelationData(event.eventKey());
+            send(
+                RabbitMessagingConfiguration.EVENTS_EXCHANGE,
+                event.eventType(),
+                new Message(event.toJson(mapper).getBytes(StandardCharsets.UTF_8), properties),
+                correlation
+            );
+            awaitConfirm(event.eventKey(), correlation);
+        } finally {
+            producer.end();
+        }
     }
 
     void defer(Message source, String routingKey, Context context) {

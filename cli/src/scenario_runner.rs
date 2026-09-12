@@ -813,6 +813,20 @@ fn causally_after(child: &Value, parent: &Value) -> bool {
     child_of(child, parent) || linked_to(child, parent)
 }
 
+fn browser_consumer_baggage_matches(span: &Value) -> bool {
+    [
+        ("tenant.id", "tenant-acme"),
+        ("user.tier", "standard"),
+        ("customer.segment", "standard"),
+        ("region", "us-east-1"),
+        ("request.priority", "normal"),
+    ]
+    .into_iter()
+    .all(|(key, expected)| {
+        span_attribute_string(span, key).is_some_and(|actual| actual == expected)
+    })
+}
+
 async fn postgres_query(sql: &str) -> anyhow::Result<String> {
     let root = repository_root();
     let compose = root.join("deploy/docker-compose.yml");
@@ -3143,43 +3157,38 @@ fn browser_trace_matches(data: &Value) -> bool {
         span_is(span, "playground-web-tests", "test.case")
             && span_attribute_string(span, "test.case.result.status") == Some("pass".to_owned())
     });
-    let Some(web_request) = spans.iter().find(|span| {
-        span_is(span, "web", "POST")
-            && span_attribute_string(span, "http.request.method") == Some("POST".to_owned())
-            && span_attribute_string(span, "url.full")
-                .is_some_and(|url| url.contains("/__storefront/graphql"))
+    let Some(checkout) = spans.iter().find_map(|web_request| {
+        if !(span_is(web_request, "web", "POST")
+            && span_attribute_string(web_request, "http.request.method") == Some("POST".to_owned())
+            && span_attribute_string(web_request, "url.full")
+                .is_some_and(|url| url.contains("/__storefront/graphql")))
+        {
+            return None;
+        }
+        let web_server = spans.iter().find(|span| {
+            span_is(span, "playground-web", "web.ssr.request")
+                && span_attribute_string(span, "http.request.method") == Some("POST".to_owned())
+                && span_attribute_string(span, "url.path")
+                    == Some("/__storefront/graphql".to_owned())
+                && causally_after(span, web_request)
+        })?;
+        let storefront_http = spans.iter().find(|span| {
+            span_is(span, "storefront", "http.server.request")
+                && span_attribute_string(span, "http.request.method") == Some("POST".to_owned())
+                && span_attribute_string(span, "http.route") == Some("/graphql".to_owned())
+                && span_attribute_i64(span, "http.response.status_code") == Some(200)
+                && causally_after(span, web_server)
+        })?;
+        let storefront_checkout = spans.iter().find(|span| {
+            span_is(span, "storefront", "graphql.resolver")
+                && span_attribute_string(span, "graphql.field.name")
+                    == Some("Mutation.checkout".to_owned())
+                && causally_after(span, storefront_http)
+        })?;
+        spans.iter().find(|span| {
+            span_is(span, "checkout", "checkout") && causally_after(span, storefront_checkout)
+        })
     }) else {
-        return false;
-    };
-    let Some(web_server) = spans.iter().find(|span| {
-        span_is(span, "playground-web", "web.ssr.request")
-            && span_attribute_string(span, "http.request.method") == Some("POST".to_owned())
-            && span_attribute_string(span, "url.path") == Some("/__storefront/graphql".to_owned())
-            && causally_after(span, web_request)
-    }) else {
-        return false;
-    };
-    let Some(storefront_http) = spans.iter().find(|span| {
-        span_is(span, "storefront", "http.server.request")
-            && span_attribute_string(span, "http.request.method") == Some("POST".to_owned())
-            && span_attribute_string(span, "http.route") == Some("/graphql".to_owned())
-            && span_attribute_i64(span, "http.response.status_code") == Some(200)
-            && causally_after(span, web_server)
-    }) else {
-        return false;
-    };
-    let Some(storefront_checkout) = spans.iter().find(|span| {
-        span_is(span, "storefront", "graphql.resolver")
-            && span_attribute_string(span, "graphql.field.name")
-                == Some("Mutation.checkout".to_owned())
-            && child_of(span, storefront_http)
-    }) else {
-        return false;
-    };
-    let Some(checkout) = spans
-        .iter()
-        .find(|span| span_is(span, "checkout", "checkout") && child_of(span, storefront_checkout))
-    else {
         return false;
     };
     let payment = spans.iter().any(|span| {
@@ -3208,21 +3217,23 @@ fn browser_trace_matches(data: &Value) -> bool {
         return false;
     };
     let fulfillment = spans.iter().any(|span| {
-        span_is(span, "fulfillment", "order.paid process")
+        span_is(span, "fulfillment", "fulfillment.orders process")
             && span_attribute_string(span, "messaging.system") == Some("rabbitmq".to_owned())
             && span_attribute_string(span, "messaging.destination.name")
                 == Some("fulfillment.orders".to_owned())
             && span_attribute_string(span, "messaging.operation.name") == Some("process".to_owned())
             && span_attribute_string(span, "commerce.event.type") == Some("order.paid".to_owned())
+            && browser_consumer_baggage_matches(span)
             && causally_after(span, producer)
     });
     let analytics = spans.iter().any(|span| {
-        span_is(span, "fulfillment", "order.paid process")
+        span_is(span, "fulfillment", "analytics.events process")
             && span_attribute_string(span, "messaging.system") == Some("rabbitmq".to_owned())
             && span_attribute_string(span, "messaging.destination.name")
                 == Some("analytics.events".to_owned())
             && span_attribute_string(span, "messaging.operation.name") == Some("process".to_owned())
             && span_attribute_string(span, "commerce.event.type") == Some("order.paid".to_owned())
+            && browser_consumer_baggage_matches(span)
             && causally_after(span, producer)
     });
     browser_test && payment && inventory && fulfillment && analytics
@@ -5247,6 +5258,44 @@ mod tests {
                 json!({"test.case.result.status": "pass"}),
             ),
             span(
+                "earlier-browser-fetch",
+                "root",
+                "web",
+                "POST",
+                json!({
+                    "http.request.method": "POST",
+                    "url.full": "http://localhost:5173/__storefront/graphql",
+                }),
+            ),
+            span(
+                "earlier-web-ssr",
+                "earlier-browser-fetch",
+                "playground-web",
+                "web.ssr.request",
+                json!({
+                    "http.request.method": "POST",
+                    "url.path": "/__storefront/graphql",
+                }),
+            ),
+            span(
+                "earlier-storefront-http",
+                "earlier-web-ssr",
+                "storefront",
+                "http.server.request",
+                json!({
+                    "http.request.method": "POST",
+                    "http.route": "/graphql",
+                    "http.response.status_code": 200,
+                }),
+            ),
+            span(
+                "earlier-storefront-quote",
+                "earlier-storefront-http",
+                "storefront",
+                "graphql.resolver",
+                json!({"graphql.field.name": "Query.quote"}),
+            ),
+            span(
                 "browser-fetch",
                 "root",
                 "web",
@@ -5324,29 +5373,42 @@ mod tests {
                 "fulfillment",
                 "producer",
                 "fulfillment",
-                "order.paid process",
+                "fulfillment.orders process",
                 json!({
                     "messaging.system": "rabbitmq",
                     "messaging.destination.name": "fulfillment.orders",
                     "messaging.operation.name": "process",
                     "commerce.event.type": "order.paid",
+                    "tenant.id": "tenant-acme",
+                    "user.tier": "standard",
+                    "customer.segment": "standard",
+                    "region": "us-east-1",
+                    "request.priority": "normal",
                 }),
             ),
             span(
                 "analytics",
                 "producer",
                 "fulfillment",
-                "order.paid process",
+                "analytics.events process",
                 json!({
                     "messaging.system": "rabbitmq",
                     "messaging.destination.name": "analytics.events",
                     "messaging.operation.name": "process",
                     "commerce.event.type": "order.paid",
+                    "tenant.id": "tenant-acme",
+                    "user.tier": "standard",
+                    "customer.segment": "standard",
+                    "region": "us-east-1",
+                    "request.priority": "normal",
                 }),
             ),
         ]);
         assert!(browser_trace_matches(&data));
-        data["trace"]["spans"][10]["parentSpanId"] = json!("wrong-parent");
+        data["trace"]["spans"][13]["name"] = json!("order.paid process");
+        assert!(!browser_trace_matches(&data));
+        data["trace"]["spans"][13]["name"] = json!("fulfillment.orders process");
+        data["trace"]["spans"][14]["parentSpanId"] = json!("wrong-parent");
         assert!(!browser_trace_matches(&data));
     }
 }

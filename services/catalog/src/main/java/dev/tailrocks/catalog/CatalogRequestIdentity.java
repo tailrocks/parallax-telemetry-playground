@@ -78,7 +78,10 @@ record CatalogRequestIdentity(String tenantId, String error) {
 
     private static CatalogRequestIdentity fromCandidates(List<String> candidates) {
         if (candidates.isEmpty()) {
-            return new CatalogRequestIdentity(null, "tenant identity is required");
+            // Header identity is optional: GraphQL arguments and authenticated
+            // admin identity are resolved after the interceptor stores headers.
+            // The final resolve() call still rejects a request with no source.
+            return new CatalogRequestIdentity(null, null);
         }
         String first = candidates.getFirst();
         if (candidates.stream().anyMatch(candidate -> !first.equals(candidate))) {
@@ -90,6 +93,9 @@ record CatalogRequestIdentity(String tenantId, String error) {
     private String tenantIdOrThrow() {
         if (error != null) {
             throw new IllegalArgumentException(error);
+        }
+        if (tenantId == null) {
+            throw new IllegalArgumentException("tenant identity is required");
         }
         return tenantId;
     }

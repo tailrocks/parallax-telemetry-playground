@@ -2014,6 +2014,7 @@ pub(crate) async fn publish_outbox_message(state: &AppState, event: &OutboxRow) 
     if parent.span().span_context().is_valid() {
         let _ = span.set_parent(parent.clone());
     }
+    playground_telemetry::stamp_business_baggage(&span, &parent);
     async move {
         let payload: Value = serde_json::from_str(&event.payload).map_err(|error| {
             ApiError::new(

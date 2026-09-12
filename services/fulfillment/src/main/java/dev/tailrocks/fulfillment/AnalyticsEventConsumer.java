@@ -2,7 +2,6 @@ package dev.tailrocks.fulfillment;
 
 import com.rabbitmq.client.Channel;
 import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.api.trace.SpanContext;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import io.tailrocks.semconv.Semconv;
@@ -47,11 +46,11 @@ final class AnalyticsEventConsumer {
             channel.basicReject(message.getMessageProperties().getDeliveryTag(), false);
             return;
         }
-        SpanContext producer = Span.fromContext(extracted).getSpanContext();
-        Span consumer = Span.current();
-        if (producer.isValid()) {
-            consumer.addLink(producer);
-        }
+        Span consumer = RabbitTraceContext.startConsumerSpan(
+            analyticsQueueName,
+            extracted,
+            message.getMessageProperties()
+        );
         Context consumerContext = consumer.getSpanContext().isValid()
             ? extracted.with(consumer)
             : extracted;
@@ -147,6 +146,8 @@ final class AnalyticsEventConsumer {
             }
             consumer.setAttribute(Semconv.OUTCOME, Semconv.OUTCOME_FAILURE);
             throw error;
+        } finally {
+            consumer.end();
         }
     }
 

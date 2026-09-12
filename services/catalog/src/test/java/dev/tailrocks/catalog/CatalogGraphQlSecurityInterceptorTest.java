@@ -110,4 +110,19 @@ class CatalogGraphQlSecurityInterceptorTest {
             null
         ));
     }
+
+    @Test
+    void permits_graphql_or_authenticated_identity_when_headers_are_omitted() {
+        CatalogRequestIdentity identity = CatalogRequestIdentity.fromHeaders(new HttpHeaders());
+        graphql.GraphQLContext context = graphql.GraphQLContext.of(Map.of(
+            CatalogRequestIdentity.CONTEXT_KEY, identity
+        ));
+
+        assertEquals("tenant-acme", CatalogRequestIdentity.resolve(
+            context, "tenant-acme"
+        ));
+        assertEquals("tenant-acme", CatalogRequestIdentity.resolve(
+            context, null, "tenant-acme"
+        ));
+    }
 }
