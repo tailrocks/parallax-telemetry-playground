@@ -19,6 +19,7 @@
         "@opentelemetry/sdk-logs": "0.221.0",
         "@opentelemetry/sdk-trace-web": "^2.10.0",
         "@opentelemetry/semantic-conventions": "^1.43.0",
+        "@sentry/node": "^10.70.0",
         "@sentry/tanstackstart-react": "^10.70.0",
         "@tanstack/react-router": "^1.170.16",
         "@tanstack/react-start": "^1.168.26",

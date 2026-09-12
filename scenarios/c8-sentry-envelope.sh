@@ -27,7 +27,7 @@ echo "c8 java SDK → $SENTRY_DSN"
 echo "c8 js SDK → $SENTRY_DSN"
 (
   cd "$ROOT/web"
-  bun ../scenarios/c8-emit-js.ts
+  bun scenarios/c8-emit-js.ts
 )
 
 found_rust=0 found_java=0 found_js=0

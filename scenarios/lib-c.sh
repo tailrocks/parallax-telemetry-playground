@@ -5,16 +5,7 @@ set -euo pipefail
 
 PARALLAX_URL="${PARALLAX_URL:-http://127.0.0.1:4000}"
 PARALLAX_BIN="${PARALLAX_BIN:-$(command -v parallax || true)}"
-if [[ -z "${PARALLAX_BIN}" && -x "${PARALLAX_BIN_FALLBACK:-}" ]]; then
-  PARALLAX_BIN="$PARALLAX_BIN_FALLBACK"
-fi
-if [[ -z "${PARALLAX_BIN}" && -x /Users/donbeave/Projects/tailrocks/parallax-project/parallax/target/debug/parallax ]]; then
-  PARALLAX_BIN=/Users/donbeave/Projects/tailrocks/parallax-project/parallax/target/debug/parallax
-fi
 PARALLAX_MCP="${PARALLAX_MCP:-$(command -v parallax-mcp || true)}"
-if [[ -z "${PARALLAX_MCP}" && -x /Users/donbeave/Projects/tailrocks/parallax-project/parallax/target/debug/parallax-mcp ]]; then
-  PARALLAX_MCP=/Users/donbeave/Projects/tailrocks/parallax-project/parallax/target/debug/parallax-mcp
-fi
 C_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Throwaway homes live under the repo, never scratch / never the operator HOME.
 C_ISOLATION="${C_ROOT}/.isolation"
@@ -27,13 +18,16 @@ C_CANARY_JWT="eyJhbGciOiJIUzI1NiJ9.CANARY.sig"
 
 c_gql() {
   local query="$1"
-  python3 - "$PARALLAX_URL" "$query" <<'PY'
+  python3 - "$PARALLAX_URL" "${PARALLAX_API_TOKEN:-}" "$query" <<'PY'
 import json, sys, urllib.request
-url, query = sys.argv[1], sys.argv[2]
+url, token, query = sys.argv[1], sys.argv[2], sys.argv[3]
+headers = {"content-type": "application/json"}
+if token:
+    headers["authorization"] = f"Bearer {token}"
 req = urllib.request.Request(
     url.rstrip("/") + "/graphql",
     data=json.dumps({"query": query}).encode(),
-    headers={"content-type": "application/json"},
+    headers=headers,
 )
 with urllib.request.urlopen(req, timeout=30) as resp:
     body = json.loads(resp.read().decode())
