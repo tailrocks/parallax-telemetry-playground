@@ -65,7 +65,9 @@ run = [
 [tasks."quality:web"]
 description = "Run web tests, production build, and strict TypeScript checking"
 dir = "web"
-run = ["bun run test", "bun run build"]
+# The gate provisions its own dependencies: a clean checkout has no
+# web/node_modules, and `--no-install` bunx would then have no vitest binary.
+run = ["bun install --frozen-lockfile", "bun run test", "bun run build"]
 
 [tasks.ci]
 description = "Provision, build, and run every Rust, Spring, and web quality gate"
