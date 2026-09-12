@@ -1,4 +1,108 @@
-type Product { id: ID!, sku: String!, name: String!, priceMinor: Int!, reviews: [Review!]!, reviewsSlow: [Review!]!, riskScore: Float }
-type Review { text: String!, stars: Int! }
-type Query { product(sku: String!): Product, products: [Product!]! }
-type Subscription { priceChanges: Product! }
+type Product {
+  id: ID!
+  tenantId: ID!
+  slug: String!
+  sku: String!
+  name: String!
+  description: String!
+  brand: String
+  category: Category!
+  price: PriceSnapshot
+  priceMinor: Int
+  variants: [ProductVariant!]!
+  reviews: [Review!]!
+  reviewsSlow: [Review!]!
+  riskScore: Float
+}
+
+type Category {
+  id: ID!
+  tenantId: ID!
+  slug: String!
+  name: String!
+}
+
+type ProductVariant {
+  id: ID!
+  tenantId: ID!
+  productId: ID!
+  sku: String!
+  name: String!
+  options: String!
+  price: PriceSnapshot
+}
+
+type PriceSnapshot {
+  id: ID!
+  currency: String!
+  amountMinor: Int!
+  compareAtMinor: Int
+  validFrom: String!
+}
+
+type Review {
+  id: ID!
+  productId: ID!
+  title: String!
+  text: String!
+  stars: Int!
+  verifiedPurchase: Boolean!
+  createdAt: String!
+}
+
+type ProductPage {
+  items: [Product!]!
+  page: Int!
+  size: Int!
+  totalElements: Int!
+  totalPages: Int!
+  hasNext: Boolean!
+  experience: String!
+}
+
+enum ProductSort {
+  FEATURED
+  NEWEST
+  PRICE_ASC
+  PRICE_DESC
+  RELEVANCE
+}
+
+type PriceChange {
+  product: Product!
+  variant: ProductVariant!
+  price: PriceSnapshot!
+  observedAt: String!
+}
+
+input UpdatePriceInput {
+  # Optional consistency assertion. The write tenant comes from the authenticated
+  # catalog administrator, never from this caller-controlled value.
+  tenantId: ID
+  sku: String!
+  currency: String!
+  amountMinor: Int!
+  compareAtMinor: Int
+}
+
+type Query {
+  product(sku: String!, tenantId: ID, segment: String = "standard"): Product
+  products(
+    search: String
+    category: String
+    sort: ProductSort = FEATURED
+    tenantId: ID
+    page: Int = 0
+    size: Int = 20
+    segment: String = "standard"
+  ): ProductPage!
+  categories(tenantId: ID): [Category!]!
+}
+
+type Mutation {
+  updatePrice(input: UpdatePriceInput!): Product!
+}
+
+type Subscription {
+  priceChanges(tenantId: ID, sku: String): PriceChange!
+}

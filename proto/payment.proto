@@ -1,0 +1,278 @@
+syntax = "proto3";
+package playground.payment.v1;
+
+option java_multiple_files = true;
+option java_package = "dev.tailrocks.payment.v1";
+
+// Payment owns authorization and the later capture, void, and refund state
+// transitions for a payment instrument.
+service Payment {
+  // Reserves funds for a merchant reference.
+  // Idempotent when tenant_id and request_id are reused for the same payment input.
+  // Errors: INVALID_ARGUMENT for malformed input, ALREADY_EXISTS for a
+  // conflicting payment, and UNAVAILABLE for a transient provider failure.
+  rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
+
+  // Captures all or part of an authorized payment.
+  // Idempotent when tenant_id and request_id are reused for the same capture input.
+  // Errors: INVALID_ARGUMENT for an invalid amount, NOT_FOUND for an unknown
+  // payment, and FAILED_PRECONDITION when the payment is not capturable.
+  rpc Capture(CaptureRequest) returns (CaptureResponse);
+
+  // Releases an uncaptured authorization.
+  // Idempotent when tenant_id and request_id are reused for the same void input.
+  // Errors: NOT_FOUND for an unknown payment and FAILED_PRECONDITION when the
+  // payment is not voidable.
+  rpc Void(VoidRequest) returns (VoidResponse);
+
+  // Returns all or part of a captured payment to the customer.
+  // Idempotent when tenant_id and request_id are reused for the same refund input.
+  // Errors: INVALID_ARGUMENT for an invalid amount, NOT_FOUND for an unknown
+  // payment, and FAILED_PRECONDITION when no captured funds remain.
+  rpc Refund(RefundRequest) returns (RefundResponse);
+
+  // Reads the current state of a payment.
+  // Idempotent and safe to retry.
+  // Errors: INVALID_ARGUMENT for a malformed payment_id and NOT_FOUND when no
+  // payment matches it.
+  rpc GetPayment(GetPaymentRequest) returns (GetPaymentResponse);
+}
+
+// A supported payment instrument without raw sensitive account data.
+message PaymentMethod {
+  // Network or instrument family used by the provider.
+  PaymentMethodType type = 1;
+  // Tokenized provider reference; raw card or bank data is never sent here.
+  string token = 2;
+}
+
+// A monetary amount represented in the smallest currency unit.
+message Money {
+  // ISO 4217 currency code for amount_minor.
+  string currency_code = 1;
+  // Amount in the currency's smallest unit, such as cents for USD.
+  int64 amount_minor = 2;
+}
+
+// The payment resource returned by every operation.
+message PaymentRecord {
+  // Stable identifier assigned by the payment service. For an authorization,
+  // this identity is deterministic for the tenant and request_id key.
+  string payment_id = 1;
+  // Merchant-owned idempotency/business reference.
+  string merchant_reference = 2;
+  // Authorized payment amount.
+  Money authorized_amount = 3;
+  // Current lifecycle state.
+  PaymentStatus status = 4;
+  // Instrument family used for the payment.
+  PaymentMethodType method_type = 5;
+  // Provider-side reference safe to use for reconciliation.
+  string provider_reference = 6;
+  // Total amount captured so far.
+  Money captured_amount = 7;
+  // Total amount refunded so far.
+  Money refunded_amount = 8;
+  // Persisted provider-independent reason for a failed or pending attempt.
+  PaymentFailureReason failure_reason = 9;
+}
+
+// Input for reserving funds.
+message AuthorizeRequest {
+  // Client-generated id used to deduplicate a retry. Checkout uses the exact
+  // key <checkout_request_id>:authorize; its payment_id remains stable across
+  // replay and provider-state recovery.
+  string request_id = 1;
+  // Merchant order or checkout reference.
+  string merchant_reference = 2;
+  // Amount to reserve.
+  Money amount = 3;
+  // Tokenized payment instrument.
+  PaymentMethod payment_method = 4;
+  // Tenant that owns the order and payment.
+  string tenant_id = 5;
+}
+
+// Result of reserving funds.
+message AuthorizeResponse {
+  // Outcome of the authorization attempt.
+  PaymentOperationStatus operation_status = 1;
+  // Payment state after the attempt, when a payment was created.
+  PaymentRecord payment = 2;
+  // Provider-independent reason when the operation did not succeed.
+  PaymentFailureReason failure_reason = 3;
+}
+
+// Input for capturing an authorization.
+message CaptureRequest {
+  // Client-generated id used to deduplicate a retry.
+  string request_id = 1;
+  // Payment to capture.
+  string payment_id = 2;
+  // Amount to capture; unset captures the remaining authorized amount.
+  Money amount = 3;
+  // Tenant that owns the payment.
+  string tenant_id = 4;
+}
+
+// Result of capturing an authorization.
+message CaptureResponse {
+  // Outcome of the capture attempt.
+  PaymentOperationStatus operation_status = 1;
+  // Payment state after the attempt.
+  PaymentRecord payment = 2;
+  // Provider-independent reason when the operation did not succeed.
+  PaymentFailureReason failure_reason = 3;
+}
+
+// Input for voiding an uncaptured authorization.
+message VoidRequest {
+  // Client-generated id used to deduplicate a retry.
+  string request_id = 1;
+  // Payment authorization to release.
+  string payment_id = 2;
+  // Business reason for releasing the authorization.
+  VoidReason reason = 3;
+  // Tenant that owns the payment.
+  string tenant_id = 4;
+}
+
+// Result of voiding an authorization.
+message VoidResponse {
+  // Outcome of the void attempt.
+  PaymentOperationStatus operation_status = 1;
+  // Payment state after the attempt.
+  PaymentRecord payment = 2;
+  // Provider-independent reason when the operation did not succeed.
+  PaymentFailureReason failure_reason = 3;
+}
+
+// Input for returning captured funds.
+message RefundRequest {
+  // Client-generated id used to deduplicate a retry.
+  string request_id = 1;
+  // Captured payment to refund.
+  string payment_id = 2;
+  // Amount to refund; a partial amount is allowed.
+  Money amount = 3;
+  // Business reason for the refund.
+  RefundReason reason = 4;
+  // Tenant that owns the payment.
+  string tenant_id = 5;
+}
+
+// Result of returning captured funds.
+message RefundResponse {
+  // Outcome of the refund attempt.
+  PaymentOperationStatus operation_status = 1;
+  // Payment state after the attempt.
+  PaymentRecord payment = 2;
+  // Provider-independent reason when the operation did not succeed.
+  PaymentFailureReason failure_reason = 3;
+}
+
+// Input for reading a payment.
+message GetPaymentRequest {
+  // Payment identifier assigned by the payment service.
+  string payment_id = 1;
+  // Tenant that owns the payment.
+  string tenant_id = 2;
+}
+
+// Result of reading a payment.
+message GetPaymentResponse {
+  // Current payment resource.
+  PaymentRecord payment = 1;
+  // Lifecycle state copied for callers that only inspect the response status.
+  PaymentStatus status = 2;
+}
+
+// Supported payment instrument families.
+enum PaymentMethodType {
+  // Value was not supplied.
+  PAYMENT_METHOD_TYPE_UNSPECIFIED = 0;
+  // Credit or debit card.
+  PAYMENT_METHOD_TYPE_CARD = 1;
+  // Bank account or bank transfer instrument.
+  PAYMENT_METHOD_TYPE_BANK_ACCOUNT = 2;
+  // Network or stored-value wallet.
+  PAYMENT_METHOD_TYPE_WALLET = 3;
+}
+
+// Lifecycle state of a payment resource.
+enum PaymentStatus {
+  // Value was not supplied.
+  PAYMENT_STATUS_UNSPECIFIED = 0;
+  // Authorization is awaiting a provider decision.
+  PAYMENT_STATUS_PENDING = 1;
+  // Funds are authorized but not fully captured.
+  PAYMENT_STATUS_AUTHORIZED = 2;
+  // Authorized funds have been fully captured.
+  PAYMENT_STATUS_CAPTURED = 3;
+  // Authorization was released before capture.
+  PAYMENT_STATUS_VOIDED = 4;
+  // Some, but not all, captured funds were refunded.
+  PAYMENT_STATUS_PARTIALLY_REFUNDED = 5;
+  // All captured funds were refunded.
+  PAYMENT_STATUS_REFUNDED = 6;
+  // The payment cannot advance because an operation failed.
+  PAYMENT_STATUS_FAILED = 7;
+}
+
+// Outcome of an individual payment operation.
+enum PaymentOperationStatus {
+  // Value was not supplied.
+  PAYMENT_OPERATION_STATUS_UNSPECIFIED = 0;
+  // Operation completed successfully.
+  PAYMENT_OPERATION_STATUS_SUCCEEDED = 1;
+  // Provider declined the operation.
+  PAYMENT_OPERATION_STATUS_DECLINED = 2;
+  // Provider accepted the operation for asynchronous processing.
+  PAYMENT_OPERATION_STATUS_PENDING = 3;
+  // Operation failed without a provider decline.
+  PAYMENT_OPERATION_STATUS_FAILED = 4;
+}
+
+// Provider-independent reason for an unsuccessful operation.
+enum PaymentFailureReason {
+  // Value was not supplied.
+  PAYMENT_FAILURE_REASON_UNSPECIFIED = 0;
+  // Provider or risk rules declined the payment.
+  PAYMENT_FAILURE_REASON_DECLINED = 1;
+  // Available funds were insufficient.
+  PAYMENT_FAILURE_REASON_INSUFFICIENT_FUNDS = 2;
+  // Payment instrument token is invalid or expired.
+  PAYMENT_FAILURE_REASON_INVALID_PAYMENT_METHOD = 3;
+  // Provider could not be reached or returned a transient failure.
+  PAYMENT_FAILURE_REASON_PROVIDER_UNAVAILABLE = 4;
+  // The requested state transition was already applied.
+  PAYMENT_FAILURE_REASON_ALREADY_PROCESSED = 5;
+  // The payment state does not allow this operation.
+  PAYMENT_FAILURE_REASON_INVALID_STATE = 6;
+}
+
+// Business reason for releasing an authorization.
+enum VoidReason {
+  // Value was not supplied.
+  VOID_REASON_UNSPECIFIED = 0;
+  // Customer or merchant cancelled before capture.
+  VOID_REASON_CUSTOMER_CANCELLED = 1;
+  // Order could not be fulfilled.
+  VOID_REASON_ORDER_CANCELLED = 2;
+  // Authorization expired before capture.
+  VOID_REASON_EXPIRED = 3;
+}
+
+// Business reason for returning captured funds.
+enum RefundReason {
+  // Value was not supplied.
+  REFUND_REASON_UNSPECIFIED = 0;
+  // Customer returned the purchase.
+  REFUND_REASON_CUSTOMER_RETURN = 1;
+  // Merchant cancelled after capture.
+  REFUND_REASON_ORDER_CANCELLED = 2;
+  // Duplicate or incorrect charge.
+  REFUND_REASON_DUPLICATE_CHARGE = 3;
+  // Other merchant-approved reason.
+  REFUND_REASON_OTHER = 4;
+}

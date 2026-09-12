@@ -30,14 +30,19 @@ http = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-metrics = "0.5"
 tonic = "0.14"
+tonic-health = "0.14"
 tonic-prost = "0.14"
 tokio-stream = { version = "0.1", features = ["net"] }
 prost = "0.14"
+prost-types = "0.14"
 tonic-prost-build = "0.14"
-reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls", "http2"] }
-# In-network Postgres is plaintext. If TLS is ever needed, use sqlx's
-# `tls-native-tls` feature; never rustls in this repo.
-sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "macros"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls", "http2", "stream"] }
+# Rust services use the rust-postgres ecosystem directly. The playground does
+# not provide an in-memory durable-store fallback.
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+deadpool-postgres = "0.14"
+redis = { version = "0.32", default-features = false, features = ["tokio-comp", "connection-manager"] }
+lapin = "3"
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }
 serde_json = "1"
@@ -52,9 +57,8 @@ opentelemetry-appender-tracing = "0.32"
 opentelemetry-proto = { version = "0.32", default-features = false, features = ["gen-tonic-messages", "trace", "logs", "metrics"] }
 opentelemetry-semantic-conventions = "0.32"
 open-feature = "0.3.0"
-# Checkout uses the RPC resolver. open-feature-flagd 0.2.1 still needs
-# `in-process` enabled because its shared error type references
-# flagd_evaluation_engine without a feature guard.
+# Checkout uses the RPC resolver. This crate release exposes its shared
+# flagd error conversion only when the evaluation-engine feature is compiled.
 open-feature-flagd = { version = "0.2.2", default-features = false, features = ["rpc", "in-process"] }
 sentry = "0.49"
 sentry-tracing = "0.49"
@@ -62,7 +66,10 @@ sentry-opentelemetry = "0.49"
 tower-http = { version = "0.6", features = ["cors"] }
 tower = { version = "0.5", features = ["util"] }
 futures = "0.3"
+futures-lite = "2"
+hmac = "0.12"
 juniper = "0.17.1"
 juniper_axum = { version = "0.3.0", features = ["subscriptions"] }
 juniper_graphql_ws = { version = "0.5.0", features = ["graphql-transport-ws", "graphql-ws"] }
 quick-xml = "0.38"
+sha2 = "0.10"

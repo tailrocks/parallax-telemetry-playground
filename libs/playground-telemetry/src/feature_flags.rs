@@ -55,6 +55,55 @@ pub async fn feature_flag(flag_key: &'static str, env_name: &'static str) -> boo
     effective
 }
 
+/// Resolve a bounded string variant with an explicit business evaluation
+/// context. The environment override is intentionally opt-in and is useful
+/// for deterministic demonstrations; normal traffic is evaluated by flagd.
+pub async fn feature_variant(
+    flag_key: &'static str,
+    default_variant: &'static str,
+    env_name: &'static str,
+    context: EvaluationContext,
+) -> String {
+    let env_variant = std::env::var(env_name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let mut provider_name = "flagd";
+    let mut variant = default_variant.to_owned();
+    let mut error = String::new();
+
+    if let Some(value) = env_variant {
+        variant = value;
+        provider_name = "env";
+    } else {
+        match flagd_provider().await {
+            Ok(provider) => match provider.resolve_string_value(flag_key, &context).await {
+                Ok(details) => {
+                    variant = details.value;
+                }
+                Err(err) => {
+                    provider_name = "default";
+                    error = format!("{err:?}");
+                }
+            },
+            Err(err) => {
+                provider_name = "default";
+                error = err.to_string();
+            }
+        }
+    }
+
+    tracing::info!(
+        "feature_flag.key" = flag_key,
+        "feature_flag.provider_name" = provider_name,
+        "feature_flag.variant" = %variant,
+        "feature_flag.value" = %variant,
+        "feature_flag.error" = %error,
+        "feature_flag.evaluation"
+    );
+    variant
+}
+
 fn env_flag(name: &str) -> bool {
     std::env::var(name).is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
 }

@@ -1,23 +1,57 @@
 spring:
   application:
     name: fulfillment
-  kafka:
-    bootstrap-servers: ${KAFKA_BROKERS:broker:9092}
-  grpc:
-    client:
-      # Boot 4.1 property is channel.<name>.target (not channels.*.address).
-      # createChannel("payment") otherwise resolves to host `payment` port 80.
-      channel:
-        payment:
-          target: ${PAYMENT_GRPC_ADDRESS:static://payment:9090}
+  datasource:
+    url: ${FULFILLMENT_DATABASE_URL:jdbc:postgresql://postgres:5432/playground}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:playground}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:8}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:2000}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    connection-timeout: ${RABBITMQ_CONNECTION_TIMEOUT:2s}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        default-requeue-rejected: false
+        prefetch: 20
+        concurrency: ${FULFILLMENT_CONCURRENCY:1}
+        max-concurrency: ${FULFILLMENT_MAX_CONCURRENCY:4}
+  sql:
+    init:
+      mode: never
+analytics:
+  clickhouse-url: ${CLICKHOUSE_URL:http://clickhouse:8123}
+  clickhouse-user: ${CLICKHOUSE_USER:default}
+  clickhouse-password: ${CLICKHOUSE_PASSWORD:}
+notifications:
+  url: ${NOTIFICATIONS_URL:http://notifications:8091}
+fulfillment:
+  claim-lease-seconds: ${FULFILLMENT_CLAIM_LEASE_SECONDS:30}
+  claim-lease-heartbeat-threads: ${FULFILLMENT_CLAIM_LEASE_HEARTBEAT_THREADS:8}
+  # FULFILLMENT_INTERNAL_TOKEN is required for /publish and /verify/order.
+  # Send either Authorization: Bearer <token> or
+  # X-Fulfillment-Internal-Token: <token>, plus tenant=<id> (or X-Tenant-Id).
+  http:
+    connect-timeout-ms: ${FULFILLMENT_HTTP_CONNECT_TIMEOUT_MS:2000}
+    read-timeout-ms: ${FULFILLMENT_HTTP_READ_TIMEOUT_MS:10000}
+  queues:
+    orders: ${FULFILLMENT_QUEUE:fulfillment.orders}
+    analytics: ${ANALYTICS_QUEUE:analytics.events}
 sentry:
   dsn: ${SENTRY_DSN:}
   environment: ${PARALLAX_ENV:playground}
   release: ${RELEASE:0.1.0}
   traces-sample-rate: 1.0
-  # A17: continuous profiling — JVM async-profiler (GA since Sentry SDK 8.23, we
-  # run 8.46). profile-lifecycle=trace ties the profiler to sampled traces, so a
-  # CPU-hot path (e.g. payment high-CPU chaos, B5) yields a trace-linked profile.
+  # Profile the consumer span when Sentry profiling is enabled in the runtime.
   profile-session-sample-rate: 1.0
   profile-lifecycle: trace
 logging:

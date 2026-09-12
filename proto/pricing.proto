@@ -1,28 +1,110 @@
 syntax = "proto3";
 package playground.pricing.v1;
 
+import "payment.proto";
+
 option java_multiple_files = true;
 option java_package = "dev.tailrocks.pricing.v1";
 
-// Pricing service — quoted by checkout over gRPC. A distinct service (not an A/B
-// reimplementation); cross-service distributed tracing flows through it.
+// Pricing calculates an itemized quote for a customer and currency.
 service Pricing {
+  // Calculates a complete quote.
+  // Idempotent when tenant_id and request_id are reused for the same input.
+  // Errors: INVALID_ARGUMENT for malformed items or currency, NOT_FOUND for an
+  // unknown SKU, and UNAVAILABLE for a transient pricing dependency failure.
   rpc Quote(QuoteRequest) returns (QuoteResponse);
-  // A7: server-streaming — emits a quote per unit (long-lived streaming span).
+
+  // Streams progressively complete quote snapshots as line items are priced.
+  // Idempotent when tenant_id and request_id are reused for the same input.
+  // Errors: INVALID_ARGUMENT for malformed items or currency, NOT_FOUND for an
+  // unknown SKU, and UNAVAILABLE for a transient pricing dependency failure.
   rpc QuoteStream(QuoteRequest) returns (stream QuoteResponse);
 }
 
+// Input for a quote calculation.
 message QuoteRequest {
-  string sku = 1;
-  uint32 quantity = 2;
-  // Lab-only knobs used by deterministic gRPC semantics scenarios.
-  uint32 delay_ms = 3;
-  uint32 fail_at = 4;
+  reserved 1, 2, 3, 4;
+  reserved "sku", "quantity", "delay_ms";
+
+  // Client-generated id used to deduplicate a retried calculation.
+  string request_id = 5;
+  // Customer whose catalog and pricing rules apply.
+  string customer_id = 6;
+  // Items to price. At least one item is required.
+  repeated QuoteItem items = 7;
+  // ISO 4217 currency code requested for every monetary value.
+  string currency_code = 8;
+  // Optional caller-supplied pricing context, such as a sales channel.
+  map<string, string> context = 9;
+  // Payment instrument category used when pricing depends on processing fees.
+  // Omit it when the payment instrument is selected after pricing.
+  optional playground.payment.v1.PaymentMethodType payment_method_type = 10;
+  // Tenant that owns the catalog, customer, prices, and promotions.
+  // Required so identical SKUs cannot cross tenant boundaries.
+  string tenant_id = 11;
 }
 
-message QuoteResponse {
+// An item requested in a quote.
+message QuoteItem {
+  // Catalog identifier for the item.
   string sku = 1;
+  // Number of units requested; must be greater than zero.
   uint32 quantity = 2;
-  uint64 total_minor = 3; // total in minor units (cents)
-  string currency = 4;
+}
+
+// A priced item in a quote.
+message QuoteLine {
+  // Catalog identifier for the item.
+  string sku = 1;
+  // Number of units priced.
+  uint32 quantity = 2;
+  // Price of one unit in the quote currency.
+  Money unit_price = 3;
+  // Price for this line after quantity and line-level adjustments.
+  Money line_total = 4;
+}
+
+// A monetary amount represented in the smallest currency unit.
+message Money {
+  // ISO 4217 currency code for amount_minor.
+  string currency_code = 1;
+  // Amount in the currency's smallest unit, such as cents for USD.
+  int64 amount_minor = 2;
+}
+
+// Lifecycle state of a quote.
+enum QuoteStatus {
+  // Value was not supplied.
+  QUOTE_STATUS_UNSPECIFIED = 0;
+  // Quote is complete and can be used while its validity window is open.
+  QUOTE_STATUS_READY = 1;
+  // Quote validity has elapsed.
+  QUOTE_STATUS_EXPIRED = 2;
+  // Quote could not be produced from the requested items or context.
+  QUOTE_STATUS_REJECTED = 3;
+}
+
+// Result of a quote calculation or one progressive stream snapshot.
+message QuoteResponse {
+  reserved 1, 2, 3, 4;
+  reserved "sku", "quantity", "total_minor", "currency";
+
+  // Stable identifier for the calculated quote.
+  string quote_id = 5;
+  // Current lifecycle state of the quote.
+  QuoteStatus status = 6;
+  // Lines priced so far; a unary response contains all requested lines.
+  repeated QuoteLine lines = 7;
+  // Sum of line totals before quote-level discounts and tax.
+  Money subtotal = 8;
+  // Total discount applied to the quote.
+  Money discount_total = 9;
+  // Total tax applied to the quote.
+  Money tax_total = 10;
+  // Amount payable after discounts and tax.
+  Money grand_total = 11;
+  // Number of seconds the quote remains valid after calculation.
+  uint32 valid_for_seconds = 12;
+  // Version of the pricing rules used to calculate this quote.
+  string pricing_version = 13;
 }

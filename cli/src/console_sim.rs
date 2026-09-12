@@ -213,8 +213,16 @@ async fn ui_action(
 
 async fn checkout_submit() -> bool {
     let base = std::env::var("CHECKOUT_URL").unwrap_or_else(|_| "http://localhost:8088".into());
-    let url = format!("{base}/checkout?sku=WIDGET-1&quantity=1");
-    match playground_telemetry::traced_get(&url).await {
+    let url = format!("{base}/checkout");
+    let request = serde_json::json!({
+        "tenant_id": "tenant-acme",
+        "customer_id": "customer-acme-ava",
+        "items": [{"sku": "WIDGET-1", "quantity": 1}],
+        "currency_code": "USD",
+        "payment_method_token": "tok_visa",
+        "request_id": format!("console-{}", invocation::invocation_id()),
+    });
+    match super::traced_checkout_post(&url, &request).await {
         Ok(response) => response.status().is_success(),
         Err(error) => {
             tracing::error!(%error, "checkout call failed");

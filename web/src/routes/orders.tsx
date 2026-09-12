@@ -1,103 +1,161 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { runTracedStep, tracedFetch, trackStep } from "../rum";
-import { APP_SCREEN_NAME, APP_WIDGET_NAME, UI_CLICK, UI_SUBMIT } from "../semconv";
-
-type SubmissionStatus =
-  | { readonly kind: "ready"; readonly message: "ready" }
-  | { readonly kind: "submitting"; readonly message: "submitting..." }
-  | { readonly kind: "success"; readonly message: string }
-  | { readonly kind: "http-error"; readonly message: string }
-  | { readonly kind: "network-error"; readonly message: string };
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+import {
+  Link,
+  Outlet,
+  createFileRoute,
+  useLocation,
+  useRouter,
+} from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import {
+  DEMO_CUSTOMER_ID,
+  DEMO_TENANT_ID,
+  errorMessageForUser,
+  fetchOrders,
+  type OrderSummary,
+} from "../commerce";
+import { Notice, OrderMeta, PageFrame } from "../components";
+import { runTracedStep } from "../rum";
+import { APP_SCREEN_NAME, APP_WIDGET_NAME, UI_CLICK } from "../semconv";
 
 export const Route = createFileRoute("/orders")({
+  loader: async () => {
+    try {
+      return {
+        orders: await fetchOrders({
+          tenantId: DEMO_TENANT_ID,
+          customerId: DEMO_CUSTOMER_ID,
+        }),
+        error: null,
+      } as const;
+    } catch (error: unknown) {
+      return { orders: null, error: errorMessageForUser(error) } as const;
+    }
+  },
   component: OrdersPage,
 });
 
 function OrdersPage() {
-  const [lagMs, setLagMs] = useState(250);
-  const [batch, setBatch] = useState(false);
-  const [status, setStatus] = useState<SubmissionStatus>({
-    kind: "ready",
-    message: "ready",
-  });
-
-  async function submit() {
-    const base = import.meta.env["VITE_ORDERS_URL"] ?? "http://localhost:8092";
-    const query = new URLSearchParams({
-      lag_ms: String(lagMs),
-      batch: batch ? "1" : "0",
-    });
-
-    setStatus({ kind: "submitting", message: "submitting..." });
-    try {
-      await runTracedStep(
-        UI_SUBMIT,
-        {
-          [APP_SCREEN_NAME]: "orders",
-          [APP_WIDGET_NAME]: "order-form",
-        },
-        async () => {
-          const res = await tracedFetch(`${base}/order?${query}`, { method: "POST" });
-          const body = await res.text();
-          setStatus({
-            kind: res.ok ? "success" : "http-error",
-            message: `${res.ok ? "Success" : "HTTP error"}: ${res.status}: ${body}`,
-          });
-        },
-      );
-    } catch (err) {
-      setStatus({ kind: "network-error", message: `Network error: ${errorMessage(err)}` });
+  const { pathname } = useLocation();
+  const router = useRouter();
+  const showingDetail = pathname.startsWith("/orders/");
+  const loaderData = Route.useLoaderData();
+  const [fallbackOrders, setFallbackOrders] = useState<
+    readonly OrderSummary[] | null
+  >(loaderData.orders);
+  useEffect(() => {
+    if (loaderData.orders !== null) {
+      setFallbackOrders(loaderData.orders);
+      return;
     }
+    let active = true;
+    void fetchOrders({
+      tenantId: DEMO_TENANT_ID,
+      customerId: DEMO_CUSTOMER_ID,
+    }).then(
+      (orders) => {
+        if (active) setFallbackOrders(orders);
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [loaderData.orders]);
+  const state =
+    fallbackOrders !== null
+      ? ({ kind: "ready", orders: fallbackOrders } as const)
+      : loaderData.error !== null
+      ? ({ kind: "error", message: loaderData.error } as const)
+        : ({ kind: "loading" } as const);
+
+  if (showingDetail) return <Outlet />;
+
+  async function refresh() {
+    await runTracedStep(
+      UI_CLICK,
+      { [APP_SCREEN_NAME]: "orders", [APP_WIDGET_NAME]: "orders-refresh" },
+      async () => {
+        await router.invalidate();
+      },
+    );
   }
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: 24, maxWidth: 880 }}>
-      <nav style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-        <Link to="/">home</Link>
-        <Link to="/checkout">checkout</Link>
-      </nav>
-      <h1>Orders</h1>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-        style={{ display: "grid", gap: 12, maxWidth: 360 }}
-      >
-        <label>
-          Consumer lag ms
-          <input
-            min={0}
-            max={5000}
-            type="number"
-            value={lagMs}
-            onChange={(event) => setLagMs(Number(event.target.value))}
-          />
-        </label>
-        <label>
-          <input
-            checked={batch}
-            type="checkbox"
-            onChange={(event) => {
-              setBatch(event.target.checked);
-              void trackStep(UI_CLICK, {
-                [APP_SCREEN_NAME]: "orders",
-                [APP_WIDGET_NAME]: "batch-toggle",
-              });
-            }}
-          />{" "}
-          batch consumer
-        </label>
-        <button type="submit">submit order</button>
-      </form>
-      <div aria-atomic="true" aria-live="polite" role="status">
-        {status.message}
+    <PageFrame
+      eyebrow="orders / durable status"
+      title="Follow the order after checkout."
+      description="Orders are read from the checkout service's Postgres-backed REST projection. Fulfillment updates status asynchronously through RabbitMQ."
+      actions={
+        <button
+          className="button button-secondary"
+          type="button"
+          onClick={() => void refresh()}
+        >
+          Refresh status
+        </button>
+      }
+    >
+      <div className="notice notice-info">
+        <div>
+          <strong>Viewing Ava Chen’s tenant-acme orders</strong>
+          <p>Customer filter: {DEMO_CUSTOMER_ID} · list path: /api/orders</p>
+        </div>
+        <Link className="button button-small button-secondary" to="/catalog" search={{ search: undefined, category: undefined, sort: undefined, page: undefined }}>
+          Shop again
+        </Link>
       </div>
-    </main>
+      {state.kind === "error" ? (
+        <Notice
+          tone="error"
+          title="Order status unavailable"
+          action={
+            <button
+              className="button button-small button-secondary"
+              type="button"
+              onClick={() => void router.invalidate()}
+            >
+              Retry
+            </button>
+          }
+        >
+          {state.message}
+        </Notice>
+      ) : null}
+      {state.kind === "ready" && state.orders.length === 0 ? (
+        <div className="empty-state">
+          <h2>No orders yet</h2>
+          <p>
+            Complete a checkout with a seeded catalog variant, then return here
+            to watch its durable status.
+          </p>
+          <Link className="button" to="/catalog" search={{ search: undefined, category: undefined, sort: undefined, page: undefined }}>
+            Browse catalog
+          </Link>
+        </div>
+      ) : null}
+      {state.kind === "ready" && state.orders.length > 0 ? (
+        <section className="order-list" aria-label="Orders">
+          {state.orders.map((order) => (
+            <article className="order-card" key={order.id}>
+              <Link
+                className="order-card-link"
+                to="/orders/$orderId"
+                params={{ orderId: order.id }}
+              >
+                <OrderMeta {...order} />
+                <p className="checkout-note">
+                  Open order detail for line items, payment totals, and
+                  fulfillment timeline.
+                </p>
+              </Link>
+            </article>
+          ))}
+        </section>
+      ) : null}
+      <p className="checkout-note">
+        Every status refresh creates a browser interaction span and propagates
+        W3C context to the storefront REST boundary.
+      </p>
+    </PageFrame>
   );
 }

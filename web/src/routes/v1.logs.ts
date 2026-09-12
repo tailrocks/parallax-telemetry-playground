@@ -27,7 +27,7 @@ export const Route = createFileRoute("/v1/logs")({
           });
         } catch (err) {
           console.error("[/v1/logs] forward to Rotel failed:", err);
-          return new Response(null, { status: 202 });
+          return new Response(null, { status: 503 });
         }
       },
     },

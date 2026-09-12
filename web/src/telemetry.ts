@@ -13,6 +13,7 @@ import { LoggerProvider } from "@opentelemetry/sdk-logs";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
 import { ZoneContextManager } from "@opentelemetry/context-zone";
+import * as Sentry from "@sentry/tanstackstart-react";
 import {
   CompositePropagator,
   W3CBaggagePropagator,
@@ -24,7 +25,9 @@ import {
 } from "@opentelemetry/resources";
 import {
   SpanStatusCode,
+  ROOT_CONTEXT,
   context,
+  isSpanContextValid,
   propagation,
   trace,
   type Context,
@@ -49,6 +52,19 @@ import {
   WEB_VITAL_VALUE,
 } from "./semconv";
 import { webResourceAttributes } from "./resource";
+import {
+  boundedBaggageEntries,
+  sanitizePropagationHeaders,
+} from "./traceparent";
+import {
+  safeWebAttributes,
+  safeWebError,
+  safeWebOperation,
+} from "./error-contract";
+import {
+  boundedGraphqlErrorDetails,
+  type GraphqlPathPart,
+} from "./graphql-errors";
 
 export type RumAttributeValue = string | number | boolean;
 export type RumAttributes = Record<string, RumAttributeValue | undefined>;
@@ -62,9 +78,11 @@ let loggerProviderRef: LoggerProvider | undefined;
 let eventLogger: Logger | undefined;
 let flushListenersAttached = false;
 let vitalsStarted = false;
-let currentStepContext: Context | undefined;
+let browserRootContext: Context | undefined;
+const reportedHandledErrorKeys = new Set<string>();
+const MAX_REPORTED_HANDLED_ERRORS = 128;
 
-export function initOtel() {
+export function initOtel(): Context {
   sessionId = getSessionId();
   // Merge onto the SDK default resource: replacing it drops
   // telemetry.sdk.language=webjs, the generic signal observability tools use
@@ -76,7 +94,8 @@ export function initOtel() {
         environment: import.meta.env["VITE_PARALLAX_ENV"],
         gitSha:
           import.meta.env["VITE_GIT_SHA"] ??
-          (globalThis as { __PLAYGROUND_GIT_SHA__?: string }).__PLAYGROUND_GIT_SHA__,
+          (globalThis as { __PLAYGROUND_GIT_SHA__?: string })
+            .__PLAYGROUND_GIT_SHA__,
         sessionId,
       }),
     ),
@@ -99,25 +118,35 @@ export function initOtel() {
   loggerProviderRef = loggerProvider;
   logs.setGlobalLoggerProvider(loggerProvider);
   eventLogger = loggerProvider.getLogger("playground.web.events");
-  provider.register({
-    contextManager: new ZoneContextManager(),
-    propagator: new CompositePropagator({
-      propagators: [
-        new W3CTraceContextPropagator(),
-        new W3CBaggagePropagator(),
-      ],
-    }),
-  });
-  registerInstrumentations({
-    instrumentations: [
-      // Reads <meta name="traceparent"> emitted during SSR (§6 handoff).
-      new DocumentLoadInstrumentation(),
-      new FetchInstrumentation(),
-      new UserInteractionInstrumentation(),
+  const propagator = new CompositePropagator({
+    propagators: [
+      new W3CTraceContextPropagator(),
+      new W3CBaggagePropagator(),
     ],
   });
+  provider.register({
+    contextManager: new ZoneContextManager(),
+    propagator,
+  });
+  browserRootContext = sessionContext(extractDocumentContext(propagator));
+  context.with(browserRootContext, () => {
+    registerInstrumentations({
+      instrumentations: [
+        // The server injects its genuine request span. Without an inbound
+        // parent, document-load remains a real browser root span.
+        new DocumentLoadInstrumentation(),
+        new FetchInstrumentation(),
+        new UserInteractionInstrumentation(),
+      ],
+    });
+  });
   void startWebVitals().finally(attachFlushListeners);
-  queueMicrotask(() => trackScreen(window.location.pathname));
+  queueMicrotask(() =>
+    context.with(browserRootContext ?? context.active(), () =>
+      trackScreen(window.location.pathname),
+    ),
+  );
+  return browserRootContext;
 }
 
 export function getSessionId(): string {
@@ -161,15 +190,12 @@ export async function runTracedStep<T>(
   const span = startRumSpan(name, attributes);
   span.addEvent(name, cleanAttributes(attributes));
   const active = trace.setSpan(sessionContext(), span);
-  const previousStepContext = currentStepContext;
-  currentStepContext = active;
   try {
     return await context.with(active, fn);
   } catch (err) {
     recordException(span, err);
     throw err;
   } finally {
-    currentStepContext = previousStepContext;
     span.end();
   }
 }
@@ -178,18 +204,18 @@ export async function tracedFetch(
   input: RequestInfo | URL,
   init: RequestInit = {},
 ): Promise<Response> {
-  const headers = new Headers(init.headers);
-  propagation.inject(sessionContext(currentStepContext), headers, {
-    set(carrier, key, value) {
-      carrier.set(key, value);
-    },
-  });
-  return fetch(input, { ...init, headers });
+  const requestContext = sessionContext();
+  // FetchInstrumentation is the sole W3C propagation owner. It creates the
+  // browser HTTP span and injects that span's context; manual injection here
+  // races it and can preserve a foreign active trace.
+  return context.with(requestContext, () => fetch(input, init));
 }
 
 export function emitTypedEvent(name: string, attributes: RumAttributes = {}) {
   const logger = eventLogger ?? logs.getLogger("playground.web.events");
-  if (!logger.enabled({ severityNumber: SeverityNumber.INFO, eventName: name })) {
+  if (
+    !logger.enabled({ severityNumber: SeverityNumber.INFO, eventName: name })
+  ) {
     return;
   }
   logger.emit({
@@ -201,46 +227,170 @@ export function emitTypedEvent(name: string, attributes: RumAttributes = {}) {
       [EVENT_NAME]: name,
       ...attributes,
     }),
-    context: sessionContext(currentStepContext),
+    context: sessionContext(),
   });
 }
 
 function startRumSpan(name: string, attributes: RumAttributes): Span {
-  return trace.getTracer(WEB_TRACER_NAME).startSpan(
-    name,
-    { attributes: cleanAttributes(attributes) },
-    sessionContext(),
-  );
+  return trace
+    .getTracer(WEB_TRACER_NAME)
+    .startSpan(
+      name,
+      { attributes: cleanAttributes(attributes) },
+      sessionContext(),
+    );
 }
 
 function recordException(span: Span, err: unknown) {
-  const error =
-    err instanceof Error ? err : new Error(typeof err === "string" ? err : "unknown error");
+  const error = safeWebError(err);
   span.recordException(error);
   span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
   span.setAttribute(ERROR_TYPE, error.name);
 }
 
-function sessionContext(base: Context = context.active()) {
+export function sessionContext(base: Context = context.active()): Context {
+  const effectiveBase = baseWithBrowserRoot(base);
+  const entries = boundedBaggageEntries(propagation.getBaggage(effectiveBase));
   const baggage = propagation.createBaggage({
+    ...entries,
     [SESSION_ID]: { value: getSessionId() },
   });
-  return propagation.setBaggage(base, baggage);
+  return propagation.setBaggage(effectiveBase, baggage);
+}
+
+function baseWithBrowserRoot(base: Context): Context {
+  if (browserRootContext === undefined) return base;
+  const activeSpan = trace.getSpan(base);
+  const browserRootSpan = trace.getSpan(browserRootContext);
+  if (
+    activeSpan !== undefined &&
+    isSpanContextValid(activeSpan.spanContext()) &&
+    (browserRootSpan === undefined ||
+      !isSpanContextValid(browserRootSpan.spanContext()) ||
+      activeSpan.spanContext().traceId === browserRootSpan.spanContext().traceId)
+  ) {
+    return base;
+  }
+
+  const entries = {
+    ...boundedBaggageEntries(propagation.getBaggage(browserRootContext)),
+    ...boundedBaggageEntries(propagation.getBaggage(base)),
+  };
+  return propagation.setBaggage(browserRootContext, propagation.createBaggage(entries));
+}
+
+function extractDocumentContext(propagator: CompositePropagator): Context {
+  const raw = {
+    traceparent: document
+      .querySelector<HTMLMetaElement>('meta[name="traceparent"]')
+      ?.content,
+    tracestate: document
+      .querySelector<HTMLMetaElement>('meta[name="tracestate"]')
+      ?.content,
+    baggage: document
+      .querySelector<HTMLMetaElement>('meta[name="baggage"]')
+      ?.content,
+  };
+  const sanitized = sanitizePropagationHeaders(raw);
+  const carrier: Record<string, string> = {};
+  for (const [key, value] of Object.entries(sanitized)) {
+    if (value !== undefined) carrier[key] = value;
+  }
+  return propagator.extract(ROOT_CONTEXT, carrier, {
+    get: (current, key) => current[key.toLowerCase()],
+    keys: (current) => Object.keys(current),
+  });
+}
+
+/** Capture handled UI failures without sending request secrets to Sentry. */
+export function reportHandledError(
+  error: unknown,
+  operation: string,
+  attributes: RumAttributes = {},
+): void {
+  if (typeof window === "undefined") return;
+  const normalized = safeWebError(error);
+  const safeOperation = safeWebOperation(operation);
+  const safeAttributes = safeWebAttributes(attributes);
+  const fingerprint = `${safeOperation}|${normalized.name}|${normalized.message}`;
+  if (reportedHandledErrorKeys.has(fingerprint)) return;
+  reportedHandledErrorKeys.add(fingerprint);
+  if (reportedHandledErrorKeys.size > MAX_REPORTED_HANDLED_ERRORS) {
+    const oldest = reportedHandledErrorKeys.values().next().value;
+    if (oldest !== undefined) reportedHandledErrorKeys.delete(oldest);
+  }
+
+  emitTypedEvent("web.error.handled", {
+    operation: safeOperation,
+    error_code: normalized.name,
+    error_type: normalized.name,
+  });
+  const errorSpan = startRumSpan("web.error.handled", {
+    operation: safeOperation,
+    error_code: normalized.name,
+    error_type: normalized.name,
+    ...safeAttributes,
+  });
+  errorSpan.recordException(normalized);
+  errorSpan.setStatus({ code: SpanStatusCode.ERROR, message: normalized.message });
+  errorSpan.end();
+  Sentry.withScope((scope) => {
+    scope.setTag("error.handled", "true");
+    scope.setTag("operation", safeOperation);
+    scope.setTag("error.code", normalized.name);
+    scope.setTag("error.type", normalized.name);
+    for (const [key, value] of Object.entries(safeAttributes)) {
+      scope.setTag(key, value);
+    }
+    const graphqlErrors = graphqlErrorDetails(error);
+    if (graphqlErrors.length > 0) {
+      scope.setContext("graphql", {
+        error_count: graphqlErrors.length,
+        errors: graphqlErrors,
+      });
+    }
+    Sentry.captureException(normalized);
+  });
+}
+
+function graphqlErrorDetails(error: unknown): readonly string[] {
+  if (!isRecord(error) || !Array.isArray(error["graphqlErrors"])) return [];
+  return boundedGraphqlErrorDetails(error["graphqlErrors"].flatMap((value) => {
+    if (!isRecord(value) || value["code"] !== "graphql_field_error") return [];
+    const path = Array.isArray(value["path"])
+      ? value["path"].filter(
+          (part): part is GraphqlPathPart =>
+            typeof part === "string" ||
+            (typeof part === "number" && Number.isSafeInteger(part)),
+        )
+      : [];
+    return [{ path }];
+  }));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function cleanAttributes(attributes: RumAttributes) {
   return Object.fromEntries(
-    Object.entries(attributes).filter((entry): entry is [string, RumAttributeValue] => {
-      const value = entry[1];
-      return value !== undefined;
-    }),
+    Object.entries(attributes).filter(
+      (entry): entry is [string, RumAttributeValue] => {
+        const value = entry[1];
+        return value !== undefined;
+      },
+    ),
   );
 }
 
 function screenName(pathname: string) {
   if (pathname === "/") return "home";
+  if (pathname === "/catalog" || pathname.startsWith("/products/"))
+    return "catalog";
+  if (pathname === "/cart") return "cart";
   if (pathname.startsWith("/checkout")) return "checkout";
   if (pathname.startsWith("/orders")) return "orders";
+  if (pathname.startsWith("/analytics")) return "analytics";
   return "unknown";
 }
 

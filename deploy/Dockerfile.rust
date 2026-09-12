@@ -1,20 +1,42 @@
 # Build any Rust service from the workspace: --build-arg BIN=<crate-bin>.
-FROM rust:1-slim AS build
+FROM rust:1-slim@sha256:17d1ba895198f9934c6314ec5346a0d5115372f3243390c3d731e242f35c2f27 AS build
 ARG BIN
+ARG CARGO_BUILD_JOBS=1
+ARG TARGETARCH
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 # protobuf-compiler for tonic codegen; pkg-config + libssl-dev for the
 # openssl-sys native build pulled in transitively (OTLP/tonic TLS).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    protobuf-compiler libprotobuf-dev pkg-config libssl-dev \
+    protobuf-compiler libprotobuf-dev pkg-config libssl-dev curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
-RUN cargo build --release --bin ${BIN}
+RUN cargo build --locked --release --bin ${BIN}
 RUN cp target/release/${BIN} /out
+
+# Pricing exposes tonic-health rather than an HTTP port. Bundle a pinned,
+# checksum-verified probe so Compose health reflects the app's database-backed
+# readiness state, not merely an open listening socket.
+ARG GRPC_HEALTH_PROBE_VERSION=v0.4.56
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) probe_arch=amd64; probe_sha256=dc13e24d92cdd05d1eb9faf7192c65057dc5b52d38b01aa56188e6899604ec93 ;; \
+      arm64) probe_arch=arm64; probe_sha256=1f84fc307ca65c0eb59c83a81202544e1005614735acd96a89beba67abb03c63 ;; \
+      *) echo "unsupported TARGETARCH for grpc health probe: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    probe_name="grpc_health_probe-linux-${probe_arch}"; \
+    curl --fail --silent --show-error --location --retry 3 \
+      --output "/tmp/${probe_name}" \
+      "https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/${probe_name}"; \
+    printf '%s  %s\n' "${probe_sha256}" "/tmp/${probe_name}" | sha256sum -c -; \
+    install -m 0755 "/tmp/${probe_name}" /usr/local/bin/grpc_health_probe; \
+    rm -f "/tmp/${probe_name}"
 
 # Runtime glibc must match the build image (rust:1-slim → Debian trixie); a
 # bookworm runtime is older (GLIBC_2.38 not found).
-FROM debian:trixie-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out /usr/local/bin/service
+COPY --from=build /usr/local/bin/grpc_health_probe /usr/local/bin/grpc_health_probe
 ENTRYPOINT ["/usr/local/bin/service"]

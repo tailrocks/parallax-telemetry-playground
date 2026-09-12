@@ -5,13 +5,31 @@ spring:
     url: ${CATALOG_DATABASE_URL:jdbc:postgresql://postgres:5432/playground}
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:playground}
+  data:
+    redis:
+      url: ${CATALOG_REDIS_URL:redis://localhost:6379}
   sql:
     init:
-      mode: always
+      mode: never
   graphql:
     # A7: GraphQL-over-WebSocket transport for the priceChanges subscription.
     websocket:
       path: /graphql
+management:
+  health:
+    redis:
+      enabled: false
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db,ping
+catalog:
+  synthetic:
+    # Empty in ordinary traffic. Set explicitly for a failure scenario/test.
+    risk-score-failure-sku: ${CATALOG_SYNTHETIC_RISK_SCORE_FAILURE_SKU:}
 sentry:
   dsn: ${SENTRY_DSN:}
   environment: ${PARALLAX_ENV:playground}

@@ -102,6 +102,7 @@ pub(crate) struct SpanSpec {
     pub start: u64,
     pub end: u64,
     pub error: bool,
+    pub status_message: Option<String>,
     pub attrs: Vec<KeyValue>,
     pub events: Vec<Event>,
     pub links: Vec<Link>,
@@ -122,6 +123,7 @@ impl SpanSpec {
             start,
             end: start + 5_000_000,
             error: false,
+            status_message: None,
             attrs: Vec::new(),
             events: Vec::new(),
             links: Vec::new(),
@@ -150,7 +152,7 @@ pub(crate) fn traces_request(spans: Vec<SpanSpec>) -> ExportTraceServiceRequest 
             links: spec.links,
             status: spec.error.then(|| Status {
                 code: 2,
-                message: "shape error".into(),
+                message: spec.status_message.unwrap_or_else(|| "shape error".into()),
             }),
             ..Default::default()
         };
@@ -180,6 +182,31 @@ pub(crate) fn traces_request(spans: Vec<SpanSpec>) -> ExportTraceServiceRequest 
             })
             .collect(),
     }
+}
+
+/// Product-surface issue seed used by the Rust scenario runner. Keep this
+/// small and deterministic: the product checks assert issue/bundle behavior,
+/// while the corpus generators above remain responsible for stress shapes.
+pub(crate) fn issue_seed() -> ExportTraceServiceRequest {
+    let trace = id16(0xc1);
+    let base = now_nanos();
+    let mut span = SpanSpec::basic(&trace, 1, None, "checkout", base);
+    span.service = Some("checkout".to_owned());
+    span.error = true;
+    span.status_message = Some("connection refused".to_owned());
+    span.attrs.push(kv("exception.type", "TimeoutError"));
+    span.attrs
+        .push(kv("exception.message", "connection refused"));
+    span.events.push(Event {
+        time_unix_nano: base + 1_000_000,
+        name: "exception".to_owned(),
+        attributes: vec![
+            kv("exception.type", "TimeoutError"),
+            kv("exception.message", "connection refused"),
+        ],
+        ..Default::default()
+    });
+    traces_request(vec![span])
 }
 
 /// t-deep: one linear chain, depth ≥ 12, alternating simulated services in

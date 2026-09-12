@@ -1,0 +1,16 @@
+# Rust-owned PostgreSQL migration/verification task.
+FROM rust:1-slim@sha256:17d1ba895198f9934c6314ec5346a0d5115372f3243390c3d731e242f35c2f27 AS build
+ARG CARGO_BUILD_JOBS=1
+ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    protobuf-compiler libprotobuf-dev pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
+RUN cargo build --release --locked -p playground-cli
+
+FROM postgres:18@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+COPY --from=build /src/target/release/playground /usr/local/bin/playground
+COPY deploy/postgres/migrations /migrations/migrations
+ENTRYPOINT ["/usr/local/bin/playground"]
+CMD ["postgres-migrate"]

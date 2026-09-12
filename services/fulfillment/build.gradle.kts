@@ -1,12 +1,10 @@
-// Spring Boot broker consumer. Consumes order events (CONSUMER span + span link
-// to the producer), then calls the Rust notifications service over HTTP (the
-// reverse Java→Rust hop). The upstream OTel agent exports to Rotel and the
-// Sentry starter captures SDK envelopes.
+// Spring AMQP order fulfillment boundary. Consumes durable commerce events,
+// persists processing decisions, publishes shipment results, and calls the
+// Rust notifications service after the database transaction commits.
 plugins {
     java
     id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
-    id("com.google.protobuf") version "0.9.4"
     id("com.atkinsondev.opentelemetry-build") version "4.7.0"
 }
 group = "dev.tailrocks"; version = "0.1.0"
@@ -27,16 +25,14 @@ dependencies {
     compileOnly("org.junit.jupiter:junit-jupiter-api")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-web")
-    // Spring Boot 4 modularized auto-configuration: plain spring-kafka no longer
-    // brings KafkaAutoConfiguration (KafkaTemplate + listener factories). The
-    // starter pulls spring-kafka + the spring-boot-kafka autoconfig module.
-    implementation("org.springframework.boot:spring-boot-starter-kafka")
-    implementation("org.springframework.boot:spring-boot-starter-grpc-client")
+    implementation("org.springframework.boot:spring-boot-starter-amqp")
+    implementation("org.springframework.boot:spring-boot-starter-jdbc")
+    implementation("com.fasterxml.jackson.core:jackson-databind")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    runtimeOnly("org.postgresql:postgresql")
     implementation("io.sentry:sentry-spring-boot-4-starter:8.53.0")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("org.springframework.kafka:spring-kafka-test")
-    testImplementation("io.grpc:grpc-inprocess")
+    testImplementation("org.springframework.amqp:spring-rabbit-test")
     // Keep test traces on the same upstream agent path as the deployed JVM.
     add(otelJavaAgent.name, "io.opentelemetry.javaagent:opentelemetry-javaagent:2.30.0")
 }
@@ -45,9 +41,6 @@ openTelemetryBuild {
     serviceName = "fulfillment-tests"
     customTags = mapOf("cli.invocation.id" to (System.getenv("CLI_INVOCATION_ID") ?: ""))
     taskTraceEnvironmentEnabled = true
-}
-protobuf {
-    protoc { artifact = "com.google.protobuf:protoc:4.34.2" }
 }
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
@@ -67,4 +60,3 @@ tasks.withType<Test>().configureEach {
         environment("OTEL_EXPORTER_OTLP_ENDPOINT", testOtelEndpoint)
     }
 }
-sourceSets { main { proto { srcDir("../../proto") } } }

@@ -1,124 +1,48 @@
-//! notifications HTTP service (scaffold) — telemetry-wired axum server. Flesh out the
-//! domain behavior per docs (DB spans / cache / reverse-hop) at implementation.
-use axum::http::HeaderMap;
-use axum::{Router, routing::get};
-use playground_telemetry::semconv;
-use tracing::Instrument;
+mod api;
+mod domain;
+mod store;
 
-async fn handle(headers: HeaderMap) -> &'static str {
-    let span = tracing::info_span!("handle", otel.kind = semconv::SPAN_KIND_SERVER);
-    playground_telemetry::set_parent_from_headers(&span, &headers);
-    handle_inner().instrument(span).await
-}
-
-async fn handle_inner() -> &'static str {
-    tracing::info!("notifications handled request");
-    "notifications ok"
-}
-
-fn app() -> Router {
-    Router::new()
-        .route("/", get(handle))
-        .route("/healthz", get(|| async { "ok" }))
-        .layer(axum::middleware::from_fn(
-            playground_telemetry::http_server_observability,
-        ))
-}
+use anyhow::Context as _;
+use std::time::Duration;
+use tokio::task::JoinHandle;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let telemetry = playground_telemetry::init("notifications")?;
-    let app = app();
+    let state = store::AppState::new(store::init_db().await?)?;
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "0.0.0.0:8091".into());
-    tracing::info!(%addr, "notifications HTTP listening");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(playground_telemetry::shutdown_signal())
-        .await?;
+    let app = api::app_with_state(state.clone());
+    let (shutdown_sender, shutdown_receiver) = tokio::sync::watch::channel(false);
+    let mut worker = tokio::spawn(store::run_delivery_worker(state, shutdown_receiver));
+    tracing::info!(%addr, "notifications HTTP listening");
+    let server_shutdown_sender = shutdown_sender.clone();
+    let server = axum::serve(listener, app).with_graceful_shutdown(async move {
+        playground_telemetry::shutdown_signal().await;
+        let _ = server_shutdown_sender.send(true);
+    });
+    let server_result = server.await;
+    let _ = shutdown_sender.send(true);
+    let worker_result = drain_worker(&mut worker).await;
     telemetry.shutdown();
+    server_result?;
+    worker_result?;
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::app;
-    use axum::{
-        body::{Body, to_bytes},
-        http::{Request, StatusCode},
-    };
-    use tower::ServiceExt;
+const WORKER_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
-    #[tokio::test]
-    async fn serves_notification_and_health_boundaries() {
-        let response = app()
-            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        assert_eq!(body.as_ref(), b"notifications ok");
-
-        let response = app()
-            .oneshot(
-                Request::builder()
-                    .uri("/healthz")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn serves_notifications_over_a_real_tcp_listener() {
-        let telemetry = playground_telemetry::init_test_telemetry("notifications-test")
-            .expect("test telemetry initializes");
-        let scope = telemetry.as_ref().map(|telemetry| telemetry.enter());
-        // Live per-test root: the junit-converted test.case spans are emitted
-        // after the fact and cannot parent live spans, so the observable rust
-        // session stitches its application descendants below this span.
-        let test_root = tracing::info_span!(
-            "test.case",
-            test.case.name = "tests::serves_notifications_over_a_real_tcp_listener",
-            test.suite.name = "notifications",
-            test.attempt.ordinal = 1i64,
-        );
-        let test_root_guard = test_root.enter();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("listener binds");
-        let address = listener.local_addr().expect("listener address");
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        let server = tokio::spawn(async move {
-            axum::serve(listener, app())
-                .with_graceful_shutdown(async move {
-                    let _ = shutdown_rx.await;
-                })
-                .await
-                .expect("server exits cleanly");
-        });
-
-        let response = reqwest::get(format!("http://{address}/"))
-            .await
-            .expect("request succeeds");
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.text().await.expect("response body"),
-            "notifications ok"
-        );
-
-        shutdown_tx.send(()).expect("shutdown signal sends");
-        tokio::time::timeout(std::time::Duration::from_secs(2), server)
-            .await
-            .expect("server shuts down")
-            .expect("server task joins");
-
-        drop(test_root_guard);
-        drop(test_root);
-        drop(scope);
-        if let Some(telemetry) = telemetry {
-            telemetry.shutdown();
+async fn drain_worker(worker: &mut JoinHandle<anyhow::Result<()>>) -> anyhow::Result<()> {
+    match tokio::time::timeout(WORKER_DRAIN_TIMEOUT, &mut *worker).await {
+        Ok(result) => result
+            .context("notification worker task join")?
+            .context("notification worker stopped"),
+        Err(_) => {
+            worker.abort();
+            let _ = (&mut *worker).await;
+            Err(anyhow::anyhow!(
+                "notification worker did not stop before the drain deadline"
+            ))
         }
     }
 }

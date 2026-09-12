@@ -7,11 +7,9 @@
 #
 # Status: Rust services (checkout, pricing, inventory, recommendation,
 # notifications, orders, storefront GraphQL) + Java (catalog GraphQL, payment gRPC, fulfillment
-# Kafka) + web (TanStack Start) all wired. Java uses the upstream OTel agent
+# RabbitMQ) + web (TanStack Start) all wired. Java uses the upstream OTel agent
 # plus the Spring Sentry SDK (deploy/Dockerfile.java); web is the Nitro server
-# (deploy/Dockerfile.web). Image tags pinned 2026-08-14 (plan 162).
-
-name: telemetry-playground
+# (deploy/Dockerfile.web). All external image references are digest-pinned.
 
 x-otlp: &otlp
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
@@ -22,43 +20,156 @@ x-otlp: &otlp
   OTEL_METRICS_EXPORTER: "otlp"
   OTEL_LOGS_EXPORTER: "otlp"
   OTEL_PROPAGATORS: "tracecontext,baggage"
-  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA:-local}"
   PARALLAX_ENV: "${PLAYGROUND_ENV:-playground}"
   # Required resource key. Set in deploy/.env or the host env (`git rev-parse HEAD`).
-  GIT_SHA: "${GIT_SHA}"
+  GIT_SHA: "${GIT_SHA:-local}"
   # Dual emission: Sentry SDK envelopes in parallel with OTLP (Rust + Java).
   SENTRY_DSN: "${SENTRY_DSN:-}"
+
+x-postgres-env: &postgres-env
+  DATABASE_URL: "postgres://postgres:${POSTGRES_PASSWORD:-playground}@postgres:5432/playground"
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "playground"
+  POSTGRES_USER: "postgres"
+  POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}"
+
+x-redis-env: &redis-env
+  REDIS_URL: "redis://redis:6379/0"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  REDIS_DATABASE: "0"
+
+x-rabbitmq-env: &rabbitmq-env
+  RABBITMQ_URL: "amqp://playground:${RABBITMQ_PASSWORD:-playground}@rabbitmq:5672/%2f"
+  AMQP_URL: "amqp://playground:${RABBITMQ_PASSWORD:-playground}@rabbitmq:5672/%2f"
+  RABBITMQ_HOST: "rabbitmq"
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_USER: "playground"
+  RABBITMQ_USERNAME: "playground"
+  RABBITMQ_PASSWORD: "${RABBITMQ_PASSWORD:-playground}"
+  RABBITMQ_VHOST: "/"
+  RABBITMQ_EXCHANGE: "commerce.events"
+  RABBITMQ_DLX: "commerce.dlx"
+
+x-clickhouse-env: &clickhouse-env
+  CLICKHOUSE_URL: "http://clickhouse:8123"
+  CLICKHOUSE_HTTP_URL: "http://clickhouse:8123"
+  CLICKHOUSE_HOST: "clickhouse"
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_DATABASE: "analytics"
+  CLICKHOUSE_USER: "default"
+  CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"
 
 services:
   checkout:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: checkout } }
+    restart: unless-stopped
     environment:
-      <<: *otlp
+      # Checkout owns only the PostgreSQL transaction. Redis and ClickHouse
+      # are downstream consumers of the durable outbox, not startup gates.
+      <<: [*otlp, *postgres-env, *rabbitmq-env]
+      CATALOG_GRAPHQL_URL: "http://catalog:8080/graphql"
       PRICING_ENDPOINT: "http://pricing:50051"
+      PAYMENT_ENDPOINT: "http://payment:9090"
+      INVENTORY_URL: "http://inventory:8089"
+      RECOMMENDATION_URL: "http://recommendation:8090"
+      FULFILLMENT_QUEUE: "fulfillment.orders"
+      ANALYTICS_QUEUE: "analytics.events"
       CHECKOUT_ADDR: "0.0.0.0:8088"
       RELEASE: "${RELEASE:-v1}"
       PLAYGROUND_SAMPLE_RATIO: "${PLAYGROUND_SAMPLE_RATIO:-}"
       FLAGD_HOST: "flagd"
       FLAGD_CACHE: "disabled"
     ports: ["8088:8088"]
-    depends_on: [pricing, inventory, recommendation, flagd]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          printf 'GET /readyz HTTP/1.0\r\nHost: localhost\r\n\r\n' |
+          nc -w 2 127.0.0.1 8088 |
+          grep -q ' 200 '
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      postgres-migrate:
+        condition: service_completed_successfully
+      pricing:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+      inventory:
+        condition: service_healthy
+      recommendation:
+        condition: service_healthy
+      flagd:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
   pricing:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: pricing } }
-    environment: { <<: *otlp, PRICING_ADDR: "0.0.0.0:50051" }
+    restart: unless-stopped
+    environment:
+      <<: [*otlp, *postgres-env, *redis-env]
+      PRICING_ADDR: "0.0.0.0:50051"
+      PRICING_ENDPOINT: "http://pricing:50051"
+      FLAGD_HOST: "flagd"
+      FLAGD_CACHE: "disabled"
+    depends_on:
+      postgres-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      flagd:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/grpc_health_probe
+        - -addr=127.0.0.1:50051
+        - -service=playground.pricing.v1.Pricing
+        - -connect-timeout=2s
+        - -rpc-timeout=2s
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
   inventory:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: inventory } }
+    restart: unless-stopped
     environment:
-      <<: *otlp
+      <<: [*otlp, *postgres-env]
       ADDR: "0.0.0.0:8089"
-      DATABASE_URL: "postgres://postgres:${POSTGRES_PASSWORD:-playground}@postgres:5432/playground"
     ports: ["8089:8089"]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          printf 'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n' |
+          nc -w 2 127.0.0.1 8089 |
+          grep -q ' 200 '
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     depends_on:
+      postgres-migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     extra_hosts: ["host.docker.internal:host-gateway"]
@@ -66,50 +177,147 @@ services:
 
   recommendation:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: recommendation } }
+    restart: unless-stopped
     environment:
       <<: *otlp
       ADDR: "0.0.0.0:8090"
+      CATALOG_GRAPHQL_URL: "http://catalog:8080/graphql"
       FLAGD_HOST: "flagd"
       FLAGD_CACHE: "disabled"
     ports: ["8090:8090"]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          printf 'GET /readyz HTTP/1.0\r\nHost: localhost\r\n\r\n' |
+          nc -w 2 127.0.0.1 8090 |
+          grep -q ' 200 '
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      catalog:
+        condition: service_healthy
+      flagd:
+        condition: service_healthy
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
   notifications:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: notifications } }
-    environment: { <<: *otlp, ADDR: "0.0.0.0:8091" }
+    restart: unless-stopped
+    environment:
+      <<: [*otlp, *postgres-env]
+      ADDR: "0.0.0.0:8091"
+    depends_on:
+      postgres-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          printf 'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n' |
+          nc -w 2 127.0.0.1 8091 |
+          grep -q ' 200 '
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
   orders:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: orders } }
+    restart: unless-stopped
     environment:
-      <<: *otlp
+      <<: [*otlp, *postgres-env, *rabbitmq-env, *clickhouse-env]
       ADDR: "0.0.0.0:8092"
       # feature_flag("poisonMessage") reads FLAGD_HOST; default localhost
       # inside the container burns ~15s of RPC retries on every POST /order.
       FLAGD_HOST: "flagd"
       FLAGD_CACHE: "disabled"
     ports: ["8092:8092"]
-    depends_on: [flagd]
+    depends_on:
+      postgres-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      flagd:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          printf 'GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n' |
+          nc -w 2 127.0.0.1 8092 |
+          grep -q ' 200 '
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
   storefront:
     build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: storefront } }
+    restart: unless-stopped
     environment:
-      <<: *otlp
+      <<: [*otlp, *postgres-env, *redis-env, *clickhouse-env]
       STOREFRONT_ADDR: "0.0.0.0:8094"
+      # Empty by default: ClickHouse's default user has no password in the
+      # playground. Supplying a password requires supplying the matching user.
+      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-}"
+      WEB_ORIGIN: "${WEB_ORIGIN:-http://localhost:5173,http://127.0.0.1:5173}"
       CATALOG_GRAPHQL_URL: "http://catalog:8080/graphql"
       PRICING_ENDPOINT: "http://pricing:50051"
+      PAYMENT_ENDPOINT: "http://payment:9090"
+      CHECKOUT_ENDPOINT: "http://checkout:8088"
     ports: ["8094:8094"]
-    depends_on: [catalog, pricing]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          printf 'GET /readyz HTTP/1.0\r\nHost: localhost\r\n\r\n' |
+          nc -w 2 127.0.0.1 8094 |
+          grep -q ' 200 '
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      postgres-migrate:
+        condition: service_completed_successfully
+      clickhouse-init:
+        condition: service_completed_successfully
+      catalog:
+        condition: service_healthy
+      pricing:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
+      checkout:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
   postgres:
-    image: postgres:18
-    environment: { POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}", POSTGRES_DB: playground }
+    image: postgres:18@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}"
+      POSTGRES_DB: "playground"
+    volumes:
+      # PostgreSQL 18 stores the cluster below a major-version directory.
+      # Mount the parent so the image can manage PGDATA and upgrades.
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d playground"]
       interval: 5s
@@ -118,35 +326,148 @@ services:
       start_period: 5s
     networks: [pg]
 
-  broker:
-    image: redpandadata/redpanda:v26.2.1 # Kafka-API-compatible, light
-    # Advertise the compose service name so clients in other containers reach the
-    # broker via broker:9092 (default advertises 127.0.0.1:9092 → unreachable
-    # cross-container, breaking the producer/consumer round-trip).
-    command: ["redpanda", "start", "--smp", "1", "--overprovisioned", "--node-id", "0", "--check=false",
-              "--kafka-addr", "PLAINTEXT://0.0.0.0:9092",
-              "--advertise-kafka-addr", "PLAINTEXT://broker:9092"]
+  postgres-migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.migrations
+    command: ["postgres-migrate"]
+    environment:
+      PGHOST: "postgres"
+      PGPORT: "5432"
+      PGDATABASE: "playground"
+      PGUSER: "postgres"
+      PGPASSWORD: "${POSTGRES_PASSWORD:-playground}"
+      MIGRATION_DIR: "/migrations/migrations"
+    volumes:
+      - ./postgres/migrations:/migrations/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "on-failure:5"
+    networks: [pg]
+
+  rabbitmq:
+    image: rabbitmq:4.1.3-management-alpine@sha256:7be3e8a1cf96af968cda654d7a80fd6e9faf036da6acb3927b784944c6502f58
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: "playground"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:-playground}"
+      RABBITMQ_DEFAULT_VHOST: "/"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      # The image entrypoint starts RabbitMQ as rabbitmq after fixing the
+      # volume ownership. Run the probe with the same identity so a probe
+      # during first boot cannot create a root-owned .erlang.cookie.
+      test: ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 30s
+      retries: 12
+      start_period: 60s
+    networks: [pg]
+
+  redis:
+    image: redis:7.4.5-alpine@sha256:bb186d083732f669da90be8b0f975a37812b15e913465bb14d845db72a4e3e08
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks: [pg]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8.12-alpine@sha256:748db0f759216ac0dce8784f22fcfba1284c70874ebcc922a27998cb4e3de347
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: "analytics"
+      CLICKHOUSE_USER: "default"
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --host localhost --user \"$$CLICKHOUSE_USER\" --password \"$$CLICKHOUSE_PASSWORD\" --query 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+    networks: [pg]
+
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:25.8.12-alpine@sha256:748db0f759216ac0dce8784f22fcfba1284c70874ebcc922a27998cb4e3de347
+    environment:
+      CLICKHOUSE_USER: "default"
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"
+    command:
+      - /bin/sh
+      - -ec
+      - clickhouse-client --host clickhouse --user "$$CLICKHOUSE_USER" --password "$$CLICKHOUSE_PASSWORD" --multiquery < /init/001-analytics.sql
+    volumes:
+      - ./clickhouse/init.sql:/init/001-analytics.sql:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    restart: "on-failure:5"
     networks: [pg]
 
   flagd:
-    image: ghcr.io/open-feature/flagd:v0.16.1
-    command: ["start", "--uri", "file:/etc/flagd/flagd.json"]
-    volumes: ["../flags/flagd.json:/etc/flagd/flagd.json:ro"]
+    image: ghcr.io/open-feature/flagd:v0.16.1@sha256:9525b3c2916183810f93f0a72774c1dfad48d1ae22852c753719c46db80af5e7
+    restart: unless-stopped
+    command: ["start", "--uri", "file:/etc/flagd/flagd.json", "--management-port", "8014"]
+    volumes:
+      - "../flags/flagd.json:/etc/flagd/flagd.json:ro"
+      - "flagd_health_tools:/health-tools:ro"
     ports: ["8013:8013"]
+    healthcheck:
+      # The flagd image is distroless. The statically-linked probe is populated
+      # before startup and checks flagd's management readiness endpoint.
+      test: ["CMD", "/health-tools/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8014/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      flagd-health-tools:
+        condition: service_completed_successfully
+    networks: [pg]
+
+  flagd-health-tools:
+    # flagd is distroless and has no ELF loader. The musl tag is static-pie,
+    # so the copied probe remains executable after the volume is mounted in
+    # flagd.
+    image: busybox:1.37.0-musl@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23
+    command: ["sh", "-ec", "cp /bin/busybox /health-tools/busybox"]
+    volumes:
+      - "flagd_health_tools:/health-tools"
+    restart: "on-failure:5"
     networks: [pg]
 
   # --- Java (upstream OTel javaagent + Sentry Spring SDK) ---
   catalog:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: catalog } }
+    restart: unless-stopped
     environment:
-      <<: *otlp
+      <<: [*otlp, *postgres-env, *redis-env]
       # Java agent 2.30.0 + Rotel v0.2.5: gRPC to Rotel :4317 verified 2026-08-14
       # (catalog span count rose under grpc after a6). HTTP/protobuf :4318 remains
       # a fallback if a future agent/Rotel pair regresses.
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "catalog"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA:-local}"
       OTEL_INSTRUMENTATION_GRAPHQL_DATA_FETCHER_ENABLED: "true"
       OTEL_INSTRUMENTATION_GRAPHQL_OPERATION_NAME_IN_SPAN_NAME_ENABLED: "false"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
@@ -160,51 +481,137 @@ services:
       FLAGD_HOST: "flagd"
       FLAGD_CACHE: "disabled"
       CATALOG_DATABASE_URL: "jdbc:postgresql://postgres:5432/playground"
+      CATALOG_REDIS_URL: "redis://redis:6379/0"
+      CATALOG_ADMIN_TOKEN: "${CATALOG_ADMIN_TOKEN:-catalog-admin:tenant-acme:research-secret}"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/playground"
+      SPRING_DATASOURCE_USERNAME: "postgres"
+      SPRING_DATASOURCE_PASSWORD: "${POSTGRES_PASSWORD:-playground}"
+      SPRING_DATA_REDIS_HOST: "redis"
+      SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_DATA_REDIS_CONNECT_TIMEOUT: "2s"
+      SPRING_DATA_REDIS_TIMEOUT: "2s"
+      CATALOG_SYNTHETIC_RISK_SCORE_FAILURE_SKU: "${CATALOG_SYNTHETIC_RISK_SCORE_FAILURE_SKU:-}"
       POSTGRES_USER: "postgres"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-playground}"
       SERVER_PORT: "8080"
     ports: ["8080:8080"] # GraphQL (browser → catalog)
-    depends_on: [flagd, postgres]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl --fail --silent http://127.0.0.1:8080/actuator/health/readiness >/dev/null &&
+          nc -z postgres 5432
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      postgres-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      flagd:
+        condition: service_healthy
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
   payment:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: payment } }
+    restart: unless-stopped
     environment:
       <<: *otlp
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "payment"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA:-local}"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
       OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_KEY_VALUE_PAIR_ATTRIBUTES: "true"
       OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_CAPTURE_MDC_ATTRIBUTES: "*"
       OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
       SENTRY_DSN: "${SENTRY_DSN:-}"
+      PAYMENT_DATABASE_URL: "jdbc:postgresql://postgres:5432/playground"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/playground"
+      SPRING_DATASOURCE_USERNAME: "postgres"
+      SPRING_DATASOURCE_PASSWORD: "${POSTGRES_PASSWORD:-playground}"
+      POSTGRES_HOST: "postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: "playground"
       SPRING_GRPC_SERVER_PORT: "9090"
+      PAYMENT_ADDR: "0.0.0.0:9090"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl --fail --silent http://127.0.0.1:8080/actuator/health >/dev/null &&
+          /usr/local/bin/grpc_health_probe -addr=127.0.0.1:9090
+          -service=playground.payment.v1.Payment
+          -connect-timeout=2s -rpc-timeout=2s
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      postgres-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
   fulfillment:
     build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: fulfillment } }
+    restart: unless-stopped
     environment:
-      <<: *otlp
+      <<: [*otlp, *postgres-env, *rabbitmq-env, *clickhouse-env]
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
       OTEL_SERVICE_NAME: "fulfillment"
-      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA}"
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${RELEASE:-0.1.0},service.namespace=playground,deployment.environment.name=${PLAYGROUND_ENV:-playground},vcs.ref.head.revision=${GIT_SHA:-local}"
       OTEL_INSTRUMENTATION_MICROMETER_ENABLED: "true"
       OTEL_METRICS_EXEMPLAR_FILTER: "trace_based"
       SENTRY_DSN: "${SENTRY_DSN:-}"
-      KAFKA_BROKERS: "broker:9092"
-      # Boot 4.1: spring.grpc.client.channel.payment.target
+      FULFILLMENT_DATABASE_URL: "jdbc:postgresql://postgres:5432/playground"
+      PAYMENT_ENDPOINT: "http://payment:9090"
       PAYMENT_GRPC_ADDRESS: "static://payment:9090"
       SPRING_GRPC_CLIENT_CHANNEL_PAYMENT_TARGET: "static://payment:9090"
       NOTIFICATIONS_URL: "http://notifications:8091"
-    # POST /publish drives the cross-language async branch: Java produces to the
-    # `orders` topic → consumes it → calls Rust `notifications` (reverse hop).
+      SPRING_RABBITMQ_HOST: "rabbitmq"
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: "playground"
+      SPRING_RABBITMQ_PASSWORD: "${RABBITMQ_PASSWORD:-playground}"
+      SPRING_RABBITMQ_VIRTUAL_HOST: "/"
+      SPRING_RABBITMQ_PUBLISHER_CONFIRM_TYPE: "correlated"
+      FULFILLMENT_QUEUE: "fulfillment.orders"
+      ANALYTICS_QUEUE: "analytics.events"
+      FULFILLMENT_INTERNAL_TOKEN: "${FULFILLMENT_INTERNAL_TOKEN:-fulfillment-internal:research-secret}"
     ports: ["8093:8080"]
-    depends_on: [broker, notifications]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl --fail --silent http://127.0.0.1:8080/actuator/health >/dev/null &&
+          nc -z postgres 5432 &&
+          nc -z rabbitmq 5672 &&
+          curl --fail --silent http://notifications:8091/healthz >/dev/null
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      postgres-migrate:
+        condition: service_completed_successfully
+      clickhouse-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
+      notifications:
+        condition: service_healthy
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
@@ -214,34 +621,72 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.web
       args:
-        VITE_GIT_SHA: "${GIT_SHA}"
+        # The web adapter proxies this same-origin path to the container-only
+        # STOREFRONT_URL, so disposable host-port remaps need no rebuild-time
+        # browser URL override.
+        VITE_STOREFRONT_URL: "${VITE_STOREFRONT_URL:-/__storefront/graphql}"
+        VITE_SENTRY_DSN: "${SENTRY_DSN:-}"
+        VITE_RELEASE: "${RELEASE:-v1}"
+        VITE_PARALLAX_ENV: "${PLAYGROUND_ENV:-playground}"
+        VITE_GIT_SHA: "${GIT_SHA:-local}"
     environment:
       # Server-side OTLP proxy target (browser → /v1/traces → Rotel HTTP).
       ROTEL_OTLP_HTTP_ENDPOINT: "http://host.docker.internal:4318"
-      VITE_CHECKOUT_URL: "http://localhost:8088"
-      VITE_CHECKOUT_URL_NOPROP: "http://127.0.0.1:8088"
-      VITE_ORDERS_URL: "http://localhost:8092"
-      VITE_SENTRY_DSN: "${SENTRY_DSN:-}"
-      VITE_RELEASE: "${RELEASE:-v1}"
-      VITE_GIT_SHA: "${GIT_SHA}"
-      GIT_SHA: "${GIT_SHA}"
+      STOREFRONT_URL: "http://storefront:8094/graphql"
+      CATALOG_GRAPHQL_URL: "http://catalog:8080/graphql"
+      PRICING_ENDPOINT: "http://pricing:50051"
+      PAYMENT_ENDPOINT: "http://payment:9090"
+      GIT_SHA: "${GIT_SHA:-local}"
       PORT: "3000"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3000/healthz').then((response) =>
+          process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
     ports: ["5173:3000"]
+    depends_on:
+      storefront:
+        condition: service_healthy
     extra_hosts: ["host.docker.internal:host-gateway"]
     networks: [pg]
 
   loadgen:
-    image: grafana/k6:2.2.0
+    image: grafana/k6:2.2.0@sha256:9bd01d6941fca969cb61bb57d2da5ee9b385fe2aa8881df3798c196564d6ace6
     profiles: [demo]
     command: ["run", "/scripts/demo.ts"]
     environment:
-      CHECKOUT_URL: "http://checkout:8088"
-      ORDERS_URL: "http://orders:8092"
-      FULFILLMENT_URL: "http://fulfillment:8080"
+      STOREFRONT_URL: "http://storefront:8094/graphql"
     volumes: ["../loadgen:/scripts:ro"]
-    depends_on: [checkout, orders, fulfillment]
+    depends_on:
+      # demo.ts drives Storefront only. Keep the real request and analytics
+      # gates explicit; synthetic orders/fulfillment remain scenario services.
+      storefront:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+      checkout:
+        condition: service_healthy
+      pricing:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      clickhouse-init:
+        condition: service_completed_successfully
     networks: [pg]
 
 networks:
   pg:
-    name: telemetry-playground
+    # Keep the network project-scoped so clean verification stacks can run
+    # beside a developer stack without alias collisions.
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  redis_data:
+  clickhouse_data:
+  clickhouse_logs:
+  flagd_health_tools:

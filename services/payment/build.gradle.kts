@@ -1,8 +1,7 @@
 import com.google.protobuf.gradle.proto
 
 // Spring Boot + gRPC payment service. Generates Java stubs from the shared
-// ../../proto/pricing.proto and serves the Pricing gRPC contract — the
-// cross-language counterpart to the Rust pricing service.
+// ../../proto/payment.proto contract and serves the durable payment lifecycle.
 //
 // Version note (current compatibility snapshot, 2026-06-23): Spring Boot 4.1.0 + the graduated
 // Spring gRPC 1.1.0 (Boot-owned `spring-boot-starter-grpc-server`). The earlier
@@ -42,10 +41,13 @@ dependencies {
     implementation("io.grpc:grpc-services")
     compileOnly("org.apache.tomcat:annotations-api:6.0.53")
     implementation("org.springframework.boot:spring-boot-starter")
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("io.sentry:sentry-spring-boot-4-starter:8.53.0")
     implementation("io.opentelemetry:opentelemetry-api")
     compileOnly("org.junit.jupiter:junit-jupiter-api")
+    runtimeOnly("org.postgresql:postgresql")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("io.grpc:grpc-inprocess")
     // Keep test traces on the same upstream agent path as the deployed JVM.
