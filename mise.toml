@@ -15,6 +15,14 @@ lockfile = true
 [task_config]
 includes = ["mise-scenarios.toml"]
 
+[tasks.install]
+description = "Provision every pinned tool from mise.lock"
+run = "mise install --locked"
+
+[tasks.build]
+description = "Compile every workspace target with a real codegen build"
+run = "cargo build --locked --workspace --all-targets --all-features"
+
 [tasks."quality:ci"]
 description = "Compile the full Rust workspace with all targets and features"
 run = "cargo check --locked --workspace --all-targets --all-features"
@@ -60,12 +68,14 @@ dir = "web"
 run = ["bun run test", "bun run build"]
 
 [tasks."quality:polyglot"]
-description = "Run Rust, Spring, and web quality gates"
-run = [
-  { task = "quality:ci" },
-  { task = "quality:test" },
-  { task = "quality:lint" },
-  { task = "quality:fmt" },
-  { task = "quality:java" },
-  { task = "quality:web" },
+description = "Provision, build, and run every Rust, Spring, and web quality gate"
+depends = [
+  "install",
+  "build",
+  "quality:ci",
+  "quality:test",
+  "quality:lint",
+  "quality:fmt",
+  "quality:java",
+  "quality:web",
 ]
