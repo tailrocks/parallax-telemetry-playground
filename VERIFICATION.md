@@ -6,10 +6,10 @@ Run it against the current checkout and a clean dependency stack.
 ## Static gates
 
 ```bash
-mise run quality:fmt
-mise run quality:ci
-mise run quality:test
-mise run quality:lint
+mise run fmt
+mise run check
+mise run nextest
+mise run lint
 mise run ci
 mise run check:scenarios
 mise run check:typescript

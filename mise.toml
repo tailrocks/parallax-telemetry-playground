@@ -23,19 +23,19 @@ run = "mise install --locked"
 description = "Compile every workspace target with a real codegen build"
 run = "cargo build --locked --workspace --all-targets --all-features"
 
-[tasks."quality:ci"]
+[tasks.check]
 description = "Compile the full Rust workspace with all targets and features"
 run = "cargo check --locked --workspace --all-targets --all-features"
 
-[tasks."quality:test"]
+[tasks.nextest]
 description = "Run the complete Rust workspace test suite"
 run = "cargo nextest run --locked --workspace --profile ci --no-tests=fail"
 
-[tasks."quality:lint"]
+[tasks.lint]
 description = "Run strict Rust Clippy checks across the workspace"
 run = "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings"
 
-[tasks."quality:fmt"]
+[tasks.fmt]
 description = "Check Rust formatting across the workspace"
 run = "cargo fmt --all -- --check"
 
@@ -74,10 +74,10 @@ description = "Provision, build, and run every Rust, Spring, and web quality gat
 depends = [
   "install",
   "build",
-  "quality:ci",
-  "quality:test",
-  "quality:lint",
-  "quality:fmt",
+  "check",
+  "nextest",
+  "lint",
+  "fmt",
   "quality:java",
   "quality:web",
 ]
@@ -85,4 +85,4 @@ depends = [
 # Code-class CI lane gate: the test-bearing gates only, without the
 # build/lint/fmt provisioning `ci` adds around them.
 [tasks.test]
-depends = ["quality:test", "quality:java", "quality:web"]
+depends = ["nextest", "quality:java", "quality:web"]
