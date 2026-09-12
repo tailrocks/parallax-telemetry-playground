@@ -81,3 +81,8 @@ depends = [
   "quality:java",
   "quality:web",
 ]
+
+# Code-class CI lane gate: the test-bearing gates only, without the
+# build/lint/fmt provisioning `ci` adds around them.
+[tasks.test]
+depends = ["quality:test", "quality:java", "quality:web"]
