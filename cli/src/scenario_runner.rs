@@ -968,6 +968,36 @@ async fn wait_for_issue() -> anyhow::Result<String> {
     }
 }
 
+/// Service-scoped variant of [`wait_for_issue`]: issue identity is
+/// (service, fingerprint), so bundle/CLI calls need both halves.
+async fn wait_for_issue_scoped(service: &str) -> anyhow::Result<(String, String)> {
+    let timeout = std::env::var("PARALLAX_TRACE_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(30);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
+    let query = format!(
+        "{{ issues(service: {service:?}, limit: 8) {{ items {{ service fingerprint title }} }} }}"
+    );
+    loop {
+        let data = parallax_graphql(&query).await.unwrap_or_else(|_| json!({}));
+        if let Some(fingerprint) = data
+            .pointer("/issues/items/0")
+            .filter(|item| item.get("service").and_then(Value::as_str) == Some(service))
+            .and_then(|item| item.get("fingerprint"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            return Ok((service.to_owned(), fingerprint.to_owned()));
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("Parallax produced no issue for service {service:?} after the seed");
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 fn assert_no_canary(label: &str, text: &str) -> anyhow::Result<()> {
     let lowered = text.to_ascii_lowercase();
     for needle in [CANARY_EMAIL, CANARY_TOKEN, CANARY_CARD, CANARY_JWT] {
@@ -4081,9 +4111,9 @@ fn parse_json_output(text: &str) -> Option<Value> {
 
 async fn issue_context() -> anyhow::Result<i32> {
     emit_issue_seed().await?;
-    let fingerprint = wait_for_issue().await?;
+    let (service, fingerprint) = wait_for_issue_scoped("checkout").await?;
     let bundle = parallax_graphql(&format!(
-        "{{ bundle(fingerprint: {fingerprint:?}) {{ canonicalHash markdown json }} }}"
+        "{{ bundle(service: {service:?}, fingerprint: {fingerprint:?}) {{ canonicalHash markdown json }} }}"
     ))
     .await?;
     let bundle = bundle
@@ -4107,6 +4137,8 @@ async fn issue_context() -> anyhow::Result<i32> {
         vec![
             "issue".into(),
             "context".into(),
+            "--service".into(),
+            service.clone(),
             fingerprint.clone(),
             "--format".into(),
             "json".into(),
@@ -4124,11 +4156,17 @@ async fn issue_context() -> anyhow::Result<i32> {
     );
     run_program(
         bin,
-        vec!["issue".into(), "resolve".into(), fingerprint.clone()],
+        vec![
+            "issue".into(),
+            "resolve".into(),
+            "--service".into(),
+            service.clone(),
+            fingerprint.clone(),
+        ],
         None,
     )
     .await?;
-    println!("issue context verified fingerprint={fingerprint} hash={hash}");
+    println!("issue context verified service={service} fingerprint={fingerprint} hash={hash}");
     Ok(0)
 }
 
@@ -5368,6 +5406,7 @@ async fn ui_agent_verify() -> anyhow::Result<i32> {
         ("/investigations", "Investigations"),
         ("/sql", "SQL"),
         ("/tests", "Tests"),
+        ("/rum", "RUM"),
     ] {
         browser.open(&format!("{ui_base}{path}")).await?;
         let snapshot = browser.snapshot().await?.to_ascii_lowercase();
