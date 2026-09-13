@@ -469,6 +469,11 @@ description = "Agent-browser verification for every core UI surface"
 raw = true
 run = "cargo run --locked -p playground-cli -- scenario product:ui_agent_verify"
 
+["product:pr71_live_legs"]
+description = "Live GraphQL + click-through proofs for chart annotations, dominant DB queries, peak traces, and alert graduation"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:pr71_live_legs"
+
 ["corpus:all"]
 description = "Run the complete synthetic corner-case corpus"
 raw = true

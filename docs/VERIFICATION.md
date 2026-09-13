@@ -67,7 +67,7 @@ git diff --check
 ```
 
 `mise run check:scenarios` validates the 92-proof catalog. `mise run corpus:all`
-dispatches those 92 proofs exactly once: 64 A/B/C proofs plus 28 corner
+dispatches those 93 proofs exactly once: 65 A/B/C proofs plus 28 corner
 proofs. Dispatch coverage is not runtime evidence for every proof.
 
 Run `mise run commerce:checkout_saga` or
