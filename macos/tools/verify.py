@@ -407,7 +407,6 @@ def main():
             check("URLSession backend-url", False, r.stderr[-300:])
         else:
             body = json.loads(r.stdout)
-            injected = failureClientTraceparentFromSummary(body)
             got = EchoHandler.received.get("traceparent")
             # dry-run still performs the URLSession POST when --backend-url is set
             check("URLSession injected traceparent received by backend",
