@@ -512,6 +512,31 @@ fn decode_hex_id(hex: &str, expected_bytes: usize) -> anyhow::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn encode_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// Trace id of the first exported span. Each `issue_seed` call mints a new
+/// occurrence identity while keeping exception type/message (fingerprint inputs)
+/// stable.
+pub(crate) fn first_span_trace_id(request: &ExportTraceServiceRequest) -> anyhow::Result<String> {
+    let trace_id = request
+        .resource_spans
+        .first()
+        .and_then(|resource| resource.scope_spans.first())
+        .and_then(|scope| scope.spans.first())
+        .map(|span| span.trace_id.as_slice())
+        .filter(|bytes| !bytes.is_empty())
+        .context("issue seed missing trace id")?;
+    Ok(encode_hex(trace_id))
+}
+
 fn log_record(ts: u64, severity: i32, body: &str, mut attrs: Vec<KeyValue>) -> LogRecord {
     attrs.push(kv(semconv::CLI_INVOCATION_ID, invocation::invocation_id()));
     LogRecord {
@@ -1479,6 +1504,52 @@ mod tests {
         // The histogram rides the standard duration metric so the service
         // latency panel (the exemplar surface) renders it.
         assert_eq!(metrics[2].name, semconv::HTTP_SERVER_REQUEST_DURATION);
+    }
+
+    #[test]
+    fn encode_hex_roundtrips_decode() {
+        let hex = "114faddc6f914a9100000000000000c1";
+        let bytes = decode_hex_id(hex, 16).expect("hex");
+        assert_eq!(encode_hex(&bytes), hex);
+    }
+
+    #[test]
+    fn issue_seed_new_occurrence_keeps_grouping_inputs() {
+        let first = issue_seed();
+        let second = issue_seed();
+        let first_trace = first_span_trace_id(&first).expect("first trace");
+        let second_trace = first_span_trace_id(&second).expect("second trace");
+        assert_ne!(first_trace, second_trace);
+        assert_eq!(first_trace.len(), 32);
+        assert_eq!(second_trace.len(), 32);
+        for request in [&first, &second] {
+            let attributes = &request.resource_spans[0]
+                .resource
+                .as_ref()
+                .expect("resource")
+                .attributes;
+            assert!(attributes.iter().any(|attribute| {
+                attribute.key == semconv::SERVICE_NAME
+                    && attribute.value.as_ref().is_some_and(|value| {
+                        value.value == Some(AnyValueEnum::StringValue("checkout".into()))
+                    })
+            }));
+            let span = &request.resource_spans[0].scope_spans[0].spans[0];
+            assert!(span.status.as_ref().is_some_and(|status| status.code == 2));
+            let attr = |key: &str| {
+                span.attributes.iter().find_map(|attribute| {
+                    if attribute.key != key {
+                        return None;
+                    }
+                    match attribute.value.as_ref()?.value.as_ref()? {
+                        AnyValueEnum::StringValue(text) => Some(text.as_str()),
+                        _ => None,
+                    }
+                })
+            };
+            assert_eq!(attr("exception.type"), Some("TimeoutError"));
+            assert_eq!(attr("exception.message"), Some("connection refused"));
+        }
     }
 
     #[test]

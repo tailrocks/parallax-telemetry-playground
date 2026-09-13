@@ -6,7 +6,7 @@ not public task names and have no aliases. Start the stack first unless the
 task says it owns Compose startup.
 
 `mise run check:scenarios` validates the public catalog and legacy-wrapper
-policy. `mise run corpus:all` dispatches all 91 proofs exactly once: 63 A/B/C
+policy. `mise run corpus:all` dispatches all 92 proofs exactly once: 64 A/B/C
 proofs plus 28 corner proofs. This proves dispatch coverage only; it does not
 prove that every runtime journey, browser assertion, or Parallax failure gate
 has passed.
@@ -90,6 +90,7 @@ has passed.
 | `eco-external` | `ecosystem:external_edge` | External client edge without an invented server node |
 | `eco-full` | `ecosystem:full` | Complete CLI, browser, and service ecosystem corpus |
 | `c1` | `product:issue_context` | Issue context, evidence bundle, and resolution |
+| `c12` | `product:issue_regression` | Resolved issue regresses on a new occurrence of the same fingerprint |
 | `c2` | `product:invocation_lifecycle` | CLI invocation lifecycle and bundle |
 | `c3` | `product:live_tail` | Live logs and traces over SSE |
 | `c4` | `product:alerting` | Alert rule, incident, and webhook flow |
