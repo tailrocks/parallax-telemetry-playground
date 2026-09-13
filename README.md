@@ -166,16 +166,17 @@ mise run failures:inventory            # inventory failure
 mise run jvm:memory_pressure            # JVM GC/memory-pressure workload
 mise run container:recommendation_oom_probe -- --yes # explicit destructive OOM probe
 mise run product:ui_agent_verify       # browser smoke, Parallax CLI required
+mise run ecosystem:service_map         # typed dependency map traffic/error proof
 mise run propagation:malformed         # malformed W3C: best-effort isolation vs strict rejection
 mise run metrics:cardinality_stress    # bounded 200-series cardinality with Parallax proof
-mise run corpus:all                    # all 91 corpus proofs, exactly once
+mise run corpus:all                    # all 92 corpus proofs, exactly once
 ```
 
 Tasks use stable `group:semantic_name` names; numeric IDs are internal fixture
 references, not public aliases. Run
 `mise tasks ls --sort name` to see every grouped task and description. Run
 `mise run demo:full` for the ordered capability tour. `mise run corpus:all`
-dispatches all 91 proofs exactly once: 63 A/B/C proofs plus 28 corner proofs.
+dispatches all 92 proofs exactly once: 63 A/B/C proofs plus 29 corner proofs.
 The corner-case corpus is documented in
 [`docs/corner-case-matrix.md`](docs/corner-case-matrix.md).
 With the stack running, use the load scenario for sustained k6 traffic:

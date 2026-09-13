@@ -802,6 +802,137 @@ pub(crate) fn eco_external() -> Vec<SpanSpec> {
     vec![root, client]
 }
 
+/// eco-service-map (next investigation slice): real OTLP CLIENT/PRODUCER
+/// spans with deterministic dependency identities. Call counts are varied
+/// (database 100, queue 10, external 1) and one low-volume HTTP dependency
+/// is an error edge, so render parity is testable without fabricated rows.
+pub(crate) fn eco_service_map() -> Vec<SpanSpec> {
+    // Keep the complete generated interval strictly in the past. The caller
+    // derives its query window after the child process returns and flushes,
+    // so retries cannot exclude the latest external edge.
+    let base = now_nanos().saturating_sub(1_000_000_000);
+    let mut spans = Vec::new();
+
+    // Instrumented checkout → pricing pair: 10 medium-traffic calls. The
+    // SERVER child prevents the pricing CLIENT span from becoming external.
+    for index in 0..10u64 {
+        let trace = id16(9_000 + index);
+        let start = base + index * 2_000_000;
+        let mut root = SpanSpec::basic(&trace, 9_100, None, "checkout.request", start);
+        root.kind = 2;
+        root.end = start + 20_000_000;
+        root.service = Some("checkout".to_string());
+        root.attrs.push(kv("shape.case", "eco-service-map"));
+
+        let mut client = SpanSpec::basic(
+            &trace,
+            9_101,
+            Some(root.id.clone()),
+            "POST pricing.internal",
+            start + 2_000_000,
+        );
+        client.kind = 3;
+        client.end = start + 14_000_000;
+        client.service = Some("checkout".to_string());
+        client.attrs = vec![
+            kv(semconv::SERVER_ADDRESS, "pricing.internal"),
+            kv(semconv::HTTP_REQUEST_METHOD, "POST"),
+        ];
+
+        let mut server = SpanSpec::basic(
+            &trace,
+            9_102,
+            Some(client.id.clone()),
+            "pricing.quote",
+            start + 3_000_000,
+        );
+        server.kind = 2;
+        server.end = start + 12_000_000;
+        server.service = Some("pricing".to_string());
+
+        spans.extend([root, client, server]);
+    }
+
+    // High-traffic database dependency: 100 unmatched CLIENT calls, three
+    // errors, with a spread of real span durations for p50/p95 aggregation.
+    let database_trace = id16(9_200);
+    for index in 0..100u64 {
+        let mut client = SpanSpec::basic(
+            &database_trace,
+            9_300 + index,
+            None,
+            "SELECT map_orders",
+            base + 100_000_000 + index * 1_000_000,
+        );
+        client.kind = 3;
+        client.end = client.start + 2_000_000 + index * 20_000;
+        client.service = Some("checkout".to_string());
+        client.error = index == 0 || index == 17 || index == 83;
+        client.attrs = vec![
+            kv("db.system.name", "postgresql"),
+            kv("db.namespace", "map_orders"),
+            kv("db.operation.name", "SELECT"),
+        ];
+        spans.push(client);
+    }
+
+    // Medium-traffic queue dependency: 10 PRODUCER calls, one error.
+    for index in 0..10u64 {
+        let trace = id16(9_400 + index);
+        let mut producer = SpanSpec::basic(
+            &trace,
+            9_500 + index,
+            None,
+            "fulfillment.publish",
+            base + 300_000_000 + index * 3_000_000,
+        );
+        producer.kind = 4; // PRODUCER
+        producer.end = producer.start + 4_000_000 + index * 100_000;
+        producer.service = Some("checkout".to_string());
+        producer.error = index == 4;
+        producer.attrs = vec![
+            kv(semconv::MESSAGING_SYSTEM, "rabbitmq"),
+            kv(semconv::MESSAGING_DESTINATION_NAME, "fulfillment"),
+            kv(semconv::MESSAGING_OPERATION_NAME, "publish"),
+        ];
+        spans.push(producer);
+    }
+
+    // Low-traffic external HTTP dependencies: one healthy and one error edge.
+    let mut healthy = SpanSpec::basic(
+        &id16(9_600),
+        9_601,
+        None,
+        "GET api.map.healthy.test",
+        base + 400_000_000,
+    );
+    healthy.kind = 3;
+    healthy.end = healthy.start + 8_000_000;
+    healthy.service = Some("checkout".to_string());
+    healthy.attrs = vec![
+        kv(semconv::SERVER_ADDRESS, "api.map.healthy.test"),
+        kv(semconv::HTTP_REQUEST_METHOD, "GET"),
+    ];
+    let mut error = SpanSpec::basic(
+        &id16(9_700),
+        9_701,
+        None,
+        "GET api.map.error.test",
+        base + 410_000_000,
+    );
+    error.kind = 3;
+    error.end = error.start + 35_000_000;
+    error.error = true;
+    error.status_message = Some("external dependency timeout".to_string());
+    error.service = Some("checkout".to_string());
+    error.attrs = vec![
+        kv(semconv::SERVER_ADDRESS, "api.map.error.test"),
+        kv(semconv::HTTP_REQUEST_METHOD, "GET"),
+    ];
+    spans.extend([healthy, error]);
+    spans
+}
+
 /// m-labels (plan 168): one gauge and one monotonic sum emitted with a
 /// 3-value `region` label (eu/us/ap) at fixed per-region values, so group-by
 /// breakdown output is exactly assertable.
@@ -1014,7 +1145,7 @@ async fn post(path: &str, body: Vec<u8>) -> anyhow::Result<()> {
 pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
     let Some(id) = args.first().map(String::as_str) else {
         anyhow::bail!(
-            "usage: playground shapes <t-deep|t-wide|t-multiroot|t-orphan|t-skew|t-zero|t-links|t-longnames|t-events|eco-external|l-burst|l-bodies|l-patterns|m-shapes|m-labels|m-cardinality|f-attrs|e-burst|e-multi-lang>"
+            "usage: playground shapes <t-deep|t-wide|t-multiroot|t-orphan|t-skew|t-zero|t-links|t-longnames|t-events|eco-external|eco-service-map|l-burst|l-bodies|l-patterns|m-shapes|m-labels|m-cardinality|f-attrs|e-burst|e-multi-lang>"
         );
     };
     println!("shapes: emitting {id} as {SERVICE}");
@@ -1048,6 +1179,7 @@ pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
             post("v1/logs", f_attrs_logs().encode_to_vec()).await?;
         }
         "eco-external" => post_traces(eco_external()).await?,
+        "eco-service-map" => post_traces(eco_service_map()).await?,
         "m-labels" => post("v1/metrics", m_labels().encode_to_vec()).await?,
         "m-cardinality" => post("v1/metrics", m_cardinality().encode_to_vec()).await?,
         "e-burst" => post_traces(e_burst()).await?,
@@ -1102,6 +1234,22 @@ mod tests {
         assert!(
             bare.iter()
                 .all(|attribute| attribute.key != semconv::VCS_REF_HEAD_REVISION)
+        );
+    }
+
+    #[test]
+    fn eco_service_map_lies_in_the_recent_past() {
+        let spans = eco_service_map();
+        let latest = spans
+            .iter()
+            .map(|span| span.end)
+            .max()
+            .expect("service map emits spans");
+        let now = now_nanos();
+        assert!(latest < now, "generated span ended at {latest}, now {now}");
+        assert!(
+            now.saturating_sub(latest) < 2_000_000_000,
+            "generated span is not recent: {latest} vs now {now}"
         );
     }
 
@@ -1214,6 +1362,42 @@ mod tests {
                         })
                 }))
         );
+    }
+
+    #[test]
+    fn eco_service_map_has_varied_dependency_edges() {
+        let spans = eco_service_map();
+        let count = |name: &str| spans.iter().filter(|span| span.name == name).count();
+        assert_eq!(count("SELECT map_orders"), 100);
+        assert_eq!(count("fulfillment.publish"), 10);
+        assert_eq!(count("GET api.map.healthy.test"), 1);
+        assert_eq!(count("GET api.map.error.test"), 1);
+        assert_eq!(
+            spans
+                .iter()
+                .filter(|span| span.name == "SELECT map_orders" && span.error)
+                .count(),
+            3
+        );
+        assert_eq!(
+            spans
+                .iter()
+                .filter(|span| span.name == "fulfillment.publish" && span.error)
+                .count(),
+            1
+        );
+        let error_dependency = spans
+            .iter()
+            .find(|span| span.name == "GET api.map.error.test")
+            .expect("error dependency");
+        assert!(error_dependency.error);
+        assert!(spans.iter().any(|span| span.kind == 4));
+        assert!(spans.iter().any(|span| span.attrs.iter().any(|attribute| {
+            attribute.key == "db.system.name"
+                && attribute.value.as_ref().is_some_and(|value| {
+                    value.value == Some(AnyValueEnum::StringValue("postgresql".to_string()))
+                })
+        })));
     }
 
     #[test]

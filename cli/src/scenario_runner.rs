@@ -108,6 +108,7 @@ pub(crate) const SCENARIO_NAMES: &[&str] = &[
     "journeys:reattach",
     "journeys:parallel",
     "ecosystem:external_edge",
+    "ecosystem:service_map",
     "ecosystem:full",
     "product:issue_context",
     "product:invocation_lifecycle",
@@ -206,6 +207,7 @@ const SCENARIO_PROOF_IDS: &[&str] = &[
     "j-reattach",
     "j-parallel",
     "eco-external",
+    "eco-map",
     "eco-full",
     "c1",
     "c2",
@@ -460,6 +462,7 @@ async fn run_semantic_named(name: &str, extra: &[String]) -> anyhow::Result<i32>
         "journeys:reattach" => journey(&["--seconds", "9", "--reattach", "3"]).await,
         "journeys:parallel" => parallel_journeys().await,
         "ecosystem:external_edge" => run_shape("eco-external").await,
+        "ecosystem:service_map" => service_map_investigation().await,
         "ecosystem:full" => ecosystem_full().await,
         "product:issue_context" => issue_context().await,
         "product:invocation_lifecycle" => invocation_lifecycle().await,
@@ -4090,6 +4093,107 @@ async fn ecosystem_full() -> anyhow::Result<i32> {
     run_current(&[]).await
 }
 
+async fn service_map_investigation() -> anyhow::Result<i32> {
+    // Reuse live commerce/browser telemetry, then add deterministic
+    // low/medium/high dependency traffic and an error edge. Emit the
+    // synthetic evidence in a completed child so its `cli.command` span is
+    // flushed before the service map can be queried.
+    checkout_saga().await?;
+    browser_journey().await?;
+    run_current(&["shapes", "eco-service-map"]).await?;
+
+    let end = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos() as u64;
+    let start = end.saturating_sub(24 * 60 * 60 * 1_000_000_000);
+    let query = format!(
+        "{{ serviceMap(fromNanos: \"{start}\", toNanos: \"{end}\", maxTraces: 100) {{
+            nodes {{ name kind system }}
+            edges {{ source target callCount errorCount p50Ms p95Ms }}
+        }} }}"
+    );
+
+    let mut map = None;
+    for _ in 0..20 {
+        let data = parallax_graphql(&query).await?;
+        let nodes = data
+            .pointer("/serviceMap/nodes")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let kind = |expected: &str| {
+            nodes
+                .iter()
+                .any(|node| node.get("kind").and_then(Value::as_str) == Some(expected))
+        };
+        let edge_targets = data
+            .pointer("/serviceMap/edges")
+            .and_then(Value::as_array)
+            .map(|edges| {
+                edges
+                    .iter()
+                    .filter_map(|edge| edge.get("target").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let has_edge = |target: &str| edge_targets.iter().any(|value| value == &target);
+        if kind("service")
+            && kind("cli")
+            && kind("browser")
+            && kind("database")
+            && kind("queue")
+            && kind("external")
+            && has_edge("map_orders")
+            && has_edge("rabbitmq/fulfillment")
+            && has_edge("api.map.healthy.test")
+            && has_edge("api.map.error.test")
+        {
+            map = Some(data);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let map = map.context("service map did not expose all investigation evidence")?;
+    let edges = map
+        .pointer("/serviceMap/edges")
+        .and_then(Value::as_array)
+        .context("service map edges missing")?;
+    let edge = |target: &str| -> anyhow::Result<&Value> {
+        edges
+            .iter()
+            .find(|edge| edge.get("target").and_then(Value::as_str) == Some(target))
+            .with_context(|| format!("service map edge missing: {target}"))
+    };
+    let number = |edge: &Value, field: &str| {
+        edge.get(field)
+            .and_then(Value::as_str)
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    ensure!(
+        number(edge("map_orders")?, "callCount") >= 100,
+        "database edge is not high traffic"
+    );
+    ensure!(
+        number(edge("rabbitmq/fulfillment")?, "callCount") >= 10,
+        "queue edge is not medium traffic"
+    );
+    ensure!(
+        number(edge("api.map.healthy.test")?, "errorCount") == 0,
+        "healthy external edge has errors"
+    );
+    ensure!(
+        number(edge("api.map.error.test")?, "errorCount") >= 1,
+        "error external edge has no error"
+    );
+    println!(
+        "service map evidence: six node kinds; database={} queue={} healthy/error external edges",
+        number(edge("map_orders")?, "callCount"),
+        number(edge("rabbitmq/fulfillment")?, "callCount")
+    );
+    Ok(0)
+}
+
 fn parse_invocation_id(text: &str) -> Option<String> {
     text.lines()
         .find_map(|line| {
@@ -6041,6 +6145,7 @@ const CORNER_CORPUS_SCENARIOS: &[&str] = &[
     "journeys:reattach",
     "journeys:parallel",
     "ecosystem:external_edge",
+    "ecosystem:service_map",
     "ecosystem:full",
 ];
 
