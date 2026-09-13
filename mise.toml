@@ -39,6 +39,13 @@ run = "cargo clippy --locked --workspace --all-targets --all-features -- -D warn
 description = "Check Rust formatting across the workspace"
 run = "cargo fmt --all -- --check"
 
+# Competitor lab fan-out proof (deploy/comparison/): one deterministic
+# traces:deep trace must arrive in Parallax, Jaeger, and OpenObserve. A live
+# check, not a registered scenario: the corpus gate counts proofs exactly.
+[tasks."check:fanout"]
+description = "Fan-out proof: one traces:deep trace arrives in Parallax, Jaeger, and OpenObserve"
+run = "cargo run --locked -p playground-cli -- check-fanout"
+
 [tasks."quality:java_catalog"]
 description = "Run the Catalog Spring test suite"
 dir = "services/catalog"

@@ -13,6 +13,7 @@
 
 mod commerce_verify;
 mod console_sim;
+mod fanout;
 mod scenario_runner;
 mod shapes;
 mod task_commands;
@@ -48,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
             | "test-verify"
             | "commerce-verify"
             | "check-scenarios"
+            | "check-fanout"
             | "check-typescript"
             | "check-typescript-policy"
             | "postgres-migrate"
@@ -83,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
             "commerce-verify" => commerce_verify_command(&rest).await,
             "scenario" => scenario_runner::run(rest).await,
             "check-scenarios" => task_commands::check_scenarios().await,
+            "check-fanout" => fanout::run(&rest).await,
             "check-typescript" => task_commands::check_typescript().await,
             "check-typescript-policy" => task_commands::check_typescript_policy().await,
             "verify-stack" => task_commands::verify_stack(rest).await,
@@ -136,6 +139,7 @@ fn command_name(mode: &str) -> &'static str {
         "commerce-verify" => "playground.commerce.verify",
         "scenario" => "playground.scenario",
         "check-scenarios" => "playground.check.scenarios",
+        "check-fanout" => "playground.check.fanout",
         "check-typescript" => "playground.check.typescript",
         "check-typescript-policy" => "playground.check.typescript",
         "verify-stack" => "playground.verify.stack",

@@ -1,0 +1,57 @@
+# OTLP fan-out: same playground workload to Parallax + competitors.
+# Ports are collector-internal; the compose file maps them to 24317/24318
+# so a normal `parallax serve` on 4317/4318 is untouched.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  # Operator's own Parallax (`parallax serve`, standard ports).
+  otlp/parallax:
+    endpoint: http://host.docker.internal:4317
+    tls:
+      insecure: true
+  otlp_http/parallax:
+    endpoint: http://host.docker.internal:4318
+    tls:
+      insecure: true
+  otlp/jaeger:
+    endpoint: http://jaeger:4317
+    tls:
+      insecure: true
+  # OpenObserve OTLP/HTTP: /api/{org}/v1/{traces,metrics,logs}.
+  otlp_http/openobserve:
+    endpoint: http://openobserve:5080/api/default
+    tls:
+      insecure: true
+    headers:
+      Authorization: Basic cm9vdEBleGFtcGxlLmNvbTpDb21wbGV4cGFzcyMxMjM=
+      stream-name: default
+
+extensions:
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/parallax, otlp/jaeger, otlp_http/openobserve]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/parallax, otlp_http/openobserve]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/parallax, otlp_http/openobserve]
