@@ -94,6 +94,7 @@ stack:
 | `feature_flags:checkout_variants` | With a configured flagd variant, checkout behavior and business context are observable; flag configuration changes and restart behavior are outside the stack health task. |
 | `failures:payment_latency` / `failures:inventory` | Provider decline and inventory failure are explicit typed failure paths using normal SKUs. |
 | `alerts:error_rate_breach` / `alerts:recovery` | Decline traffic then healthy traffic demonstrate error-rate recovery. |
+| `ecosystem:service_map` | Typed service, CLI, browser, PostgreSQL, RabbitMQ, and external nodes render with varied traffic and healthy/error dependency edges through Parallax GraphQL. |
 | `events:typed_business_events` | Shared typed business event names appear across Rust, Java, and web telemetry. |
 | `product:ui_agent_verify` | Browser surface smoke plus a real click traversal (issue → trace → span → logs → metric exemplar, back-navigation, empty/error/high-volume states) against GraphQL ground truth, when the Parallax browser harness is available. |
 

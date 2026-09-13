@@ -166,6 +166,7 @@ mise run failures:inventory            # inventory failure
 mise run jvm:memory_pressure            # JVM GC/memory-pressure workload
 mise run container:recommendation_oom_probe -- --yes # explicit destructive OOM probe
 mise run product:ui_agent_verify       # browser smoke, Parallax CLI required
+mise run ecosystem:service_map         # typed dependency map traffic/error proof
 mise run propagation:malformed         # malformed W3C: best-effort isolation vs strict rejection
 mise run metrics:cardinality_stress    # bounded 200-series cardinality with Parallax proof
 mise run corpus:all                    # all 91 corpus proofs, exactly once
