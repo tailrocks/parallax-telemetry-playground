@@ -176,7 +176,8 @@ Tasks use stable `group:semantic_name` names; numeric IDs are internal fixture
 references, not public aliases. Run
 `mise tasks ls --sort name` to see every grouped task and description. Run
 `mise run demo:full` for the ordered capability tour. `mise run corpus:all`
-dispatches all 92 proofs exactly once: 63 A/B/C proofs plus 29 corner proofs.
+dispatches all 95 proofs exactly once: 65 A/B/C proofs plus 30 corner proofs.
+
 The corner-case corpus is documented in
 [`docs/corner-case-matrix.md`](docs/corner-case-matrix.md).
 With the stack running, use the load scenario for sustained k6 traffic:

@@ -26,6 +26,10 @@ use playground_telemetry::semconv;
 
 pub(crate) const SERVICE: &str = "playground-shapes";
 
+/// c13 PR71 live legs: dedicated service so annotation/dominant/graduation
+/// assertions filter exactly the legs' own telemetry.
+pub(crate) const PR71_SERVICE: &str = "m3-legs";
+
 pub(crate) fn kv(key: &str, value: &str) -> KeyValue {
     KeyValue {
         key: key.to_string(),
@@ -498,6 +502,88 @@ pub(crate) fn issue_correlated_logs(
     Ok(logs_request(records))
 }
 
+/// c13 PR71 live legs: one trace with ranked database spans — three
+/// `orders` selects (150ms total) dominating one `users` select (10ms) —
+/// under a longer non-DB root span that must NOT enter the rank. Returns
+/// the request plus the trace/root hex ids for GraphQL ground truth.
+pub(crate) fn pr71_db_trace() -> (ExportTraceServiceRequest, String, String) {
+    let trace = id16(0xc13);
+    let base = now_nanos();
+    let mut root = SpanSpec::basic(&trace, 0xc130, None, "m3legs.checkout", base);
+    root.service = Some(PR71_SERVICE.to_owned());
+    root.end = base + 300_000_000;
+    let root_id = root.id.clone();
+    let mut spans = vec![root];
+    for (seed, statement, duration_ms) in [
+        (0xc131, "SELECT * FROM orders WHERE id = 1", 50),
+        (0xc132, "SELECT * FROM orders WHERE id = 2", 60),
+        (0xc133, "SELECT * FROM orders WHERE id = 3", 40),
+        (0xc134, "SELECT * FROM users WHERE id = 7", 10),
+    ] {
+        let mut span = SpanSpec::basic(
+            &trace,
+            seed,
+            Some(root_id.clone()),
+            "db.query",
+            base + (seed - 0xc130) * 1_000_000,
+        );
+        span.service = Some(PR71_SERVICE.to_owned());
+        span.end = span.start + duration_ms as u64 * 1_000_000;
+        span.attrs.push(kv("db.system", "postgresql"));
+        span.attrs.push(kv("db.statement", statement));
+        spans.push(span);
+    }
+    let request = traces_request(spans);
+    (request, encode_hex(&trace), encode_hex(&root_id))
+}
+
+/// c13 PR71 live legs: log records under a caller-chosen service, pinned to
+/// a caller-supplied trace/span (hex). Bodies carry the `pr71-live-legs`
+/// marker so the logs graduation leg asserts against real rows.
+pub(crate) fn pr71_probe_logs(
+    service: &str,
+    trace_hex: &str,
+    span_hex: &str,
+) -> anyhow::Result<ExportLogsServiceRequest> {
+    let trace_id = decode_hex_id(trace_hex, 16)?;
+    let span_id = decode_hex_id(span_hex, 8)?;
+    let base = now_nanos();
+    let mut records = Vec::new();
+    for (index, (severity, body)) in [
+        (9, "pr71-live-legs probe: checkout started"),
+        (
+            17,
+            "pr71-live-legs probe: checkout failed: connection refused",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut record = log_record(
+            base + (index as u64) * 1_000_000,
+            severity,
+            body,
+            vec![kv("shape.case", "pr71-live-legs")],
+        );
+        record.trace_id = trace_id.clone();
+        record.span_id = span_id.clone();
+        records.push(record);
+    }
+    Ok(logs_request_for_service(service, records))
+}
+
+/// c13 PR71 live legs: a single span timestamped exactly at a metric peak
+/// so the peak→traces window resolves a real trace. Returns the request
+/// plus the trace hex id for ground truth.
+pub(crate) fn pr71_peak_witness(peak_nanos: u64) -> (ExportTraceServiceRequest, String) {
+    let trace = id16(0xc13e);
+    let mut span = SpanSpec::basic(&trace, 0xc13e, None, "m3legs.peak_witness", peak_nanos);
+    span.service = Some(PR71_SERVICE.to_owned());
+    span.end = peak_nanos + 5_000_000;
+    let request = traces_request(vec![span]);
+    (request, encode_hex(&trace))
+}
+
 fn decode_hex_id(hex: &str, expected_bytes: usize) -> anyhow::Result<Vec<u8>> {
     anyhow::ensure!(
         hex.len() == expected_bytes * 2,
@@ -510,6 +596,31 @@ fn decode_hex_id(hex: &str, expected_bytes: usize) -> anyhow::Result<Vec<u8>> {
         bytes.push(byte);
     }
     Ok(bytes)
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// Trace id of the first exported span. Each `issue_seed` call mints a new
+/// occurrence identity while keeping exception type/message (fingerprint inputs)
+/// stable.
+pub(crate) fn first_span_trace_id(request: &ExportTraceServiceRequest) -> anyhow::Result<String> {
+    let trace_id = request
+        .resource_spans
+        .first()
+        .and_then(|resource| resource.scope_spans.first())
+        .and_then(|scope| scope.spans.first())
+        .map(|span| span.trace_id.as_slice())
+        .filter(|bytes| !bytes.is_empty())
+        .context("issue seed missing trace id")?;
+    Ok(encode_hex(trace_id))
 }
 
 fn log_record(ts: u64, severity: i32, body: &str, mut attrs: Vec<KeyValue>) -> LogRecord {
@@ -535,10 +646,14 @@ fn log_record(ts: u64, severity: i32, body: &str, mut attrs: Vec<KeyValue>) -> L
 }
 
 fn logs_request(records: Vec<LogRecord>) -> ExportLogsServiceRequest {
+    logs_request_for_service(SERVICE, records)
+}
+
+fn logs_request_for_service(service: &str, records: Vec<LogRecord>) -> ExportLogsServiceRequest {
     ExportLogsServiceRequest {
         resource_logs: vec![ResourceLogs {
             resource: Some(Resource {
-                attributes: required_resource_kvs(SERVICE, env_git_sha().as_deref()),
+                attributes: required_resource_kvs(service, env_git_sha().as_deref()),
                 ..Default::default()
             }),
             scope_logs: vec![ScopeLogs {
@@ -1254,6 +1369,106 @@ mod tests {
     }
 
     #[test]
+    fn pr71_db_trace_has_ranked_db_spans_under_a_non_db_root() {
+        let (request, trace_hex, root_hex) = pr71_db_trace();
+        assert_eq!(trace_hex.len(), 32);
+        assert_eq!(root_hex.len(), 16);
+        let spans: Vec<&Span> = request
+            .resource_spans
+            .iter()
+            .flat_map(|resource| resource.scope_spans.iter())
+            .flat_map(|scope| scope.spans.iter())
+            .collect();
+        assert_eq!(spans.len(), 5);
+        assert!(spans.iter().all(|span| hex(&span.trace_id) == trace_hex));
+        let db_spans: Vec<&&Span> = spans
+            .iter()
+            .filter(|span| {
+                span.attributes
+                    .iter()
+                    .any(|attr| attr.key == "db.statement")
+            })
+            .collect();
+        assert_eq!(db_spans.len(), 4);
+        let orders_ms: u64 = db_spans
+            .iter()
+            .filter(|span| {
+                span.attributes.iter().any(|attr| {
+                    attr.key == "db.statement"
+                        && attr.value.as_ref().is_some_and(|value| {
+                            matches!(&value.value, Some(AnyValueEnum::StringValue(text)) if text.contains("orders"))
+                        })
+                })
+            })
+            .map(|span| span.end_time_unix_nano - span.start_time_unix_nano)
+            .sum();
+        assert_eq!(orders_ms, 150_000_000);
+        let root = spans
+            .iter()
+            .find(|span| hex(&span.span_id) == root_hex)
+            .expect("root span");
+        assert!(
+            root.attributes
+                .iter()
+                .all(|attr| attr.key != "db.statement"),
+            "root must stay out of the dominant-DB rank"
+        );
+    }
+
+    #[test]
+    fn pr71_probe_logs_pin_service_and_marker() {
+        let request = pr71_probe_logs(
+            PR71_SERVICE,
+            "4bf92f3577b34da6a3ce929d0e0e4736",
+            "00f067aa0ba902b7",
+        )
+        .expect("probe logs");
+        let resource = &request.resource_logs[0];
+        let service = resource
+            .resource
+            .as_ref()
+            .and_then(|resource| {
+                resource
+                    .attributes
+                    .iter()
+                    .find(|attr| attr.key == playground_telemetry::semconv::SERVICE_NAME)
+            })
+            .and_then(|attr| attr.value.as_ref())
+            .and_then(|value| match &value.value {
+                Some(AnyValueEnum::StringValue(text)) => Some(text.clone()),
+                _ => None,
+            })
+            .expect("service name");
+        assert_eq!(service, PR71_SERVICE);
+        let bodies: Vec<String> = resource.scope_logs[0]
+            .log_records
+            .iter()
+            .filter_map(|record| match &record.body.as_ref()?.value {
+                Some(AnyValueEnum::StringValue(text)) => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(bodies.len(), 2);
+        assert!(bodies.iter().all(|body| body.contains("pr71-live-legs")));
+    }
+
+    #[test]
+    fn pr71_peak_witness_pins_peak_timestamp() {
+        let peak = 1_789_323_840_000_000_000u64;
+        let (request, trace_hex) = pr71_peak_witness(peak);
+        assert_eq!(trace_hex.len(), 32);
+        let spans: Vec<&Span> = request
+            .resource_spans
+            .iter()
+            .flat_map(|resource| resource.scope_spans.iter())
+            .flat_map(|scope| scope.spans.iter())
+            .collect();
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].start_time_unix_nano, peak);
+        assert_eq!(spans[0].end_time_unix_nano, peak + 5_000_000);
+    }
+
+    #[test]
     fn l_patterns_is_twenty_thousand_lines_with_a_late_spike() {
         let records = l_patterns();
         assert_eq!(records.len(), 20_000);
@@ -1663,6 +1878,52 @@ mod tests {
         // The histogram rides the standard duration metric so the service
         // latency panel (the exemplar surface) renders it.
         assert_eq!(metrics[2].name, semconv::HTTP_SERVER_REQUEST_DURATION);
+    }
+
+    #[test]
+    fn encode_hex_roundtrips_decode() {
+        let hex = "114faddc6f914a9100000000000000c1";
+        let bytes = decode_hex_id(hex, 16).expect("hex");
+        assert_eq!(encode_hex(&bytes), hex);
+    }
+
+    #[test]
+    fn issue_seed_new_occurrence_keeps_grouping_inputs() {
+        let first = issue_seed();
+        let second = issue_seed();
+        let first_trace = first_span_trace_id(&first).expect("first trace");
+        let second_trace = first_span_trace_id(&second).expect("second trace");
+        assert_ne!(first_trace, second_trace);
+        assert_eq!(first_trace.len(), 32);
+        assert_eq!(second_trace.len(), 32);
+        for request in [&first, &second] {
+            let attributes = &request.resource_spans[0]
+                .resource
+                .as_ref()
+                .expect("resource")
+                .attributes;
+            assert!(attributes.iter().any(|attribute| {
+                attribute.key == semconv::SERVICE_NAME
+                    && attribute.value.as_ref().is_some_and(|value| {
+                        value.value == Some(AnyValueEnum::StringValue("checkout".into()))
+                    })
+            }));
+            let span = &request.resource_spans[0].scope_spans[0].spans[0];
+            assert!(span.status.as_ref().is_some_and(|status| status.code == 2));
+            let attr = |key: &str| {
+                span.attributes.iter().find_map(|attribute| {
+                    if attribute.key != key {
+                        return None;
+                    }
+                    match attribute.value.as_ref()?.value.as_ref()? {
+                        AnyValueEnum::StringValue(text) => Some(text.as_str()),
+                        _ => None,
+                    }
+                })
+            };
+            assert_eq!(attr("exception.type"), Some("TimeoutError"));
+            assert_eq!(attr("exception.message"), Some("connection refused"));
+        }
     }
 
     #[test]

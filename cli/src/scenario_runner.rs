@@ -111,6 +111,7 @@ pub(crate) const SCENARIO_NAMES: &[&str] = &[
     "ecosystem:service_map",
     "ecosystem:full",
     "product:issue_context",
+    "product:issue_regression",
     "product:invocation_lifecycle",
     "product:live_tail",
     "product:alerting",
@@ -121,6 +122,7 @@ pub(crate) const SCENARIO_NAMES: &[&str] = &[
     "product:lifecycle_ops",
     "security:redaction_egress",
     "product:ui_agent_verify",
+    "product:pr71_live_legs",
     "propagation:malformed",
     "metrics:cardinality_stress",
 ];
@@ -210,6 +212,7 @@ const SCENARIO_PROOF_IDS: &[&str] = &[
     "eco-map",
     "eco-full",
     "c1",
+    "c12",
     "c2",
     "c3",
     "c4",
@@ -220,6 +223,7 @@ const SCENARIO_PROOF_IDS: &[&str] = &[
     "c9",
     "c10",
     "c11",
+    "c13",
     "b24",
     "b25",
 ];
@@ -465,6 +469,7 @@ async fn run_semantic_named(name: &str, extra: &[String]) -> anyhow::Result<i32>
         "ecosystem:service_map" => service_map_investigation().await,
         "ecosystem:full" => ecosystem_full().await,
         "product:issue_context" => issue_context().await,
+        "product:issue_regression" => issue_regression().await,
         "product:invocation_lifecycle" => invocation_lifecycle().await,
         "product:live_tail" => live_tail().await,
         "product:alerting" => alerting().await,
@@ -475,6 +480,7 @@ async fn run_semantic_named(name: &str, extra: &[String]) -> anyhow::Result<i32>
         "product:lifecycle_ops" => lifecycle_ops().await,
         "security:redaction_egress" => redaction_egress().await,
         "product:ui_agent_verify" => ui_agent_verify().await,
+        "product:pr71_live_legs" => pr71_live_legs().await,
         "propagation:malformed" => malformed_propagation().await,
         "metrics:cardinality_stress" => cardinality_stress().await,
         _ => unreachable!("registry and dispatch must stay in sync"),
@@ -943,7 +949,160 @@ async fn emit_otlp_request(signal: &str, encoded: Vec<u8>) -> anyhow::Result<()>
 }
 
 async fn emit_issue_seed() -> anyhow::Result<()> {
-    emit_trace_request(shapes::issue_seed()).await
+    emit_issue_occurrence().await.map(|_| ())
+}
+
+async fn emit_issue_occurrence() -> anyhow::Result<String> {
+    let request = shapes::issue_seed();
+    let trace_id = shapes::first_span_trace_id(&request)?;
+    emit_trace_request(request).await?;
+    Ok(trace_id)
+}
+
+fn hex_eq(left: &str, right: &str) -> bool {
+    left.eq_ignore_ascii_case(right)
+}
+
+fn parallax_issue_timeout() -> Duration {
+    Duration::from_secs(
+        std::env::var("PARALLAX_TRACE_TIMEOUT_SECONDS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(30),
+    )
+}
+
+/// Wait until GraphQL shows an issue whose last occurrence is `trace_id`.
+/// Does not skip when `PARALLAX_URL` is unset; default URL is used and
+/// GraphQL failure fails the scenario.
+async fn wait_for_issue_last_trace(
+    service: &str,
+    trace_id: &str,
+) -> anyhow::Result<(String, String, i64)> {
+    let deadline = tokio::time::Instant::now() + parallax_issue_timeout();
+    let query = format!(
+        "{{ issues(service: {service:?}, limit: 50) {{ items {{ service fingerprint status eventCount lastTraceId }} }} }}"
+    );
+    let mut last = json!({});
+    loop {
+        match parallax_graphql(&query).await {
+            Ok(data) => {
+                last = data.clone();
+                if let Some((fingerprint, event_count)) = data
+                    .pointer("/issues/items")
+                    .and_then(Value::as_array)
+                    .and_then(|items| {
+                        items.iter().find_map(|item| {
+                            let last_trace = item.get("lastTraceId")?.as_str()?;
+                            if !hex_eq(last_trace, trace_id) {
+                                return None;
+                            }
+                            if item.get("service")?.as_str()? != service {
+                                return None;
+                            }
+                            let fingerprint = item
+                                .get("fingerprint")?
+                                .as_str()
+                                .filter(|value| !value.is_empty())?
+                                .to_owned();
+                            let event_count = item.get("eventCount")?.as_i64()?;
+                            Some((fingerprint, event_count))
+                        })
+                    })
+                {
+                    return Ok((service.to_owned(), fingerprint, event_count));
+                }
+            }
+            Err(error) => last = json!({ "error": error.to_string() }),
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "Parallax produced no issue for service {service:?} occurrence {trace_id} before timeout: {last}"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+async fn wait_for_issue_status(
+    service: &str,
+    fingerprint: &str,
+    expected: &str,
+) -> anyhow::Result<Value> {
+    let deadline = tokio::time::Instant::now() + parallax_issue_timeout();
+    let query = format!(
+        "{{ issue(service: {service:?}, fingerprint: {fingerprint:?}) {{ status eventCount lastTraceId }} }}"
+    );
+    let mut last = json!({});
+    loop {
+        match parallax_graphql(&query).await {
+            Ok(data) => {
+                last = data.clone();
+                if data.pointer("/issue/status").and_then(Value::as_str) == Some(expected) {
+                    return Ok(data);
+                }
+            }
+            Err(error) => last = json!({ "error": error.to_string() }),
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "issue {service}/{fingerprint} status {expected:?} not observed before timeout: {last}"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+async fn wait_for_issue_regressed(
+    service: &str,
+    fingerprint: &str,
+    occurrence_trace_id: &str,
+    previous_event_count: i64,
+) -> anyhow::Result<Value> {
+    let deadline = tokio::time::Instant::now() + parallax_issue_timeout();
+    let query = format!(
+        "{{ issue(service: {service:?}, fingerprint: {fingerprint:?}) {{ status eventCount lastTraceId latestEvent {{ traceId }} }} }}"
+    );
+    let mut last = json!({});
+    loop {
+        match parallax_graphql(&query).await {
+            Ok(data) => {
+                last = data.clone();
+                let issue = data.get("issue");
+                let status = issue
+                    .and_then(|row| row.get("status"))
+                    .and_then(Value::as_str);
+                let event_count = issue
+                    .and_then(|row| row.get("eventCount"))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                let last_trace = issue
+                    .and_then(|row| row.get("lastTraceId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let latest_trace = issue
+                    .and_then(|row| row.pointer("/latestEvent/traceId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let new_occurrence = hex_eq(last_trace, occurrence_trace_id)
+                    || hex_eq(latest_trace, occurrence_trace_id);
+                if status == Some("regressed")
+                    && new_occurrence
+                    && event_count > previous_event_count
+                {
+                    return Ok(data);
+                }
+            }
+            Err(error) => last = json!({ "error": error.to_string() }),
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "issue {service}/{fingerprint} did not become status=regressed for occurrence {occurrence_trace_id} (prior eventCount={previous_event_count}): {last}"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 async fn wait_for_issue() -> anyhow::Result<String> {
@@ -966,6 +1125,36 @@ async fn wait_for_issue() -> anyhow::Result<String> {
         }
         if tokio::time::Instant::now() >= deadline {
             bail!("Parallax produced no issue after the seed");
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+/// Service-scoped variant of [`wait_for_issue`]: issue identity is
+/// (service, fingerprint), so bundle/CLI calls need both halves.
+async fn wait_for_issue_scoped(service: &str) -> anyhow::Result<(String, String)> {
+    let timeout = std::env::var("PARALLAX_TRACE_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(30);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
+    let query = format!(
+        "{{ issues(service: {service:?}, limit: 8) {{ items {{ service fingerprint title }} }} }}"
+    );
+    loop {
+        let data = parallax_graphql(&query).await.unwrap_or_else(|_| json!({}));
+        if let Some(fingerprint) = data
+            .pointer("/issues/items/0")
+            .filter(|item| item.get("service").and_then(Value::as_str) == Some(service))
+            .and_then(|item| item.get("fingerprint"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            return Ok((service.to_owned(), fingerprint.to_owned()));
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("Parallax produced no issue for service {service:?} after the seed");
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -4185,9 +4374,9 @@ fn parse_json_output(text: &str) -> Option<Value> {
 
 async fn issue_context() -> anyhow::Result<i32> {
     emit_issue_seed().await?;
-    let fingerprint = wait_for_issue().await?;
+    let (service, fingerprint) = wait_for_issue_scoped("checkout").await?;
     let bundle = parallax_graphql(&format!(
-        "{{ bundle(fingerprint: {fingerprint:?}) {{ canonicalHash markdown json }} }}"
+        "{{ bundle(service: {service:?}, fingerprint: {fingerprint:?}) {{ canonicalHash markdown json }} }}"
     ))
     .await?;
     let bundle = bundle
@@ -4211,6 +4400,8 @@ async fn issue_context() -> anyhow::Result<i32> {
         vec![
             "issue".into(),
             "context".into(),
+            "--service".into(),
+            service.clone(),
             fingerprint.clone(),
             "--format".into(),
             "json".into(),
@@ -4228,11 +4419,58 @@ async fn issue_context() -> anyhow::Result<i32> {
     );
     run_program(
         bin,
-        vec!["issue".into(), "resolve".into(), fingerprint.clone()],
+        vec![
+            "issue".into(),
+            "resolve".into(),
+            "--service".into(),
+            service.clone(),
+            fingerprint.clone(),
+        ],
         None,
     )
     .await?;
-    println!("issue context verified fingerprint={fingerprint} hash={hash}");
+    println!("issue context verified service={service} fingerprint={fingerprint} hash={hash}");
+    Ok(0)
+}
+
+async fn issue_regression() -> anyhow::Result<i32> {
+    let first_trace = emit_issue_occurrence().await?;
+    let (service, fingerprint, event_count) =
+        wait_for_issue_last_trace("checkout", &first_trace).await?;
+
+    let resolved = parallax_graphql(&format!(
+        "mutation {{ issueSetStatus(service: {service:?}, fingerprint: {fingerprint:?}, status: \"resolved\") {{ service fingerprint status }} }}"
+    ))
+    .await?;
+    ensure!(
+        resolved
+            .pointer("/issueSetStatus/status")
+            .and_then(Value::as_str)
+            == Some("resolved"),
+        "issueSetStatus did not persist resolved: {resolved}"
+    );
+    wait_for_issue_status(&service, &fingerprint, "resolved").await?;
+
+    let second_trace = emit_issue_occurrence().await?;
+    ensure!(
+        !hex_eq(&first_trace, &second_trace),
+        "regression seed reused occurrence identity {first_trace}"
+    );
+
+    let snapshot =
+        wait_for_issue_regressed(&service, &fingerprint, &second_trace, event_count).await?;
+    let status = snapshot
+        .pointer("/issue/status")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    ensure!(
+        status == "regressed",
+        "issue status must be regressed, got {status:?}: {snapshot}"
+    );
+
+    println!(
+        "issue regression verified service={service} fingerprint={fingerprint} first={first_trace} second={second_trace} status={status}"
+    );
     Ok(0)
 }
 
@@ -4807,7 +5045,7 @@ async fn sentry_envelopes() -> anyhow::Result<i32> {
     )
     .await?;
     run_bun_script_with_env(
-        "scenarios/c8-emit-js.ts",
+        "web/scenarios/c8-emit-js.ts",
         &[],
         &[("SENTRY_DSN", dsn.as_str())],
     )
@@ -5141,24 +5379,25 @@ impl UiBrowser {
     }
 }
 
-/// Poll snapshots for a click target resolved by `pick`; clicks the first
-/// match and returns true, or false when the bounded wait expires.
-async fn ui_click_first(
+/// Poll `document`-scoped evaluated text until `needle` appears or the
+/// bounded wait expires; returns the matching text. Plain `<p>`/`<li>`
+/// text nodes never appear in the a11y snapshot, so overlay and prefill
+/// legs assert through the DOM instead.
+async fn ui_wait_for_eval(
     browser: &UiBrowser,
     label: &str,
+    script: &str,
+    needle: &str,
     timeout: Duration,
-    pick: impl Fn(&str) -> Option<String>,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<String> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        let snapshot = browser.snapshot().await?;
-        if let Some(target) = pick(&snapshot) {
-            browser.click(&target).await?;
-            return Ok(true);
+        let text = browser.eval(script).await?;
+        if text.contains(needle) {
+            return Ok(text);
         }
         if tokio::time::Instant::now() >= deadline {
-            println!("UI traversal notice: {label} never appeared; degrading");
-            return Ok(false);
+            bail!("{label}: DOM text never contained {needle:?} (last: {text:?})");
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -5251,11 +5490,9 @@ async fn ui_traversal_seed() -> anyhow::Result<UiTraversalSeed> {
         .filter(|value| *value > 0)
         .unwrap_or(30);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
-    // NOTE: `issue.events` is intentionally avoided here: it routes through
-    // the batched `error_events_by_fingerprints` query whose outer SELECT
-    // references `"ts"` from a subquery that only exposes `ts_nanos`
-    // (parallax-side defect, outside playground ownership). Resolve the
-    // occurrence ids through `lastTraceId` + the trace itself instead.
+    // Resolve the seeded occurrence through `lastTraceId` + the trace
+    // itself; hop 2 then proves the `issue.events`-backed occurrence links
+    // render by clicking one for real (fail-loud, no degraded path).
     let trace_id = loop {
         let data = parallax_graphql(&format!(
             "{{ issue(service: \"checkout\", fingerprint: {fingerprint:?}) \
@@ -5472,6 +5709,7 @@ async fn ui_agent_verify() -> anyhow::Result<i32> {
         ("/investigations", "Investigations"),
         ("/sql", "SQL"),
         ("/tests", "Tests"),
+        ("/rum", "RUM"),
     ] {
         browser.open(&format!("{ui_base}{path}")).await?;
         let snapshot = browser.snapshot().await?.to_ascii_lowercase();
@@ -5519,29 +5757,19 @@ async fn ui_traversal(
     println!("UI traversal hop 1: issues -> {url}");
 
     let trace_prefix = seed.trace_id[..16.min(seed.trace_id.len())].to_owned();
-    // Prefer the real occurrence → trace click. When the issue page cannot
-    // render its occurrences (currently: the parallax `issue.events`
-    // backend defect noted in `ui_traversal_seed`), fall back to direct
-    // navigation so the remaining real-click hops still verify.
-    let clicked = ui_click_first(browser, "issue detail occurrence link", hop, |snapshot| {
-        ui_snapshot_ref(snapshot, &["Open trace", trace_prefix.as_str()])
-            .or_else(|| ui_snapshot_ref(snapshot, &[trace_href.as_str()]))
-    })
-    .await?;
-    if clicked {
-        browser
-            .wait_for_url("trace detail", &trace_href, hop)
-            .await?;
-    } else {
-        println!(
-            "UI traversal hop 2 degraded: issue page shows no occurrence trace link \
-             (parallax issue.events backend gap); navigating directly to {trace_href}"
-        );
-        browser.open(&format!("{ui_base}{trace_href}")).await?;
-        browser
-            .wait_for_url("trace detail", &trace_href, hop)
-            .await?;
-    }
+    // The occurrence → trace click must succeed: parallax PR70 fixed the
+    // `issue.events` backend defect, so a missing occurrence link is a
+    // loud regression, never a degradation case.
+    let snapshot = browser
+        .wait_for_text("issue detail occurrence link", &trace_prefix, hop)
+        .await?;
+    let target = ui_snapshot_ref(&snapshot, &["Open trace", trace_prefix.as_str()])
+        .or_else(|| ui_snapshot_ref(&snapshot, &[trace_href.as_str()]))
+        .context("issue detail shows no occurrence trace link for the seeded occurrence")?;
+    browser.click(&target).await?;
+    browser
+        .wait_for_url("trace detail", &trace_href, hop)
+        .await?;
     let url = browser.current_url().await?;
     ensure!(
         url.contains(&seed.trace_id),
@@ -5739,6 +5967,647 @@ async fn ui_state_coverage(browser: &UiBrowser, ui_base: &str) -> anyhow::Result
     Ok(())
 }
 
+/// Release version the c13 legs expect on their spans: the shapes resource
+/// default (`RELEASE`, else `0.1.0`). Export `RELEASE=m3.1.0` for
+/// distinctive annotation titles; the service filter keeps the legs exact
+/// under any value.
+fn pr71_release() -> String {
+    std::env::var("RELEASE")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "0.1.0".to_owned())
+}
+
+/// c13 ground truth: a versioned DB trace, correlated probe logs, a checkout
+/// error occurrence, and m-shapes metric data — every leg below fails when
+/// its backend data is absent.
+struct Pr71Seed {
+    db_trace_id: String,
+    error_trace_id: String,
+    witness_trace_id: String,
+}
+
+/// Mirror of the metric-detail loader query for
+/// `http.server.request.duration?kind=histogram&range=1h&step=30`
+/// (histogram/p50, step 30, last hour): the exact series the UI peak link
+/// is computed from. The 1h/step-30 path also keeps the chart multi-point
+/// so annotation ReferenceLines render (a single-category chart emits none).
+async fn pr71_peak_window() -> anyhow::Result<(u128, u128, u128, f64)> {
+    let now = ui_now_nanos();
+    let from_range = now.saturating_sub(3_600_000_000_000);
+    let data = parallax_graphql(&format!(
+        "{{ metricQuery(name: \"http.server.request.duration\", kind: \"histogram\", \
+         agg: \"p50\", fromNanos: \"{from_range}\", toNanos: \"{now}\", stepSeconds: 30) \
+         {{ series {{ points {{ tsNanos value }} }} }} }}",
+    ))
+    .await?;
+    let series = data
+        .pointer("/metricQuery/series")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    // Mirror the UI `peakWindowFromSeries`: highest sample wins, padded
+    // ±60s into a traces window.
+    let mut peak: Option<(u128, f64)> = None;
+    for bucket in &series {
+        let points = bucket
+            .get("points")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for point in &points {
+            let (Some(ts), Some(value)) = (
+                point
+                    .get("tsNanos")
+                    .and_then(Value::as_str)
+                    .and_then(|ts| ts.parse::<u128>().ok()),
+                point.get("value").and_then(Value::as_f64),
+            ) else {
+                continue;
+            };
+            if peak.is_none_or(|(_, best)| value > best) {
+                peak = Some((ts, value));
+            }
+        }
+    }
+    let Some((peak_ts, peak_value)) = peak else {
+        bail!("metric series has no usable points for a peak window");
+    };
+    let pad = 60_000_000_000u128;
+    Ok((
+        peak_ts.saturating_sub(pad),
+        peak_ts + pad,
+        peak_ts,
+        peak_value,
+    ))
+}
+
+/// c13 `product:pr71_live_legs`: dedicated LIVE proofs for the parallax
+/// PR71 slices — chartAnnotations+overlay, dominantDbQueries, peak→traces,
+/// alert graduation prefill — each asserted against a real stack at both
+/// the GraphQL and the click-through UI layers.
+async fn pr71_live_legs() -> anyhow::Result<i32> {
+    let seed = pr71_seed().await?;
+    pr71_graphql_legs(&seed).await?;
+    pr71_ui_legs(&seed).await?;
+    Ok(0)
+}
+
+async fn pr71_seed() -> anyhow::Result<Pr71Seed> {
+    let (db_request, db_trace_id, root_span_id) = shapes::pr71_db_trace();
+    emit_trace_request(db_request).await?;
+    let logs = shapes::pr71_probe_logs(shapes::PR71_SERVICE, &db_trace_id, &root_span_id)?;
+    emit_log_request(logs).await?;
+    let error_trace_id = emit_issue_occurrence().await?;
+    run_shape("m-shapes").await?;
+    let timeout = parallax_issue_timeout();
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let data = parallax_graphql(&format!(
+            "{{ trace(traceId: {db_trace_id:?}) {{ spans {{ spanId }} }} }}"
+        ))
+        .await?;
+        let spans = data
+            .pointer("/trace/spans")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0);
+        if spans >= 5 {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("pr71 DB trace never arrived with all 5 spans (saw {spans})");
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let expected = pr71_release();
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let data = parallax_graphql(&format!(
+            "{{ chartAnnotations(fromNanos: \"0\", toNanos: \"{}\", service: {:?}) \
+             {{ title service }} }}",
+            ui_now_nanos() + 300_000_000_000,
+            shapes::PR71_SERVICE,
+        ))
+        .await?;
+        let matched = data
+            .pointer("/chartAnnotations")
+            .and_then(Value::as_array)
+            .is_some_and(|rows| {
+                rows.iter()
+                    .any(|row| row.get("title").and_then(Value::as_str) == Some(expected.as_str()))
+            });
+        if matched {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("pr71 release annotation {expected} never arrived");
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let deadline = tokio::time::Instant::now() + timeout;
+    let peak_ts = loop {
+        if let Ok((_, _, peak_ts, _)) = pr71_peak_window().await {
+            break peak_ts;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("pr71 histogram series never arrived");
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    // The m-shapes peak lands wherever the synthetic history spikes; pin a
+    // witness trace exactly at the peak so the peak→traces window resolves
+    // a real trace.
+    let peak_u64: u64 = peak_ts.try_into().context("peak timestamp overflows u64")?;
+    let (witness_request, witness_trace_id) = shapes::pr71_peak_witness(peak_u64);
+    emit_trace_request(witness_request).await?;
+    let deadline = tokio::time::Instant::now() + timeout;
+    let (peak_value, peak_ts) = loop {
+        let (from, to, peak_ts, peak_value) = pr71_peak_window().await?;
+        let data = parallax_graphql(&format!(
+            "{{ tracesPage(fromNanos: \"{from}\", toNanos: \"{to}\", limit: 50) \
+             {{ items {{ traceId }} }} }}",
+        ))
+        .await?;
+        let matched = data
+            .pointer("/tracesPage/items")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.get("traceId").and_then(Value::as_str) == Some(witness_trace_id.as_str())
+                })
+            });
+        if matched {
+            break (peak_value, peak_ts);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("pr71 peak witness never arrived in {from}..{to}");
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let data = parallax_graphql(&format!(
+            "{{ logs(traceId: {db_trace_id:?}, limit: 5) {{ body }} }}"
+        ))
+        .await?;
+        let matched = data
+            .pointer("/logs")
+            .and_then(Value::as_array)
+            .is_some_and(|rows| {
+                rows.iter().any(|row| {
+                    row.get("body")
+                        .and_then(Value::as_str)
+                        .is_some_and(|body| body.contains("pr71-live-legs probe"))
+                })
+            });
+        if matched {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("pr71 probe logs never arrived");
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    println!(
+        "pr71 seed: db_trace={db_trace_id} root_span={root_span_id} error_trace={error_trace_id} \
+         witness={witness_trace_id} peak={peak_value}@{peak_ts}"
+    );
+    Ok(Pr71Seed {
+        db_trace_id,
+        error_trace_id,
+        witness_trace_id,
+    })
+}
+
+/// GraphQL half of c13: chartAnnotations, dominantDbQueries, and the
+/// peak→traces resolution the "Traces around peak" link encodes.
+async fn pr71_graphql_legs(seed: &Pr71Seed) -> anyhow::Result<()> {
+    let expected = pr71_release();
+    let to_nanos = ui_now_nanos() + 300_000_000_000;
+    let data = parallax_graphql(&format!(
+        "{{ chartAnnotations(fromNanos: \"0\", toNanos: \"{to_nanos}\", \
+         service: {:?}) {{ tsNanos kind title service }} }}",
+        shapes::PR71_SERVICE,
+    ))
+    .await?;
+    let rows = data
+        .pointer("/chartAnnotations")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mark = rows
+        .iter()
+        .find(|row| row.get("title").and_then(Value::as_str) == Some(expected.as_str()));
+    let Some(mark) = mark else {
+        bail!("chartAnnotations omits the {expected} release mark: {rows:?}");
+    };
+    ensure!(
+        mark.get("kind").and_then(Value::as_str) == Some("release")
+            && mark.get("service").and_then(Value::as_str) == Some(shapes::PR71_SERVICE)
+            && mark
+                .get("tsNanos")
+                .and_then(Value::as_str)
+                .and_then(|ts| ts.parse::<u128>().ok())
+                .is_some_and(|ts| ts > 0),
+        "chartAnnotations mark has wrong shape: {mark:?}"
+    );
+    let data = parallax_graphql(&format!(
+        "{{ releases(service: {:?}, fromNanos: \"0\", toNanos: \"{to_nanos}\") \
+         {{ version spanCount }} }}",
+        shapes::PR71_SERVICE,
+    ))
+    .await?;
+    let windows = data
+        .pointer("/releases")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    ensure!(
+        windows.iter().any(|window| {
+            window.get("version").and_then(Value::as_str) == Some(expected.as_str())
+                && window
+                    .get("spanCount")
+                    .and_then(Value::as_str)
+                    .and_then(|count| count.parse::<u64>().ok())
+                    .is_some_and(|count| count > 0)
+        }),
+        "releases() omits the {expected} window behind the annotation: {windows:?}"
+    );
+    println!("pr71 leg a: chartAnnotations carries release {expected}");
+
+    let data = parallax_graphql(&format!(
+        "{{ trace(traceId: {:?}) {{ dominantDbQueries \
+         {{ normalized example count totalNs maxNs exampleSpanId service }} }} }}",
+        seed.db_trace_id,
+    ))
+    .await?;
+    let queries = data
+        .pointer("/trace/dominantDbQueries")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    ensure!(
+        queries.len() == 2,
+        "dominantDbQueries must rank exactly the 2 DB groups (root excluded): {queries:?}"
+    );
+    let first = &queries[0];
+    let second = &queries[1];
+    let first_total: u128 = first
+        .get("totalNs")
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    let second_total: u128 = second
+        .get("totalNs")
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    ensure!(
+        first.get("count").and_then(Value::as_i64) == Some(3)
+            && first
+                .get("normalized")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("orders")),
+        "dominantDbQueries rank head must be the 3-span orders group: {first:?}"
+    );
+    ensure!(
+        second.get("count").and_then(Value::as_i64) == Some(1)
+            && second
+                .get("normalized")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains("users")),
+        "dominantDbQueries rank tail must be the 1-span users group: {second:?}"
+    );
+    ensure!(
+        first_total > second_total && second_total > 0,
+        "dominantDbQueries must sort by total duration descending: {queries:?}"
+    );
+    for query in &queries {
+        ensure!(
+            query.get("service").and_then(Value::as_str) == Some(shapes::PR71_SERVICE)
+                && query
+                    .get("example")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| !text.is_empty())
+                && query
+                    .get("exampleSpanId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| {
+                        id.len() == 16 && id.chars().all(|c| c.is_ascii_hexdigit())
+                    }),
+            "dominantDbQueries row has wrong shape: {query:?}"
+        );
+    }
+    println!("pr71 leg b: dominantDbQueries ranks orders(3) over users(1)");
+
+    let (from, to, peak_ts, peak_value) = pr71_peak_window().await?;
+    let data = parallax_graphql(&format!(
+        "{{ tracesPage(fromNanos: \"{from}\", toNanos: \"{to}\", limit: 50) \
+         {{ total items {{ traceId }} }} }}",
+    ))
+    .await?;
+    let total: u64 = data
+        .pointer("/tracesPage/total")
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    let items = data
+        .pointer("/tracesPage/items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    ensure!(
+        total > 0
+            && items.iter().any(|item| {
+                item.get("traceId").and_then(Value::as_str) == Some(seed.witness_trace_id.as_str())
+            }),
+        "peak window {from}..{to} (peak {peak_value} at {peak_ts}) resolves no real traces: total={total} items={items:?}"
+    );
+    println!("pr71 leg c: peak {peak_value} window holds {total} traces incl the witness");
+    Ok(())
+}
+
+/// Alert-dialog DOM text: graduation prefill renders as plain `<p>` text,
+/// invisible to the a11y snapshot.
+const PR71_DIALOG_TEXT: &str = "document.querySelector('[role=\"dialog\"]')?.innerText ?? ''";
+
+/// UI half of c13: the metric overlay, the peak link click-through, the
+/// dominant-DB panel, and alert graduation prefill from all three signals.
+async fn pr71_ui_legs(seed: &Pr71Seed) -> anyhow::Result<()> {
+    let api_base = url_env("PARALLAX_URL", "http://127.0.0.1:4000");
+    let ui_base = std::env::var("PARALLAX_UI_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(api_base)
+        .trim_end_matches('/')
+        .to_owned();
+    let session = if let Some(session) = std::env::var("AGENT_BROWSER_SESSION")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    {
+        session
+    } else {
+        let (code, output) = capture_program(
+            PathBuf::from("agent-browser"),
+            vec![
+                "session".into(),
+                "id".into(),
+                "--scope".into(),
+                "worktree".into(),
+                "--prefix".into(),
+                "m3legs".into(),
+            ],
+            None,
+        )
+        .await?;
+        ensure!(code == 0, "agent-browser session creation failed: {output}");
+        output
+            .split_whitespace()
+            .last()
+            .map(str::to_owned)
+            .context("agent-browser returned no session id")?
+    };
+    let browser = UiBrowser {
+        program: PathBuf::from("agent-browser"),
+        session,
+    };
+    browser
+        .command(vec![
+            "set".into(),
+            "viewport".into(),
+            "1440".into(),
+            "900".into(),
+        ])
+        .await?;
+    browser.open(&format!("{ui_base}/")).await?;
+    if let Some(token) = std::env::var("PARALLAX_API_TOKEN")
+        .ok()
+        .filter(|token| !token.trim().is_empty())
+    {
+        let encoded = serde_json::to_string(&token)?;
+        browser
+            .eval(&format!(
+                "localStorage.setItem('parallax.api-token', {encoded})"
+            ))
+            .await?;
+        browser.command(vec!["reload".into()]).await?;
+        browser.settle().await;
+    }
+    let hop = Duration::from_secs(15);
+    let metric = "http.server.request.duration";
+
+    browser
+        .open(&format!(
+            "{ui_base}/metrics/{metric}?kind=histogram&range=1h&step=30"
+        ))
+        .await?;
+    let snapshot = browser
+        .wait_for_text("metric peak link", "Traces around peak", hop)
+        .await?;
+    // The annotation `<li>` text nodes never appear in the a11y snapshot,
+    // so assert the overlay through the DOM: the marks list carries the
+    // release mark and the same marks array renders ReferenceLines.
+    let expected = pr71_release();
+    let deadline = tokio::time::Instant::now() + hop;
+    let overlay = loop {
+        let text = browser
+            .eval("document.querySelector('[data-testid=\"chart-annotations\"]')?.innerText ?? ''")
+            .await?;
+        if text.contains(&expected) && text.contains(shapes::PR71_SERVICE) {
+            break text;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "metric detail omits the chart-annotation overlay mark for release {expected}:\n{snapshot}"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    ensure!(
+        overlay.contains("release"),
+        "chart-annotation overlay mark has the wrong kind: {overlay:?}"
+    );
+    let lines = browser
+        .eval(
+            "document.querySelectorAll('.recharts-wrapper svg line[stroke-dasharray=\"3 3\"]').length",
+        )
+        .await?;
+    let rendered: usize = lines
+        .trim()
+        .parse()
+        .with_context(|| format!("unreadable ReferenceLine count from metric chart: {lines:?}"))?;
+    let items = browser
+        .eval("document.querySelectorAll('[data-testid=\"chart-annotations\"] li').length")
+        .await?;
+    let marks: usize = items.trim().parse().with_context(|| {
+        format!("unreadable annotation mark count from metric chart: {items:?}")
+    })?;
+    ensure!(
+        rendered > 0 && rendered == marks,
+        "metric chart overlay mismatch: {rendered} ReferenceLines for {marks} annotation marks"
+    );
+    println!(
+        "pr71 ui leg a: metric detail overlays release {expected} ({rendered} ReferenceLines)"
+    );
+    let target = ui_snapshot_ref(&snapshot, &["Traces around peak"])
+        .context("metric detail has no Traces around peak link")?;
+    browser.click(&target).await?;
+    let url = browser.wait_for_url("peak traces", "/traces", hop).await?;
+    ensure!(
+        url.contains("from=") && url.contains("to="),
+        "peak link did not carry the padded window: {url}"
+    );
+    let snapshot = browser
+        .wait_for_text("peak traces", &seed.witness_trace_id[..16], hop)
+        .await?;
+    let lowered = snapshot.to_ascii_lowercase();
+    ensure!(
+        !lowered.contains("no matching traces") && !lowered.contains("no traces yet"),
+        "peak window shows an empty state instead of real traces:\n{snapshot}"
+    );
+    println!("pr71 ui leg c: peak link resolves to real traces at {url}");
+
+    browser
+        .open(&format!("{ui_base}/traces/{}", seed.db_trace_id))
+        .await?;
+    let snapshot = browser
+        .wait_for_text("dominant db panel", "Dominant database queries", hop)
+        .await?;
+    for needle in ["orders", "users"] {
+        ensure!(
+            snapshot.to_ascii_lowercase().contains(needle),
+            "dominant-DB panel omits the {needle} group:\n{snapshot}"
+        );
+    }
+    println!("pr71 ui leg b: trace detail ranks the dominant DB queries");
+
+    browser
+        .open(&format!(
+            "{ui_base}/metrics/{metric}?kind=histogram&range=1h&step=30"
+        ))
+        .await?;
+    let snapshot = browser
+        .wait_for_text("metric graduation", "Create alert", hop)
+        .await?;
+    let target = ui_snapshot_ref(&snapshot, &["Create alert"])
+        .context("metric detail has no Create alert button")?;
+    browser.click(&target).await?;
+    let url = browser
+        .wait_for_url("metric graduation", "/alerts", hop)
+        .await?;
+    ensure!(
+        url.contains("signal_type=metric")
+            && url.contains(&format!("metric_name={metric}"))
+            && url.contains("metric_aggregation=p50"),
+        "metric graduation lost its prefill context: {url}"
+    );
+    let dialog =
+        ui_wait_for_eval(&browser, "metric prefill", PR71_DIALOG_TEXT, metric, hop).await?;
+    ensure!(
+        dialog.contains("p50"),
+        "metric graduation dialog omits the aggregation: {dialog:?}"
+    );
+    println!("pr71 ui leg d: metric graduation prefills {url}");
+
+    browser
+        .open(&format!("{ui_base}/logs?service={}", shapes::PR71_SERVICE))
+        .await?;
+    let snapshot = browser
+        .wait_for_text("logs graduation rows", "pr71-live-legs probe", hop)
+        .await?;
+    let target = ui_snapshot_ref(&snapshot, &["Create alert"])
+        .context("logs page has no Create alert button")?;
+    browser.click(&target).await?;
+    let url = browser
+        .wait_for_url("logs graduation", "/alerts", hop)
+        .await?;
+    ensure!(
+        url.contains("signal_type=log_count")
+            && url.contains(&format!("service={}", shapes::PR71_SERVICE)),
+        "logs graduation lost its prefill context: {url}"
+    );
+    let dialog =
+        ui_wait_for_eval(&browser, "logs prefill", PR71_DIALOG_TEXT, "log_count", hop).await?;
+    ensure!(
+        dialog.contains(shapes::PR71_SERVICE),
+        "logs graduation dialog omits the service scope: {dialog:?}"
+    );
+    println!("pr71 ui leg d: logs graduation prefills {url}");
+
+    browser
+        .open(&format!(
+            "{ui_base}/traces?service={}",
+            shapes::PR71_SERVICE
+        ))
+        .await?;
+    let snapshot = browser
+        .wait_for_text("traces graduation rows", &seed.db_trace_id[..16], hop)
+        .await?;
+    let target = ui_snapshot_ref(&snapshot, &["Create alert"])
+        .context("traces page has no Create alert button")?;
+    browser.click(&target).await?;
+    let url = browser
+        .wait_for_url("traces graduation", "/alerts", hop)
+        .await?;
+    ensure!(
+        url.contains("signal_type=p95_latency")
+            && url.contains(&format!("service={}", shapes::PR71_SERVICE)),
+        "traces graduation lost its prefill context: {url}"
+    );
+    let dialog = ui_wait_for_eval(
+        &browser,
+        "traces prefill",
+        PR71_DIALOG_TEXT,
+        "p95_latency",
+        hop,
+    )
+    .await?;
+    ensure!(
+        dialog.contains(shapes::PR71_SERVICE),
+        "traces graduation dialog omits the service scope: {dialog:?}"
+    );
+    println!("pr71 ui leg d: traces graduation prefills {url}");
+
+    browser
+        .open(&format!("{ui_base}/traces?service=checkout"))
+        .await?;
+    let snapshot = browser
+        .wait_for_text("errors-only toggle", "Errors only", hop)
+        .await?;
+    let target = ui_snapshot_ref(&snapshot, &["Errors only"])
+        .context("traces page has no Errors only toggle")?;
+    browser.click(&target).await?;
+    browser
+        .wait_for_text("errors-only rows", &seed.error_trace_id[..16], hop)
+        .await?;
+    let snapshot = browser.snapshot().await?;
+    let target = ui_snapshot_ref(&snapshot, &["Create alert"])
+        .context("errors-only traces page has no Create alert button")?;
+    browser.click(&target).await?;
+    let url = browser
+        .wait_for_url("error-rate graduation", "/alerts", hop)
+        .await?;
+    ensure!(
+        url.contains("signal_type=error_rate") && url.contains("service=checkout"),
+        "errors-only graduation lost its prefill context: {url}"
+    );
+    let dialog = ui_wait_for_eval(
+        &browser,
+        "error-rate prefill",
+        PR71_DIALOG_TEXT,
+        "error_rate",
+        hop,
+    )
+    .await?;
+    ensure!(
+        dialog.contains("checkout"),
+        "error-rate graduation dialog omits the service scope: {dialog:?}"
+    );
+    println!("pr71 ui leg d: errors-only graduation prefills {url}");
+    Ok(())
+}
+
 async fn run_bun_script(relative: &str, args: &[&str]) -> anyhow::Result<i32> {
     run_bun_script_with_env(relative, args, &[]).await
 }
@@ -5749,10 +6618,16 @@ async fn run_bun_script_with_env(
     env: &[(&str, &str)],
 ) -> anyhow::Result<i32> {
     let root = repository_root();
-    let (cwd, script) = if relative == "scenarios/c8-emit-js.ts" {
-        (root.join("web"), "../scenarios/c8-emit-js.ts".to_owned())
-    } else {
-        (root.clone(), relative.to_owned())
+    let script_path = root.join(relative);
+    ensure!(
+        script_path.is_file(),
+        "bun script missing: {}",
+        script_path.display()
+    );
+    // Bun resolves node_modules from the cwd: scripts under web/ run there.
+    let (cwd, script) = match relative.strip_prefix("web/") {
+        Some(rest) => (root.join("web"), rest.to_owned()),
+        None => (root.clone(), relative.to_owned()),
     };
     let mut command_args = vec![script];
     command_args.extend(args.iter().map(|arg| (*arg).to_owned()));
@@ -6321,6 +7196,16 @@ mod tests {
         assert_eq!(super::shapes::cardinality_bucket_label(0), "000");
         assert_eq!(super::shapes::cardinality_bucket_label(199), "199");
         assert_eq!(super::shapes::CARDINALITY_SERIES, 200);
+    }
+
+    #[test]
+    fn issue_regression_is_registered_product_proof() {
+        assert_eq!(scenario_proof_id("product:issue_regression"), Some("c12"));
+        assert_eq!(
+            scenario_dispatch_id("product:issue_regression"),
+            Some("c12")
+        );
+        assert!(SCENARIO_NAMES.contains(&"product:issue_regression"));
     }
 
     #[test]

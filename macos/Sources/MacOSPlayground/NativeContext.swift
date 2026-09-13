@@ -1,21 +1,25 @@
 import Darwin
 import Foundation
+import MachO
 import MetricKit
 import os
 
 /// Real native context collected from macOS APIs. No stubs: every value comes
-/// from ProcessInfo/sysctl/Bundle, and unavailable values are labeled as such.
+/// from ProcessInfo/sysctl/Bundle/Mach-O, and unavailable values are labeled.
 struct NativeContext {
     var osVersion: String
     var thermalState: String
     var processorCount: Int
     var physicalMemoryGB: Double
+    var memoryResidentBytes: Int
     var uptimeSeconds: Int
     var deviceModel: String
     var appVersion: String
     var appVersionSource: String
     var processName: String
     var pid: Int32
+    var buildUUID: String
+    var lowPowerMode: Bool
 
     static func collect() -> NativeContext {
         let p = ProcessInfo.processInfo
@@ -42,29 +46,57 @@ struct NativeContext {
             thermalState: thermal,
             processorCount: p.processorCount,
             physicalMemoryGB: Double(p.physicalMemory) / 1_000_000_000.0,
+            memoryResidentBytes: taskResidentBytes(),
             uptimeSeconds: Int(p.systemUptime),
             deviceModel: sysctlString("hw.model") ?? "unknown",
             appVersion: version,
             appVersionSource: source,
             processName: p.processName,
-            pid: p.processIdentifier
+            pid: p.processIdentifier,
+            buildUUID: currentExecutableUUID() ?? "unknown",
+            lowPowerMode: p.isLowPowerModeEnabled
         )
     }
 
     /// Resource attributes shared by all signals (OTel semconv + macos.*).
     func resourceAttrs(serviceName: String, scenarioId: String, stableInstance: Bool = false) -> [(String, String)] {
-        [
+        let buildIdHex = buildUUID.replacingOccurrences(of: "-", with: "").lowercased()
+        return [
             ("service.name", serviceName),
             ("service.version", appVersion),
             ("service.instance.id", stableInstance ? "\(processName)-frozen" : "\(processName)-\(pid)"),
+            ("telemetry.sdk.name", "macos-playground"),
+            ("telemetry.sdk.language", "swift"),
+            ("telemetry.sdk.version", "0.1.0"),
             ("os.type", "darwin"),
+            ("os.name", "macOS"),
             ("os.description", osVersion),
             ("host.arch", sysctlString("hw.machine") ?? "unknown"),
             ("device.model.identifier", deviceModel),
+            ("process.executable.name", processName),
+            ("process.executable.build_id", buildIdHex),
+            ("macos.build_uuid", buildUUID),
+            ("macos.app_version_source", appVersionSource),
             ("macos.thermal_state", thermalState),
+            ("macos.low_power_mode", lowPowerMode ? "true" : "false"),
+            ("macos.memory.physical_gb", String(format: "%.1f", physicalMemoryGB)),
+            ("macos.memory.resident_bytes", stableInstance ? "frozen" : "\(memoryResidentBytes)"),
+            ("macos.cpu.logical_count", "\(processorCount)"),
             ("macos.scenario_id", scenarioId),
         ]
     }
+}
+
+func taskResidentBytes() -> Int {
+    var info = mach_task_basic_info()
+    var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+    let kr = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+            task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+        }
+    }
+    guard kr == KERN_SUCCESS else { return 0 }
+    return Int(info.resident_size)
 }
 
 func sysctlString(_ name: String) -> String? {
@@ -73,6 +105,29 @@ func sysctlString(_ name: String) -> String? {
     var buf = [CChar](repeating: 0, count: size)
     guard sysctlbyname(name, &buf, &size, nil, 0) == 0 else { return nil }
     return String(cString: buf)
+}
+
+/// Mach-O `LC_UUID` of the running image — the dSYM join key.
+func currentExecutableUUID() -> String? {
+    guard let header = _dyld_get_image_header(0) else { return nil }
+    let magic = header.pointee.magic
+    let headerSize: Int
+    if magic == MH_MAGIC_64 || magic == MH_CIGAM_64 {
+        headerSize = MemoryLayout<mach_header_64>.size
+    } else {
+        headerSize = MemoryLayout<mach_header>.size
+    }
+    let ncmds = Int(header.pointee.ncmds)
+    var p = UnsafeRawPointer(header).advanced(by: headerSize)
+    for _ in 0 ..< ncmds {
+        let lc = p.load(as: load_command.self)
+        if lc.cmd == UInt32(LC_UUID) {
+            let uuid = p.assumingMemoryBound(to: uuid_command.self).pointee.uuid
+            return UUID(uuid: uuid).uuidString
+        }
+        p = p.advanced(by: Int(lc.cmdsize))
+    }
+    return nil
 }
 
 /// Real stack frames captured in-process (symbolicated while the binary

@@ -96,7 +96,8 @@ stack:
 | `alerts:error_rate_breach` / `alerts:recovery` | Decline traffic then healthy traffic demonstrate error-rate recovery. |
 | `ecosystem:service_map` | Typed service, CLI, browser, PostgreSQL, RabbitMQ, and external nodes render with varied traffic and healthy/error dependency edges through Parallax GraphQL. |
 | `events:typed_business_events` | Shared typed business event names appear across Rust, Java, and web telemetry. |
-| `product:ui_agent_verify` | Browser surface smoke plus a real click traversal (issue → trace → span → logs → metric exemplar, back-navigation, empty/error/high-volume states) against GraphQL ground truth, when the Parallax browser harness is available. |
+| `product:ui_agent_verify` | Browser surface smoke plus a real click traversal (issue → occurrence trace → span → logs → metric exemplar, back-navigation, empty/error/high-volume states) against GraphQL ground truth, when the Parallax browser harness is available. Hop 2 clicks a real `issue.events`-backed occurrence link and fails loud when absent. |
+| `product:pr71_live_legs` | Live GraphQL + click-through proofs for chart annotations + metric overlay, dominant DB queries, peak → traces resolution, and alert graduation prefill from metric/logs/traces, when the Parallax browser harness is available. |
 
 The real distributed topology has an executable Parallax assertion. With the
 stack and Parallax server running, execute:

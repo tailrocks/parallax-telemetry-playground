@@ -6,7 +6,7 @@ not public task names and have no aliases. Start the stack first unless the
 task says it owns Compose startup.
 
 `mise run check:scenarios` validates the public catalog and legacy-wrapper
-policy. `mise run corpus:all` dispatches all 91 proofs exactly once: 63 A/B/C
+policy. `mise run corpus:all` dispatches all 93 proofs exactly once: 65 A/B/C
 proofs plus 28 corner proofs. This proves dispatch coverage only; it does not
 prove that every runtime journey, browser assertion, or Parallax failure gate
 has passed.
@@ -90,6 +90,7 @@ has passed.
 | `eco-external` | `ecosystem:external_edge` | External client edge without an invented server node |
 | `eco-full` | `ecosystem:full` | Complete CLI, browser, and service ecosystem corpus |
 | `c1` | `product:issue_context` | Issue context, evidence bundle, and resolution |
+| `c12` | `product:issue_regression` | Resolved issue regresses on a new occurrence of the same fingerprint |
 | `c2` | `product:invocation_lifecycle` | CLI invocation lifecycle and bundle |
 | `c3` | `product:live_tail` | Live logs and traces over SSE |
 | `c4` | `product:alerting` | Alert rule, incident, and webhook flow |
@@ -100,6 +101,7 @@ has passed.
 | `c9` | `product:lifecycle_ops` | Isolated HOME lifecycle, prune, context, and argument forwarding |
 | `c10` | `security:redaction_egress` | Redaction across bundle, MCP, UI, webhook, and Sentry |
 | `c11` | `product:ui_agent_verify` | Agent-browser surface smoke plus a real click traversal: issue → occurrence trace → span → surrounding logs → metric exemplar, with back-navigation and empty/error/high-volume states |
+| `c13` | `product:pr71_live_legs` | Live GraphQL + click-through proofs for chart annotations + overlay, dominant DB queries, peak → traces, and alert graduation prefill from metric/logs/traces |
 | `a30` | `metrics:request_shapes` | Active requests, request latency, and checkout metrics |
 | `a31` | `errors:handled_unhandled` | Handled payment decline versus provider-internal failure |
 

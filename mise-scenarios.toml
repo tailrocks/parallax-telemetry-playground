@@ -419,6 +419,11 @@ description = "Issue context, evidence bundle, and resolution"
 raw = true
 run = "cargo run --locked -p playground-cli -- scenario product:issue_context"
 
+["product:issue_regression"]
+description = "Resolved issue regresses on a new occurrence of the same fingerprint"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:issue_regression"
+
 ["product:invocation_lifecycle"]
 description = "CLI invocation lifecycle and bundle"
 raw = true
@@ -469,6 +474,11 @@ description = "Agent-browser verification for every core UI surface"
 raw = true
 run = "cargo run --locked -p playground-cli -- scenario product:ui_agent_verify"
 
+["product:pr71_live_legs"]
+description = "Live GraphQL + click-through proofs for chart annotations, dominant DB queries, peak traces, and alert graduation"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:pr71_live_legs"
+
 ["corpus:all"]
 description = "Run the complete synthetic corner-case corpus"
 raw = true
@@ -488,6 +498,7 @@ run = [
   { task = "deploy:release_regression" },
   { task = "failures:inventory" },
   { task = "product:issue_context" },
+  { task = "product:issue_regression" },
   { task = "product:agent_session" },
   { task = "sentry:envelopes" },
   { task = "security:redaction_egress" },
