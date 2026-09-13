@@ -19,6 +19,7 @@ struct Harness {
         var scenarioId: String?
         var unifiedLog = false
         var metricKitSeconds: UInt32 = 0
+        var backendUrl: String?
 
         var i = 0
         while i < args.count {
@@ -29,7 +30,7 @@ struct Harness {
                 return args[i]
             }
             switch a {
-            case "failure", "slow-op", "all", "crash": mode = a
+            case "failure", "slow-op", "lifecycle", "session", "all", "crash": mode = a
             case "--seed": seed = UInt64(nextValue(a)) ?? 0; seedGiven = true
             case "--endpoint": endpoint = nextValue(a)
             case "--frozen-time": frozen = UInt64(nextValue(a))
@@ -39,6 +40,7 @@ struct Harness {
             case "--scenario-id": scenarioId = nextValue(a)
             case "--unified-log": unifiedLog = true
             case "--metrickit-probe-seconds": metricKitSeconds = UInt32(nextValue(a)) ?? 0
+            case "--backend-url": backendUrl = nextValue(a)
             case "-h", "--help":
                 print(usage)
                 return
@@ -70,8 +72,20 @@ struct Harness {
         )
 
         var outputs: [ScenarioOutput] = []
-        if mode == "failure" || mode == "all" { outputs.append(runFailureScenario(cfg: cfg, native: native)) }
+        var httpStatus = 502
+        var usedBackend = backendUrl ?? "http://localhost:8088/checkout"
+        if (mode == "failure" || mode == "all"), let bu = backendUrl {
+            usedBackend = bu
+            let tp = failureClientTraceparent(cfg: cfg)
+            let posted = await postBackend(url: bu, traceparent: tp)
+            if posted.status > 0 { httpStatus = posted.status }
+        }
+        if mode == "failure" || mode == "all" {
+            outputs.append(runFailureScenario(cfg: cfg, native: native, httpStatus: httpStatus, backendUrl: usedBackend))
+        }
         if mode == "slow-op" || mode == "all" { outputs.append(runSlowOpScenario(cfg: cfg, native: native)) }
+        if mode == "lifecycle" || mode == "all" { outputs.append(runLifecycleScenario(cfg: cfg, native: native)) }
+        if mode == "session" { outputs.append(runSessionTraceScenario(cfg: cfg, native: native)) }
 
         if unifiedLog {
             for o in outputs {
@@ -110,8 +124,12 @@ struct Harness {
                 "device_model": native.deviceModel,
                 "app_version": native.appVersion,
                 "app_version_source": native.appVersionSource,
+                "build_uuid": native.buildUUID,
+                "low_power_mode": native.lowPowerMode,
+                "memory_physical_gb": native.physicalMemoryGB,
                 "pid": native.pid,
             ],
+            "session_id": outputs.first?.sessionId ?? sessionId(for: cfg),
             "metrickit": metricKit,
             "scenarios": outputs.map { o in
                 [
@@ -119,6 +137,7 @@ struct Harness {
                     "trace_id": o.traceIdHex,
                     "span_id": o.spanIdHex,
                     "traceparent": o.traceparent,
+                    "session_id": o.sessionId,
                     "bytes": ["traces": o.traces.count, "logs": o.logs.count, "metrics": o.metrics.count],
                 ] as [String: Any]
             },
@@ -136,6 +155,22 @@ struct Harness {
         }
         let data = try! JSONSerialization.data(withJSONObject: summary, options: [.sortedKeys])
         print(String(data: data, encoding: .utf8)!)
+    }
+
+    static func postBackend(url: String, traceparent: String) async -> (status: Int, error: String?) {
+        guard let u = URL(string: url) else { return (-1, "bad url") }
+        var req = URLRequest(url: u)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 5
+        req.setValue(traceparent, forHTTPHeaderField: "traceparent")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Data("{\"scenario\":\"failure\"}".utf8)
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            return ((resp as? HTTPURLResponse)?.statusCode ?? -1, nil)
+        } catch {
+            return (-1, "\(error)")
+        }
     }
 
     static func post(endpoint: String, signal: String, body: Data) async -> [String: Any] {
@@ -158,7 +193,7 @@ struct Harness {
 }
 
 let usage = """
-usage: MacOSPlayground [failure|slow-op|all|crash] [flags]
+usage: MacOSPlayground [failure|slow-op|lifecycle|session|all|crash] [flags]
   --seed N                   deterministic ID seed (default: random)
   --endpoint URL             OTLP/HTTP base (default http://127.0.0.1:4318)
   --frozen-time NANOS        fixed clock for byte-determinism checks
@@ -168,4 +203,5 @@ usage: MacOSPlayground [failure|slow-op|all|crash] [flags]
   --scenario-id ID           macos.scenario_id (default macos-<seed>)
   --unified-log              also emit os_log entries (verifiable via `log show`)
   --metrickit-probe-seconds N  subscribe to MetricKit and report payloads
+  --backend-url URL          real URLSession POST with injected traceparent
 """

@@ -414,6 +414,11 @@ description = "Issue context, evidence bundle, and resolution"
 raw = true
 run = "cargo run --locked -p playground-cli -- scenario product:issue_context"
 
+["product:issue_regression"]
+description = "Resolved issue regresses on a new occurrence of the same fingerprint"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario product:issue_regression"
+
 ["product:invocation_lifecycle"]
 description = "CLI invocation lifecycle and bundle"
 raw = true
@@ -483,6 +488,7 @@ run = [
   { task = "deploy:release_regression" },
   { task = "failures:inventory" },
   { task = "product:issue_context" },
+  { task = "product:issue_regression" },
   { task = "product:agent_session" },
   { task = "sentry:envelopes" },
   { task = "security:redaction_egress" },

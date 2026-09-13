@@ -167,12 +167,37 @@ struct OtlpSpan {
     var events: [OtlpEvent]
     var statusCode: Int // 0 unset, 1 ok, 2 error
     var statusMessage: String
+    var links: [OtlpLink] = []
 }
 
 struct OtlpEvent {
     var timeNanos: UInt64
     var name: String
     var stringAttrs: [(String, String)]
+}
+
+struct OtlpLink {
+    var traceId: Data
+    var spanId: Data
+    var stringAttrs: [(String, String)]
+}
+
+struct OtlpExemplar {
+    var timeNanos: UInt64
+    var value: Double
+    var traceId: Data
+    var spanId: Data
+    var stringAttrs: [(String, String)] = []
+}
+
+func writeExemplar(into w: ProtoWriter, _ e: OtlpExemplar) {
+    for (k, v) in e.stringAttrs {
+        writeStringAttr(into: w, field: 7 /* filtered_attributes */, key: k, value: v)
+    }
+    w.fixed64(field: 2, e.timeNanos)
+    w.double(field: 3 /* as_double */, e.value)
+    w.rawBytes(field: 4, e.spanId)
+    w.rawBytes(field: 5, e.traceId)
 }
 
 func buildTracesData(
@@ -207,6 +232,15 @@ func buildTracesData(
                             ev.string(field: 2, e.name)
                             for (k, v) in e.stringAttrs {
                                 writeStringAttr(into: ev, field: 3, key: k, value: v)
+                            }
+                        }
+                    }
+                    for link in s.links {
+                        sp.message(field: 13) { ln in
+                            ln.rawBytes(field: 1, link.traceId)
+                            ln.rawBytes(field: 2, link.spanId)
+                            for (k, v) in link.stringAttrs {
+                                writeStringAttr(into: ln, field: 4, key: k, value: v)
                             }
                         }
                     }
@@ -275,6 +309,7 @@ struct OtlpSumPoint {
     var startNanos: UInt64
     var value: Double
     var stringAttrs: [(String, String)]
+    var exemplars: [OtlpExemplar] = []
 }
 
 struct OtlpHistogramPoint {
@@ -285,6 +320,7 @@ struct OtlpHistogramPoint {
     var bounds: [Double]
     var bucketCounts: [UInt64]
     var stringAttrs: [(String, String)]
+    var exemplars: [OtlpExemplar] = []
 }
 
 func buildMetricsData(
@@ -310,6 +346,9 @@ func buildMetricsData(
                                 dp.fixed64(field: 2, p.startNanos)
                                 dp.fixed64(field: 3, p.timeNanos)
                                 dp.double(field: 4 /* as_double */, p.value)
+                                for e in p.exemplars {
+                                    dp.message(field: 5) { writeExemplar(into: $0, e) }
+                                }
                                 for (k, v) in p.stringAttrs {
                                     writeStringAttr(into: dp, field: 7, key: k, value: v)
                                 }
@@ -334,6 +373,9 @@ func buildMetricsData(
                                 dp.double(field: 5, p.sum)
                                 for c in p.bucketCounts { dp.fixed64(field: 6, c) }
                                 for b in p.bounds { dp.double(field: 7, b) }
+                                for e in p.exemplars {
+                                    dp.message(field: 8) { writeExemplar(into: $0, e) }
+                                }
                                 for (k, v) in p.stringAttrs {
                                     writeStringAttr(into: dp, field: 9, key: k, value: v)
                                 }

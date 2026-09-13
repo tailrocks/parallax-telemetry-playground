@@ -110,6 +110,7 @@ pub(crate) const SCENARIO_NAMES: &[&str] = &[
     "ecosystem:external_edge",
     "ecosystem:full",
     "product:issue_context",
+    "product:issue_regression",
     "product:invocation_lifecycle",
     "product:live_tail",
     "product:alerting",
@@ -208,6 +209,7 @@ const SCENARIO_PROOF_IDS: &[&str] = &[
     "eco-external",
     "eco-full",
     "c1",
+    "c12",
     "c2",
     "c3",
     "c4",
@@ -462,6 +464,7 @@ async fn run_semantic_named(name: &str, extra: &[String]) -> anyhow::Result<i32>
         "ecosystem:external_edge" => run_shape("eco-external").await,
         "ecosystem:full" => ecosystem_full().await,
         "product:issue_context" => issue_context().await,
+        "product:issue_regression" => issue_regression().await,
         "product:invocation_lifecycle" => invocation_lifecycle().await,
         "product:live_tail" => live_tail().await,
         "product:alerting" => alerting().await,
@@ -940,7 +943,160 @@ async fn emit_otlp_request(signal: &str, encoded: Vec<u8>) -> anyhow::Result<()>
 }
 
 async fn emit_issue_seed() -> anyhow::Result<()> {
-    emit_trace_request(shapes::issue_seed()).await
+    emit_issue_occurrence().await.map(|_| ())
+}
+
+async fn emit_issue_occurrence() -> anyhow::Result<String> {
+    let request = shapes::issue_seed();
+    let trace_id = shapes::first_span_trace_id(&request)?;
+    emit_trace_request(request).await?;
+    Ok(trace_id)
+}
+
+fn hex_eq(left: &str, right: &str) -> bool {
+    left.eq_ignore_ascii_case(right)
+}
+
+fn parallax_issue_timeout() -> Duration {
+    Duration::from_secs(
+        std::env::var("PARALLAX_TRACE_TIMEOUT_SECONDS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(30),
+    )
+}
+
+/// Wait until GraphQL shows an issue whose last occurrence is `trace_id`.
+/// Does not skip when `PARALLAX_URL` is unset; default URL is used and
+/// GraphQL failure fails the scenario.
+async fn wait_for_issue_last_trace(
+    service: &str,
+    trace_id: &str,
+) -> anyhow::Result<(String, String, i64)> {
+    let deadline = tokio::time::Instant::now() + parallax_issue_timeout();
+    let query = format!(
+        "{{ issues(service: {service:?}, limit: 50) {{ items {{ service fingerprint status eventCount lastTraceId }} }} }}"
+    );
+    let mut last = json!({});
+    loop {
+        match parallax_graphql(&query).await {
+            Ok(data) => {
+                last = data.clone();
+                if let Some((fingerprint, event_count)) = data
+                    .pointer("/issues/items")
+                    .and_then(Value::as_array)
+                    .and_then(|items| {
+                        items.iter().find_map(|item| {
+                            let last_trace = item.get("lastTraceId")?.as_str()?;
+                            if !hex_eq(last_trace, trace_id) {
+                                return None;
+                            }
+                            if item.get("service")?.as_str()? != service {
+                                return None;
+                            }
+                            let fingerprint = item
+                                .get("fingerprint")?
+                                .as_str()
+                                .filter(|value| !value.is_empty())?
+                                .to_owned();
+                            let event_count = item.get("eventCount")?.as_i64()?;
+                            Some((fingerprint, event_count))
+                        })
+                    })
+                {
+                    return Ok((service.to_owned(), fingerprint, event_count));
+                }
+            }
+            Err(error) => last = json!({ "error": error.to_string() }),
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "Parallax produced no issue for service {service:?} occurrence {trace_id} before timeout: {last}"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+async fn wait_for_issue_status(
+    service: &str,
+    fingerprint: &str,
+    expected: &str,
+) -> anyhow::Result<Value> {
+    let deadline = tokio::time::Instant::now() + parallax_issue_timeout();
+    let query = format!(
+        "{{ issue(service: {service:?}, fingerprint: {fingerprint:?}) {{ status eventCount lastTraceId }} }}"
+    );
+    let mut last = json!({});
+    loop {
+        match parallax_graphql(&query).await {
+            Ok(data) => {
+                last = data.clone();
+                if data.pointer("/issue/status").and_then(Value::as_str) == Some(expected) {
+                    return Ok(data);
+                }
+            }
+            Err(error) => last = json!({ "error": error.to_string() }),
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "issue {service}/{fingerprint} status {expected:?} not observed before timeout: {last}"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+async fn wait_for_issue_regressed(
+    service: &str,
+    fingerprint: &str,
+    occurrence_trace_id: &str,
+    previous_event_count: i64,
+) -> anyhow::Result<Value> {
+    let deadline = tokio::time::Instant::now() + parallax_issue_timeout();
+    let query = format!(
+        "{{ issue(service: {service:?}, fingerprint: {fingerprint:?}) {{ status eventCount lastTraceId latestEvent {{ traceId }} }} }}"
+    );
+    let mut last = json!({});
+    loop {
+        match parallax_graphql(&query).await {
+            Ok(data) => {
+                last = data.clone();
+                let issue = data.get("issue");
+                let status = issue
+                    .and_then(|row| row.get("status"))
+                    .and_then(Value::as_str);
+                let event_count = issue
+                    .and_then(|row| row.get("eventCount"))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                let last_trace = issue
+                    .and_then(|row| row.get("lastTraceId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let latest_trace = issue
+                    .and_then(|row| row.pointer("/latestEvent/traceId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let new_occurrence = hex_eq(last_trace, occurrence_trace_id)
+                    || hex_eq(latest_trace, occurrence_trace_id);
+                if status == Some("regressed")
+                    && new_occurrence
+                    && event_count > previous_event_count
+                {
+                    return Ok(data);
+                }
+            }
+            Err(error) => last = json!({ "error": error.to_string() }),
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "issue {service}/{fingerprint} did not become status=regressed for occurrence {occurrence_trace_id} (prior eventCount={previous_event_count}): {last}"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 async fn wait_for_issue() -> anyhow::Result<String> {
@@ -4170,6 +4326,47 @@ async fn issue_context() -> anyhow::Result<i32> {
     Ok(0)
 }
 
+async fn issue_regression() -> anyhow::Result<i32> {
+    let first_trace = emit_issue_occurrence().await?;
+    let (service, fingerprint, event_count) =
+        wait_for_issue_last_trace("checkout", &first_trace).await?;
+
+    let resolved = parallax_graphql(&format!(
+        "mutation {{ issueSetStatus(service: {service:?}, fingerprint: {fingerprint:?}, status: \"resolved\") {{ service fingerprint status }} }}"
+    ))
+    .await?;
+    ensure!(
+        resolved
+            .pointer("/issueSetStatus/status")
+            .and_then(Value::as_str)
+            == Some("resolved"),
+        "issueSetStatus did not persist resolved: {resolved}"
+    );
+    wait_for_issue_status(&service, &fingerprint, "resolved").await?;
+
+    let second_trace = emit_issue_occurrence().await?;
+    ensure!(
+        !hex_eq(&first_trace, &second_trace),
+        "regression seed reused occurrence identity {first_trace}"
+    );
+
+    let snapshot =
+        wait_for_issue_regressed(&service, &fingerprint, &second_trace, event_count).await?;
+    let status = snapshot
+        .pointer("/issue/status")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    ensure!(
+        status == "regressed",
+        "issue status must be regressed, got {status:?}: {snapshot}"
+    );
+
+    println!(
+        "issue regression verified service={service} fingerprint={fingerprint} first={first_trace} second={second_trace} status={status}"
+    );
+    Ok(0)
+}
+
 async fn invocation_lifecycle() -> anyhow::Result<i32> {
     let bin = parallax_bin();
     let (code, output) = capture_program(
@@ -6255,6 +6452,16 @@ mod tests {
         assert_eq!(super::shapes::cardinality_bucket_label(0), "000");
         assert_eq!(super::shapes::cardinality_bucket_label(199), "199");
         assert_eq!(super::shapes::CARDINALITY_SERIES, 200);
+    }
+
+    #[test]
+    fn issue_regression_is_registered_product_proof() {
+        assert_eq!(scenario_proof_id("product:issue_regression"), Some("c12"));
+        assert_eq!(
+            scenario_dispatch_id("product:issue_regression"),
+            Some("c12")
+        );
+        assert!(SCENARIO_NAMES.contains(&"product:issue_regression"));
     }
 
     #[test]
