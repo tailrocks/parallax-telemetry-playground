@@ -27,6 +27,7 @@ enum ScenarioSalt {
     static let slowOp: UInt64 = 0x5_1002
     static let lifecycle: UInt64 = 0x11FE_0001
     static let session: UInt64 = 0x5E55_1001
+    static let sessionTrace: UInt64 = 0x5E55_1002
 }
 
 let durationBounds: [Double] = [10, 50, 100, 500, 1000, 5000]
@@ -415,6 +416,120 @@ func runLifecycleScenario(cfg: ScenarioConfig, native: NativeContext) -> Scenari
     return ScenarioOutput(
         name: "lifecycle", traceIdHex: traceHex, spanIdHex: spanHex,
         traceparent: formatTraceparent(traceId: traceId, spanId: spanId),
+        sessionId: sid,
+        traces: traces, logs: logsData, metrics: metrics
+    )
+}
+
+/// One native session as a single trace: lifecycle parent with checkout-fail
+/// and hang children. Isolated `failure`/`slow-op`/`lifecycle` modes keep
+/// distinct traces joined by `session.id`; this scenario is the product
+/// proof that those three operations can share one `trace_id`.
+func runSessionTraceScenario(cfg: ScenarioConfig, native: NativeContext) -> ScenarioOutput {
+    let now = nowNanos(cfg)
+    let start = now - 4_200_000_000
+    let hangStart = now - 2_400_000_000
+    let failStart = now - 185_000_000
+    let minted = mintTraceIds(cfg: cfg, salt: ScenarioSalt.sessionTrace)
+    var rng = minted.rng
+    let traceId = minted.traceId
+    let sessionSpanId = minted.spanId
+    let parentId = minted.parentId
+    let hangId = rng.bytes(count: 8)
+    let failId = rng.bytes(count: 8)
+    let sid = sessionId(for: cfg)
+    let stack = captureStackTrace()
+
+    let session = OtlpSpan(
+        traceId: traceId, spanId: sessionSpanId, parentSpanId: parentId,
+        name: "macos.app.session", kind: 1,
+        startNanos: start, endNanos: now,
+        stringAttrs: [
+            ("macos.scenario", "session"),
+            ("session.id", sid),
+            ("macos.build_uuid", native.buildUUID),
+        ],
+        intAttrs: [],
+        events: [
+            OtlpEvent(timeNanos: start, name: "lifecycle.cold_start", stringAttrs: [("session.id", sid)]),
+        ],
+        statusCode: 2, statusMessage: "session contains failed checkout"
+    )
+    let hang = OtlpSpan(
+        traceId: traceId, spanId: hangId, parentSpanId: sessionSpanId,
+        name: "macos.report.render", kind: 1,
+        startNanos: hangStart, endNanos: now,
+        stringAttrs: [("macos.scenario", "session"), ("macos.hang.suspected", "true"), ("session.id", sid)],
+        intAttrs: [("macos.operation.duration_ms", 2400)],
+        events: [OtlpEvent(timeNanos: now, name: "macos.hang.stack", stringAttrs: [("exception.stacktrace", stack)])],
+        statusCode: 0, statusMessage: ""
+    )
+    let fail = OtlpSpan(
+        traceId: traceId, spanId: failId, parentSpanId: sessionSpanId,
+        name: "macos.checkout.submit", kind: 3,
+        startNanos: failStart, endNanos: now,
+        stringAttrs: [
+            ("macos.scenario", "session"),
+            ("error.type", "CheckoutDeclined"),
+            ("session.id", sid),
+        ],
+        intAttrs: [("http.response.status_code", 502)],
+        events: [OtlpEvent(
+            timeNanos: now, name: "exception",
+            stringAttrs: [
+                ("exception.type", "CheckoutDeclined"),
+                ("exception.message", "payment backend returned 502"),
+                ("exception.stacktrace", stack),
+            ]
+        )],
+        statusCode: 2, statusMessage: "CheckoutDeclined"
+    )
+
+    let traceHex = hexString(traceId)
+    let logs = [
+        OtlpLog(
+            timeNanos: start, observedNanos: start, severityNumber: 9, severityText: "INFO",
+            body: "macos lifecycle: cold start",
+            stringAttrs: [("macos.scenario", "session"), ("session.id", sid)],
+            traceId: traceId, spanId: sessionSpanId
+        ),
+        OtlpLog(
+            timeNanos: now, observedNanos: now, severityNumber: 13, severityText: "WARN",
+            body: "main-thread render took 2400ms",
+            stringAttrs: [("macos.scenario", "session"), ("session.id", sid)],
+            traceId: traceId, spanId: hangId
+        ),
+        OtlpLog(
+            timeNanos: now, observedNanos: now, severityNumber: 17, severityText: "ERROR",
+            body: "checkout submit failed: CheckoutDeclined",
+            stringAttrs: [("macos.scenario", "session"), ("error.type", "CheckoutDeclined"), ("session.id", sid)],
+            traceId: traceId, spanId: failId
+        ),
+    ]
+    let res = native.resourceAttrs(serviceName: cfg.serviceName, scenarioId: cfg.scenarioId, stableInstance: cfg.frozenTimeNanos != nil)
+    let traces = buildTracesData(
+        resourceAttrs: res, scopeName: cfg.scopeName, scopeVersion: cfg.scopeVersion,
+        spans: [session, hang, fail]
+    )
+    let logsData = buildLogsData(resourceAttrs: res, scopeName: cfg.scopeName, scopeVersion: cfg.scopeVersion, logs: logs)
+    let metrics = buildMetricsData(
+        resourceAttrs: res, scopeName: cfg.scopeName, scopeVersion: cfg.scopeVersion,
+        sums: [],
+        histograms: [(
+            name: "macos.playground.operation.duration",
+            description: "Native operation duration by scenario",
+            unit: "ms",
+            points: [OtlpHistogramPoint(
+                timeNanos: now, startNanos: hangStart, count: 1, sum: 2400,
+                bounds: durationBounds, bucketCounts: durationBuckets(2400),
+                stringAttrs: [("macos.scenario", "session"), ("session.id", sid)],
+                exemplars: [makeExemplar(now: now, value: 2400, traceId: traceId, spanId: hangId, scenario: "session")]
+            )]
+        )]
+    )
+    return ScenarioOutput(
+        name: "session", traceIdHex: traceHex, spanIdHex: hexString(sessionSpanId),
+        traceparent: formatTraceparent(traceId: traceId, spanId: sessionSpanId),
         sessionId: sid,
         traces: traces, logs: logsData, metrics: metrics
     )

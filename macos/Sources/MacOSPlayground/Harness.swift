@@ -30,7 +30,7 @@ struct Harness {
                 return args[i]
             }
             switch a {
-            case "failure", "slow-op", "lifecycle", "all", "crash": mode = a
+            case "failure", "slow-op", "lifecycle", "session", "all", "crash": mode = a
             case "--seed": seed = UInt64(nextValue(a)) ?? 0; seedGiven = true
             case "--endpoint": endpoint = nextValue(a)
             case "--frozen-time": frozen = UInt64(nextValue(a))
@@ -85,6 +85,7 @@ struct Harness {
         }
         if mode == "slow-op" || mode == "all" { outputs.append(runSlowOpScenario(cfg: cfg, native: native)) }
         if mode == "lifecycle" || mode == "all" { outputs.append(runLifecycleScenario(cfg: cfg, native: native)) }
+        if mode == "session" { outputs.append(runSessionTraceScenario(cfg: cfg, native: native)) }
 
         if unifiedLog {
             for o in outputs {
@@ -192,7 +193,7 @@ struct Harness {
 }
 
 let usage = """
-usage: MacOSPlayground [failure|slow-op|lifecycle|all|crash] [flags]
+usage: MacOSPlayground [failure|slow-op|lifecycle|session|all|crash] [flags]
   --seed N                   deterministic ID seed (default: random)
   --endpoint URL             OTLP/HTTP base (default http://127.0.0.1:4318)
   --frozen-time NANOS        fixed clock for byte-determinism checks

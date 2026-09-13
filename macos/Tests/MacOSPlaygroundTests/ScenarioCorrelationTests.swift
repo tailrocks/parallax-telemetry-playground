@@ -10,6 +10,23 @@ final class ScenarioCorrelationTests: XCTestCase {
         )
     }
 
+    func testFailureHangLifecycleShareOneTraceId() {
+        let native = NativeContext.collect()
+        let out = runSessionTraceScenario(cfg: cfg(), native: native)
+        XCTAssertEqual(out.name, "session")
+        XCTAssertEqual(out.traceIdHex.count, 32)
+        let tid = dataFromHex(out.traceIdHex)!
+        XCTAssertTrue(out.traces.range(of: Data("macos.app.session".utf8)) != nil)
+        XCTAssertTrue(out.traces.range(of: Data("macos.checkout.submit".utf8)) != nil)
+        XCTAssertTrue(out.traces.range(of: Data("macos.report.render".utf8)) != nil)
+        XCTAssertTrue(out.traces.range(of: tid) != nil)
+        XCTAssertTrue(out.logs.range(of: tid) != nil)
+        XCTAssertTrue(out.metrics.range(of: tid) != nil)
+        XCTAssertTrue(out.logs.range(of: Data("checkout submit failed".utf8)) != nil)
+        XCTAssertTrue(out.logs.range(of: Data("main-thread render".utf8)) != nil)
+        XCTAssertTrue(out.logs.range(of: Data("cold start".utf8)) != nil)
+    }
+
     func testSessionIdSharedAcrossScenarios() {
         let native = NativeContext.collect()
         let c = cfg()
