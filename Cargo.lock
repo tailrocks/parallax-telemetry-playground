@@ -3125,6 +3125,7 @@ dependencies = [
  "libtest-mimic",
  "opentelemetry",
  "opentelemetry-proto",
+ "opentelemetry_sdk",
  "playground-telemetry",
  "prost",
  "quick-xml",

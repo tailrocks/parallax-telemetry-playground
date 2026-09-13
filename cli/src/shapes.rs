@@ -463,6 +463,55 @@ pub(crate) fn l_bodies() -> ExportLogsServiceRequest {
     logs_request(records)
 }
 
+/// c11 UI-traversal probe: log records pinned to a caller-supplied trace and
+/// span id (hex), so the issue → trace → logs hop has deterministic
+/// correlated rows to click through. Bodies carry the `ui-traversal` marker.
+pub(crate) fn issue_correlated_logs(
+    trace_hex: &str,
+    span_hex: &str,
+) -> anyhow::Result<ExportLogsServiceRequest> {
+    let trace_id = decode_hex_id(trace_hex, 16)?;
+    let span_id = decode_hex_id(span_hex, 8)?;
+    let base = now_nanos();
+    let mut records = Vec::new();
+    for (index, (severity, body)) in [
+        (9, "ui-traversal probe: checkout started"),
+        (13, "ui-traversal probe: checkout retrying upstream"),
+        (
+            17,
+            "ui-traversal probe: checkout failed: connection refused",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut record = log_record(
+            base + (index as u64) * 1_000_000,
+            severity,
+            body,
+            vec![kv("shape.case", "ui-traversal")],
+        );
+        record.trace_id = trace_id.clone();
+        record.span_id = span_id.clone();
+        records.push(record);
+    }
+    Ok(logs_request(records))
+}
+
+fn decode_hex_id(hex: &str, expected_bytes: usize) -> anyhow::Result<Vec<u8>> {
+    anyhow::ensure!(
+        hex.len() == expected_bytes * 2,
+        "expected {expected_bytes} bytes of hex, got {} chars",
+        hex.len()
+    );
+    let mut bytes = Vec::with_capacity(expected_bytes);
+    for pair in 0..expected_bytes {
+        let byte = u8::from_str_radix(&hex[pair * 2..pair * 2 + 2], 16)?;
+        bytes.push(byte);
+    }
+    Ok(bytes)
+}
+
 fn log_record(ts: u64, severity: i32, body: &str, mut attrs: Vec<KeyValue>) -> LogRecord {
     attrs.push(kv(semconv::CLI_INVOCATION_ID, invocation::invocation_id()));
     LogRecord {
@@ -816,6 +865,54 @@ pub(crate) fn m_labels() -> ExportMetricsServiceRequest {
     }
 }
 
+/// m-cardinality: bounded high-cardinality stress. One gauge carries exactly
+/// `CARDINALITY_SERIES` distinct `stress_bucket` values at fixed magnitudes
+/// (value == bucket index), so label-value enumeration and group-by output
+/// are exactly assertable without unbounded churn. The label is emitted in
+/// its stored form: the native metric engine maps attribute keys to physical
+/// tag columns (`.` becomes `_`), and `metricLabelValues` matches the column
+/// name exactly, so a dotted key would never be enumerable.
+pub(crate) const CARDINALITY_SERIES: usize = 200;
+pub(crate) const CARDINALITY_METRIC: &str = "shapes.stress.series";
+pub(crate) const CARDINALITY_LABEL: &str = "stress_bucket";
+
+pub(crate) fn cardinality_bucket_label(index: usize) -> String {
+    format!("{index:03}")
+}
+
+pub(crate) fn m_cardinality() -> ExportMetricsServiceRequest {
+    let ts = now_nanos();
+    let points = (0..CARDINALITY_SERIES)
+        .map(|index| NumberDataPoint {
+            time_unix_nano: ts,
+            start_time_unix_nano: ts,
+            value: Some(number_data_point::Value::AsDouble(index as f64)),
+            attributes: vec![kv(CARDINALITY_LABEL, &cardinality_bucket_label(index))],
+            ..Default::default()
+        })
+        .collect();
+    let gauge = Metric {
+        name: CARDINALITY_METRIC.to_string(),
+        data: Some(Data::Gauge(Gauge {
+            data_points: points,
+        })),
+        ..Default::default()
+    };
+    ExportMetricsServiceRequest {
+        resource_metrics: vec![ResourceMetrics {
+            resource: Some(Resource {
+                attributes: required_resource_kvs(SERVICE, env_git_sha().as_deref()),
+                ..Default::default()
+            }),
+            scope_metrics: vec![ScopeMetrics {
+                metrics: vec![gauge],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    }
+}
+
 /// e-burst: one error type repeated for grouping + five distinct
 /// `error.type` values under one invocation.
 pub(crate) fn e_burst() -> Vec<SpanSpec> {
@@ -917,7 +1014,7 @@ async fn post(path: &str, body: Vec<u8>) -> anyhow::Result<()> {
 pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
     let Some(id) = args.first().map(String::as_str) else {
         anyhow::bail!(
-            "usage: playground shapes <t-deep|t-wide|t-multiroot|t-orphan|t-skew|t-zero|t-links|t-longnames|t-events|eco-external|l-burst|l-bodies|l-patterns|m-shapes|m-labels|f-attrs|e-burst|e-multi-lang>"
+            "usage: playground shapes <t-deep|t-wide|t-multiroot|t-orphan|t-skew|t-zero|t-links|t-longnames|t-events|eco-external|l-burst|l-bodies|l-patterns|m-shapes|m-labels|m-cardinality|f-attrs|e-burst|e-multi-lang>"
         );
     };
     println!("shapes: emitting {id} as {SERVICE}");
@@ -952,6 +1049,7 @@ pub(crate) async fn run(args: Vec<String>) -> anyhow::Result<i32> {
         }
         "eco-external" => post_traces(eco_external()).await?,
         "m-labels" => post("v1/metrics", m_labels().encode_to_vec()).await?,
+        "m-cardinality" => post("v1/metrics", m_cardinality().encode_to_vec()).await?,
         "e-burst" => post_traces(e_burst()).await?,
         "e-multi-lang" => post("v1/logs", e_multi_lang().encode_to_vec()).await?,
         other => anyhow::bail!("unknown shape id: {other}"),
@@ -1153,6 +1251,47 @@ mod tests {
     }
 
     #[test]
+    fn cardinality_stress_has_two_hundred_exact_series() {
+        let request = m_cardinality();
+        let metrics = &request.resource_metrics[0].scope_metrics[0].metrics;
+        assert_eq!(metrics.len(), 1);
+        assert_eq!(metrics[0].name, CARDINALITY_METRIC);
+        let Some(Data::Gauge(gauge)) = &metrics[0].data else {
+            panic!("cardinality metric must be a gauge");
+        };
+        assert_eq!(gauge.data_points.len(), CARDINALITY_SERIES);
+        let mut labels = gauge
+            .data_points
+            .iter()
+            .map(|point| {
+                assert_eq!(point.attributes.len(), 1);
+                assert_eq!(point.attributes[0].key, CARDINALITY_LABEL);
+                let label = match point.attributes[0]
+                    .value
+                    .as_ref()
+                    .and_then(|value| match &value.value {
+                        Some(AnyValueEnum::StringValue(text)) => Some(text.clone()),
+                        _ => None,
+                    }) {
+                    Some(label) => label,
+                    None => panic!("bucket label must be a string"),
+                };
+                let index: usize = label.parse().expect("zero-padded bucket");
+                assert_eq!(
+                    point.value,
+                    Some(number_data_point::Value::AsDouble(index as f64))
+                );
+                label
+            })
+            .collect::<Vec<_>>();
+        labels.sort_unstable();
+        labels.dedup();
+        assert_eq!(labels.len(), CARDINALITY_SERIES);
+        assert_eq!(labels.first().map(String::as_str), Some("000"));
+        assert_eq!(labels.last().map(String::as_str), Some("199"));
+    }
+
+    #[test]
     fn deep_chain_has_single_root_and_depth_fourteen() {
         let spans = t_deep();
         assert_eq!(spans.len(), 14);
@@ -1340,5 +1479,25 @@ mod tests {
         // The histogram rides the standard duration metric so the service
         // latency panel (the exemplar surface) renders it.
         assert_eq!(metrics[2].name, semconv::HTTP_SERVER_REQUEST_DURATION);
+    }
+
+    #[test]
+    fn correlated_logs_pin_trace_and_span() {
+        let trace = "114faddc6f914a9100000000000000c1";
+        let span = "89f045e975c94e5d";
+        let request = issue_correlated_logs(trace, span).expect("valid hex");
+        let records = &request.resource_logs[0].scope_logs[0].log_records;
+        assert_eq!(records.len(), 3);
+        for record in records {
+            assert_eq!(record.trace_id, decode_hex_id(trace, 16).expect("trace"));
+            assert_eq!(record.span_id, decode_hex_id(span, 8).expect("span"));
+            let body = record.body.as_ref().and_then(|value| value.value.as_ref());
+            assert!(
+                matches!(body, Some(AnyValueEnum::StringValue(text)) if text.contains("ui-traversal probe")),
+                "probe marker missing"
+            );
+        }
+        assert!(issue_correlated_logs("abc", span).is_err());
+        assert!(issue_correlated_logs(trace, "zz").is_err());
     }
 }

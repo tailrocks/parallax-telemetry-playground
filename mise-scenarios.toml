@@ -59,6 +59,11 @@ description = "Malformed W3C carriers: best-effort checkout isolation versus str
 raw = true
 run = "cargo run --locked -p playground-cli -- scenario propagation:malformed"
 
+["metrics:cardinality_stress"]
+description = "Bounded 200-series cardinality stress with Parallax label enumeration proof"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario metrics:cardinality_stress"
+
 ["messaging:checkout_outbox"]
 description = "Checkout transactional outbox linked to Java fulfillment consumer"
 raw = true

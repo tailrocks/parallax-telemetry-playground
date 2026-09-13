@@ -121,6 +121,7 @@ pub(crate) const SCENARIO_NAMES: &[&str] = &[
     "security:redaction_egress",
     "product:ui_agent_verify",
     "propagation:malformed",
+    "metrics:cardinality_stress",
 ];
 
 /// Stable A/B/C/corner-corpus proof IDs, aligned one-for-one with
@@ -218,6 +219,7 @@ const SCENARIO_PROOF_IDS: &[&str] = &[
     "c10",
     "c11",
     "b24",
+    "b25",
 ];
 
 pub(crate) fn semantic_names() -> &'static [&'static str] {
@@ -471,6 +473,7 @@ async fn run_semantic_named(name: &str, extra: &[String]) -> anyhow::Result<i32>
         "security:redaction_egress" => redaction_egress().await,
         "product:ui_agent_verify" => ui_agent_verify().await,
         "propagation:malformed" => malformed_propagation().await,
+        "metrics:cardinality_stress" => cardinality_stress().await,
         _ => unreachable!("registry and dispatch must stay in sync"),
     }
 }
@@ -5394,9 +5397,11 @@ async fn corpus_all() -> anyhow::Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CORNER_CORPUS_SCENARIOS, SCENARIO_NAMES, SCENARIO_PROOF_IDS, browser_trace_matches,
-        corpus_scenarios, hex_id, inventory_failure_trace_matches, payment_failure_trace_matches,
-        scenario_dispatch_id, scenario_evidence_id, scenario_proof_id, validate_scenario_registry,
+        CORNER_CORPUS_SCENARIOS, MALFORMED_VALID_TRACE_ID, SCENARIO_NAMES, SCENARIO_PROOF_IDS,
+        browser_trace_matches, checkout_span_present, corpus_scenarios, hex_id,
+        inventory_failure_trace_matches, malformed_checkout_corpus, malformed_headers,
+        malformed_notify_corpus, payment_failure_trace_matches, scenario_dispatch_id,
+        scenario_evidence_id, scenario_proof_id, validate_scenario_registry,
     };
     use serde_json::{Value, json};
 
@@ -5446,6 +5451,139 @@ mod tests {
     fn generated_ids_have_expected_hex_width() {
         assert_eq!(hex_id(16).len(), 32);
         assert_eq!(hex_id(8).len(), 16);
+    }
+
+    fn malformed_ids_unique(ids: &[&str]) {
+        let mut sorted = ids.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len());
+    }
+
+    #[test]
+    fn malformed_corpora_are_deterministic_and_unique() {
+        let checkout = malformed_checkout_corpus();
+        let notify = malformed_notify_corpus();
+        assert_eq!(checkout.len(), 10);
+        assert_eq!(notify.len(), 7);
+        malformed_ids_unique(
+            &checkout
+                .iter()
+                .map(|carrier| carrier.id)
+                .collect::<Vec<_>>(),
+        );
+        malformed_ids_unique(&notify.iter().map(|carrier| carrier.id).collect::<Vec<_>>());
+        // Deterministic: rebuilding the corpus must not drift.
+        assert!(
+            malformed_checkout_corpus()
+                .iter()
+                .zip(checkout.iter())
+                .all(|(again, first)| {
+                    again.id == first.id
+                        && again.traceparent == first.traceparent
+                        && again.tracestate == first.tracestate
+                        && again.baggage == first.baggage
+                })
+        );
+    }
+
+    #[test]
+    fn malformed_corpora_keep_tenant_resolvable() {
+        for carrier in malformed_checkout_corpus()
+            .iter()
+            .chain(malformed_notify_corpus().iter())
+        {
+            let headers = malformed_headers(carrier).expect("carrier headers");
+            assert_eq!(
+                playground_telemetry::resolve_http_tenant_identity(&headers, Some("tenant-acme")),
+                Ok("tenant-acme".to_owned()),
+                "{}",
+                carrier.id
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_notify_corpus_fails_durable_validation() {
+        for carrier in malformed_notify_corpus() {
+            let headers = malformed_headers(&carrier).expect("carrier headers");
+            assert!(
+                playground_telemetry::validate_durable_context(&headers).is_err(),
+                "{} must fail durable validation",
+                carrier.id
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_best_effort_detaches_only_invalid_traceparents() {
+        use opentelemetry::propagation::TextMapCompositePropagator;
+        use opentelemetry::trace::TraceContextExt as _;
+        use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
+        // Mirror service init: best-effort extraction reads the global W3C
+        // propagator. Carriers whose traceparent is corrupt or absent must
+        // not poison the extracted parent; carriers with a valid traceparent
+        // keep it even when tracestate or baggage is malformed.
+        opentelemetry::global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
+            Box::new(TraceContextPropagator::new()),
+            Box::new(BaggagePropagator::new()),
+        ]));
+        for carrier in malformed_checkout_corpus() {
+            let headers = malformed_headers(&carrier).expect("carrier headers");
+            let context = playground_telemetry::extract_context(&headers);
+            let span_context = context.span().span_context().clone();
+            let traceparent_valid = carrier
+                .traceparent
+                .as_deref()
+                .is_some_and(|value| value == super::malformed_valid_traceparent());
+            if traceparent_valid {
+                assert!(span_context.is_valid(), "{}", carrier.id);
+                assert_eq!(
+                    span_context.trace_id().to_string(),
+                    MALFORMED_VALID_TRACE_ID,
+                    "{}",
+                    carrier.id
+                );
+            } else {
+                assert!(!span_context.is_valid(), "{}", carrier.id);
+            }
+        }
+    }
+
+    #[test]
+    fn checkout_span_present_matches_service_and_name() {
+        let matching = trace(vec![span(
+            "bbbbbbbbbbbbbbbb",
+            "aaaaaaaaaaaaaaaa",
+            "checkout",
+            "checkout",
+            json!({"http.route": "/checkout"}),
+        )]);
+        assert!(checkout_span_present(&matching));
+        let other_service = trace(vec![span(
+            "bbbbbbbbbbbbbbbb",
+            "aaaaaaaaaaaaaaaa",
+            "payment",
+            "checkout",
+            json!({}),
+        )]);
+        assert!(!checkout_span_present(&other_service));
+        let other_name = trace(vec![span(
+            "bbbbbbbbbbbbbbbb",
+            "aaaaaaaaaaaaaaaa",
+            "checkout",
+            "checkout.reserve",
+            json!({}),
+        )]);
+        assert!(!checkout_span_present(&other_name));
+        assert!(!checkout_span_present(&json!({"trace": {"spans": []}})));
+    }
+
+    #[test]
+    fn cardinality_bucket_labels_are_zero_padded() {
+        assert_eq!(super::shapes::cardinality_bucket_label(0), "000");
+        assert_eq!(super::shapes::cardinality_bucket_label(199), "199");
+        assert_eq!(super::shapes::CARDINALITY_SERIES, 200);
     }
 
     #[test]

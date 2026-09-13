@@ -27,6 +27,7 @@ prost = { workspace = true }
 
 [dev-dependencies]
 libtest-mimic = "0.8.2"
+opentelemetry_sdk = { workspace = true }
 
 # Parameterized-name coverage: rustc test fn paths cannot carry `[…]`
 # parameter suffixes, so the parameterized-test contract fixture uses a
