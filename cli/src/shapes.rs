@@ -807,7 +807,10 @@ pub(crate) fn eco_external() -> Vec<SpanSpec> {
 /// (database 100, queue 10, external 1) and one low-volume HTTP dependency
 /// is an error edge, so render parity is testable without fabricated rows.
 pub(crate) fn eco_service_map() -> Vec<SpanSpec> {
-    let base = now_nanos();
+    // Keep the complete generated interval strictly in the past. The caller
+    // derives its query window after the child process returns and flushes,
+    // so retries cannot exclude the latest external edge.
+    let base = now_nanos().saturating_sub(1_000_000_000);
     let mut spans = Vec::new();
 
     // Instrumented checkout → pricing pair: 10 medium-traffic calls. The
@@ -1231,6 +1234,22 @@ mod tests {
         assert!(
             bare.iter()
                 .all(|attribute| attribute.key != semconv::VCS_REF_HEAD_REVISION)
+        );
+    }
+
+    #[test]
+    fn eco_service_map_lies_in_the_recent_past() {
+        let spans = eco_service_map();
+        let latest = spans
+            .iter()
+            .map(|span| span.end)
+            .max()
+            .expect("service map emits spans");
+        let now = now_nanos();
+        assert!(latest < now, "generated span ended at {latest}, now {now}");
+        assert!(
+            now.saturating_sub(latest) < 2_000_000_000,
+            "generated span is not recent: {latest} vs now {now}"
         );
     }
 

@@ -14,6 +14,7 @@ isolated to the CLI; normal commerce journeys use seeded PostgreSQL data.
 | `m-shapes` / `m-labels` / `f-attrs` | `metrics:shapes`, `metrics:labels`, `attributes:bounded` | Counter reset, gauge gap, exemplars, bounded labels, and method facets render correctly. |
 | `e-burst` / `e-multi-lang` | `issues:burst`, `issues:multi_language` | Repeated and cross-language error fingerprints group distinctly. |
 | `eco-external` | `ecosystem:external_edge` | External client edge has no invented server node. |
+| `eco-service-map` | `ecosystem:service_map` | Completed CLI, browser, database, queue, and healthy/error external dependency identities expose service-map nodes, call counts, and error counts. |
 | `j-happy` / `j-error` / `j-outside` / `j-reattach` / `j-parallel` | `journeys:happy_path`, `journeys:error_path`, `journeys:outside_screen`, `journeys:reattach`, `journeys:parallel` | Journey/session attribution and concurrent invocation isolation remain visible. |
 | `p-grpc-err` | `protocols:grpc_errors` | Pricing gRPC success, invalid input, deadline, and unavailable outcomes are distinct. |
 | `p-grpc-stream` | `protocols:grpc_stream` | Stream SENT/RECEIVED events, failure, and cancellation are ordered and visible. |

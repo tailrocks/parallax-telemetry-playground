@@ -4065,10 +4065,12 @@ async fn ecosystem_full() -> anyhow::Result<i32> {
 
 async fn service_map_investigation() -> anyhow::Result<i32> {
     // Reuse live commerce/browser telemetry, then add deterministic
-    // low/medium/high dependency traffic and an error edge.
+    // low/medium/high dependency traffic and an error edge. Emit the
+    // synthetic evidence in a completed child so its `cli.command` span is
+    // flushed before the service map can be queried.
     checkout_saga().await?;
     browser_journey().await?;
-    run_shape("eco-service-map").await?;
+    run_current(&["shapes", "eco-service-map"]).await?;
 
     let end = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
