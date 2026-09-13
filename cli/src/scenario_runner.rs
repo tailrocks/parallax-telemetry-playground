@@ -120,6 +120,7 @@ pub(crate) const SCENARIO_NAMES: &[&str] = &[
     "product:lifecycle_ops",
     "security:redaction_egress",
     "product:ui_agent_verify",
+    "propagation:malformed",
 ];
 
 /// Stable A/B/C/corner-corpus proof IDs, aligned one-for-one with
@@ -216,6 +217,7 @@ const SCENARIO_PROOF_IDS: &[&str] = &[
     "c9",
     "c10",
     "c11",
+    "b24",
 ];
 
 pub(crate) fn semantic_names() -> &'static [&'static str] {
@@ -468,6 +470,7 @@ async fn run_semantic_named(name: &str, extra: &[String]) -> anyhow::Result<i32>
         "product:lifecycle_ops" => lifecycle_ops().await,
         "security:redaction_egress" => redaction_egress().await,
         "product:ui_agent_verify" => ui_agent_verify().await,
+        "propagation:malformed" => malformed_propagation().await,
         _ => unreachable!("registry and dispatch must stay in sync"),
     }
 }
@@ -884,11 +887,23 @@ async fn wait_for_postgres_row(sql: &str, label: &str) -> anyhow::Result<Vec<Str
 async fn emit_trace_request(request: ExportTraceServiceRequest) -> anyhow::Result<()> {
     let mut encoded = Vec::new();
     request.encode(&mut encoded)?;
+    emit_otlp_request("traces", encoded).await
+}
+
+async fn emit_log_request(
+    request: opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest,
+) -> anyhow::Result<()> {
+    let mut encoded = Vec::new();
+    request.encode(&mut encoded)?;
+    emit_otlp_request("logs", encoded).await
+}
+
+async fn emit_otlp_request(signal: &str, encoded: Vec<u8>) -> anyhow::Result<()> {
     let base = url_env("PARALLAX_OTLP_HTTP", "http://127.0.0.1:4318");
-    let endpoint = if base.ends_with("/v1/traces") {
+    let endpoint = if base.ends_with(&format!("/v1/{signal}")) {
         base
     } else {
-        format!("{base}/v1/traces")
+        format!("{base}/v1/{signal}")
     };
     let mut endpoints = vec![endpoint.clone()];
     if let Ok(mut fallback) = Url::parse(&endpoint)
@@ -918,7 +933,7 @@ async fn emit_trace_request(request: ExportTraceServiceRequest) -> anyhow::Resul
             Err(error) => failures.push(format!("{endpoint}: {error}")),
         }
     }
-    bail!("OTLP trace request failed: {}", failures.join("; "))
+    bail!("OTLP {signal} request failed: {}", failures.join("; "))
 }
 
 async fn emit_issue_seed() -> anyhow::Result<()> {
@@ -1585,6 +1600,361 @@ async fn seeded_order_replay() -> anyhow::Result<i32> {
     }
     println!("seeded-order replay preserved durable inbox and notification idempotence");
     Ok(0)
+}
+
+const MALFORMED_VALID_TRACE_ID: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
+const MALFORMED_VALID_SPAN_ID: &str = "00f067aa0ba902b7";
+const MALFORMED_VALID_TRACESTATE: &str = "playground=commerce";
+const MALFORMED_VALID_BAGGAGE: &str = "tenant.id=tenant-acme,user.tier=standard,customer.segment=standard,region=us-east-1,request.priority=normal";
+
+/// One deterministic malformed carrier. `None` means the header is absent.
+/// Every entry keeps tenant identity resolvable (body + `x-tenant-id`), so
+/// failures isolate W3C handling rather than tenant handling.
+struct MalformedCarrier {
+    id: &'static str,
+    traceparent: Option<String>,
+    tracestate: Option<&'static str>,
+    baggage: Option<String>,
+}
+
+fn malformed_valid_traceparent() -> String {
+    format!("00-{MALFORMED_VALID_TRACE_ID}-{MALFORMED_VALID_SPAN_ID}-01")
+}
+
+fn malformed_checkout_corpus() -> Vec<MalformedCarrier> {
+    let valid_tp = malformed_valid_traceparent();
+    let baggage = MALFORMED_VALID_BAGGAGE.to_owned();
+    vec![
+        MalformedCarrier {
+            // `ff` is the spec-forbidden version; `01` would be valid
+            // forward-compatible input, not a malformed carrier.
+            id: "tp-bad-version",
+            traceparent: Some(format!(
+                "ff-{MALFORMED_VALID_TRACE_ID}-{MALFORMED_VALID_SPAN_ID}-01"
+            )),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "tp-non-hex",
+            traceparent: Some(format!(
+                "00-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-{MALFORMED_VALID_SPAN_ID}-01"
+            )),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "tp-zero-trace",
+            traceparent: Some(format!(
+                "00-00000000000000000000000000000000-{MALFORMED_VALID_SPAN_ID}-01"
+            )),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "tp-zero-span",
+            traceparent: Some(format!("00-{MALFORMED_VALID_TRACE_ID}-0000000000000000-01")),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "tp-truncated",
+            traceparent: Some("00-abc123".to_owned()),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "tp-missing",
+            traceparent: None,
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "ts-garbage",
+            traceparent: Some(valid_tp.clone()),
+            tracestate: Some("!!!"),
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "ts-missing",
+            traceparent: Some(valid_tp.clone()),
+            tracestate: None,
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "baggage-junk-member",
+            traceparent: Some(valid_tp.clone()),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(format!("{baggage},junk-member-without-equals")),
+        },
+        MalformedCarrier {
+            id: "baggage-missing",
+            traceparent: Some(valid_tp),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: None,
+        },
+    ]
+}
+
+fn malformed_notify_corpus() -> Vec<MalformedCarrier> {
+    let valid_tp = malformed_valid_traceparent();
+    let baggage = MALFORMED_VALID_BAGGAGE.to_owned();
+    vec![
+        MalformedCarrier {
+            // `ff` is the spec-forbidden version; `01` would be valid
+            // forward-compatible input, not a malformed carrier.
+            id: "tp-bad-version",
+            traceparent: Some(format!(
+                "ff-{MALFORMED_VALID_TRACE_ID}-{MALFORMED_VALID_SPAN_ID}-01"
+            )),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "tp-zero-trace",
+            traceparent: Some(format!(
+                "00-00000000000000000000000000000000-{MALFORMED_VALID_SPAN_ID}-01"
+            )),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "tp-missing",
+            traceparent: None,
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "ts-missing",
+            traceparent: Some(valid_tp.clone()),
+            tracestate: None,
+            baggage: Some(baggage.clone()),
+        },
+        MalformedCarrier {
+            id: "baggage-missing",
+            traceparent: Some(valid_tp.clone()),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: None,
+        },
+        MalformedCarrier {
+            id: "baggage-junk-member",
+            traceparent: Some(valid_tp.clone()),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(format!("{baggage},junk-member-without-equals")),
+        },
+        MalformedCarrier {
+            id: "baggage-duplicate-key",
+            traceparent: Some(valid_tp),
+            tracestate: Some(MALFORMED_VALID_TRACESTATE),
+            baggage: Some(
+                "tenant.id=tenant-acme,tenant.id=tenant-acme,user.tier=standard".to_owned(),
+            ),
+        },
+    ]
+}
+
+fn malformed_headers(carrier: &MalformedCarrier) -> anyhow::Result<HeaderMap> {
+    let mut headers = HeaderMap::new();
+    if let Some(traceparent) = carrier.traceparent.as_deref() {
+        headers.insert("traceparent", traceparent.parse()?);
+    }
+    if let Some(tracestate) = carrier.tracestate {
+        headers.insert("tracestate", tracestate.parse()?);
+    }
+    if let Some(baggage) = carrier.baggage.as_deref() {
+        headers.insert("baggage", baggage.parse()?);
+    }
+    headers.insert("x-tenant-id", "tenant-acme".parse()?);
+    Ok(headers)
+}
+
+async fn notify_request(
+    headers: HeaderMap,
+    event_key: &str,
+    order_id: &str,
+) -> anyhow::Result<(StatusCode, Value)> {
+    let base = url_env("NOTIFICATIONS_URL", "http://localhost:8091");
+    let mut full = json_headers();
+    full.extend(headers);
+    request_json(
+        Method::POST,
+        &format!("{base}/notify"),
+        full,
+        Some(json!({
+            "tenant_id": "tenant-acme",
+            "event_key": event_key,
+            "order_id": order_id,
+            "channel": "webhook",
+            "payload": {"case": event_key},
+        })),
+    )
+    .await
+}
+
+/// Malformed propagation: best-effort HTTP ingress must isolate a corrupt
+/// carrier (business succeeds on a detached trace) while strict durable
+/// ingress must reject it (400, nothing persisted).
+async fn malformed_propagation() -> anyhow::Result<i32> {
+    for carrier in malformed_checkout_corpus() {
+        let (status, body) = checkout_http(
+            "WIDGET-1",
+            1,
+            "tok_visa",
+            &format!("malformed-{}", carrier.id),
+            malformed_headers(&carrier)?,
+            &[],
+        )
+        .await?;
+        ensure!(
+            status.is_success() && body.get("status").and_then(Value::as_str) == Some("paid"),
+            "malformed checkout {} must stay paid on a detached trace: HTTP {status}: {body}",
+            carrier.id
+        );
+        println!("malformed checkout {} stayed paid", carrier.id);
+    }
+
+    for carrier in malformed_notify_corpus() {
+        let case = format!("malformed:{}", carrier.id);
+        let event_key = format!("{case}:{}", uuid::Uuid::new_v4());
+        let (status, body) =
+            notify_request(malformed_headers(&carrier)?, &event_key, "order-acme-1001").await?;
+        let error = body
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        ensure!(
+            status == StatusCode::BAD_REQUEST && error.contains("invalid W3C propagation"),
+            "malformed notify {} must be rejected as invalid W3C: HTTP {status}: {body}",
+            carrier.id
+        );
+        println!("malformed notify {} rejected: {error}", carrier.id);
+    }
+
+    let control_trace_id = hex_id(16);
+    let mut control = HeaderMap::new();
+    control.insert(
+        "traceparent",
+        scenario_traceparent(&control_trace_id).parse()?,
+    );
+    control.insert("tracestate", "playground=malformed-proof".parse()?);
+    control.insert("baggage", MALFORMED_VALID_BAGGAGE.parse()?);
+    control.insert("x-tenant-id", "tenant-acme".parse()?);
+    let control_key = format!("malformed:control:{}", uuid::Uuid::new_v4());
+    let (status, body) = notify_request(control, &control_key, "order-acme-1001").await?;
+    ensure!(
+        status == StatusCode::ACCEPTED,
+        "valid notify control must be accepted: HTTP {status}: {body}"
+    );
+    println!("malformed control notify accepted: {control_key}");
+
+    let (status, body) = checkout_http(
+        "WIDGET-1",
+        1,
+        "tok_visa",
+        "malformed-control",
+        scenario_headers(&control_trace_id, "playground=malformed-proof")?,
+        &[],
+    )
+    .await?;
+    ensure!(
+        status.is_success(),
+        "malformed control checkout failed: HTTP {status}: {body}"
+    );
+    wait_for_checkout_span(&control_trace_id).await?;
+    println!("malformed control trace {control_trace_id} reached Parallax");
+    Ok(0)
+}
+
+fn checkout_span_present(data: &Value) -> bool {
+    trace_spans(data).is_some_and(|spans| {
+        spans
+            .iter()
+            .any(|span| span_is(span, "checkout", "checkout"))
+    })
+}
+
+async fn wait_for_checkout_span(trace_id: &str) -> anyhow::Result<()> {
+    let timeout = positive_env("PARALLAX_TRACE_TIMEOUT_SECONDS", 30)?;
+    let poll = positive_env("PARALLAX_TRACE_POLL_SECONDS", 1)?;
+    let query = format!(
+        "{{ trace(traceId: {trace_id:?}) {{ spans {{ spanId parentSpanId service name statusCode attributes }} }} }}"
+    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
+    let mut last = Value::Null;
+    loop {
+        if let Ok(data) = parallax_graphql(&query).await {
+            last = data;
+            if checkout_span_present(&last) {
+                return Ok(());
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!("checkout span for trace {trace_id} never reached Parallax: {last}");
+        }
+        tokio::time::sleep(Duration::from_secs(poll)).await;
+    }
+}
+
+/// Bounded cardinality stress: 200 deterministic series must all arrive and
+/// stay enumerable through the Parallax metrics API.
+async fn cardinality_stress() -> anyhow::Result<i32> {
+    run_shape("m-cardinality").await?;
+    let now_nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock is before Unix epoch")?
+        .as_nanos();
+    let from_nanos = now_nanos.saturating_sub(15 * 60 * 1_000_000_000);
+    let to_nanos = now_nanos + 60 * 1_000_000_000;
+    let timeout = positive_env("PARALLAX_METRIC_TIMEOUT_SECONDS", 120)?;
+    let poll = positive_env("PARALLAX_METRIC_POLL_SECONDS", 2)?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
+    let expected = (0..shapes::CARDINALITY_SERIES)
+        .map(shapes::cardinality_bucket_label)
+        .collect::<std::collections::BTreeSet<_>>();
+    loop {
+        let query = format!(
+            "{{ metricLabelValues(name: {:?}, label: {:?}, fromNanos: \"{from_nanos}\", toNanos: \"{to_nanos}\") }}",
+            shapes::CARDINALITY_METRIC,
+            shapes::CARDINALITY_LABEL
+        );
+        if let Ok(data) = parallax_graphql(&query).await {
+            let observed = data
+                .get("metricLabelValues")
+                .and_then(Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect::<std::collections::BTreeSet<_>>()
+                })
+                .unwrap_or_default();
+            if observed == expected {
+                println!(
+                    "cardinality stress verified: {} exact {} values for {}",
+                    observed.len(),
+                    shapes::CARDINALITY_LABEL,
+                    shapes::CARDINALITY_METRIC
+                );
+                return Ok(0);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                let missing = expected
+                    .difference(&observed)
+                    .take(8)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                bail!(
+                    "cardinality stress incomplete: {}/{} label values (missing sample: {missing:?})",
+                    observed.len(),
+                    expected.len()
+                );
+            }
+        } else if tokio::time::Instant::now() >= deadline {
+            bail!("Parallax metric query never succeeded before timeout");
+        }
+        tokio::time::sleep(Duration::from_secs(poll)).await;
+    }
 }
 
 async fn baggage_checkout() -> anyhow::Result<i32> {

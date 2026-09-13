@@ -210,6 +210,9 @@ services:
     environment:
       <<: [*otlp, *postgres-env]
       ADDR: "0.0.0.0:8091"
+    # Published so propagation:malformed can probe the strict durable
+    # ingress directly; fulfillment reaches it over the pg network.
+    ports: ["8091:8091"]
     depends_on:
       postgres-migrate:
         condition: service_completed_successfully
