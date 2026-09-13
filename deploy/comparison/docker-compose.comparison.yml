@@ -1,0 +1,75 @@
+# Parallax competitor lab (GOAL.md §11).
+#
+# Fan-out harness: the playground emits OTLP once; the collector forwards the
+# identical stream to Parallax and to pinned competitors. Isolated Compose
+# project; none of these ports collide with the playground stack or a normal
+# `parallax serve`.
+#
+#   docker compose -f deploy/comparison/docker-compose.comparison.yml \
+#     --project-name parallax-comparison up -d
+#
+# Then run the playground with:
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:24317 \
+#   OTEL_EXPORTER_OTLP_HTTP_ENDPOINT=http://127.0.0.1:24318 ...
+#
+# Versions are latest-stable at 2026-09-13, digest-pinned. See README.md.
+
+services:
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+    command: ["--config=/etc/otelcol/otelcol-comparison.yaml"]
+    volumes:
+      - ./otelcol-comparison.yaml:/etc/otelcol/otelcol-comparison.yaml:ro
+    ports:
+      - "24317:4317" # OTLP/gRPC ingress (playground points here)
+      - "24318:4318" # OTLP/HTTP ingress (playground points here)
+      - "55679:55679" # zPages
+    healthcheck:
+      test: ["CMD", "/otelcol-contrib", "--help"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [comparison]
+    depends_on:
+      jaeger:
+        condition: service_started
+      openobserve:
+        condition: service_started
+
+  jaeger:
+    image: jaegertracing/jaeger:2.20.0@sha256:46a886260e04002d8f45e213fc39063fa11a50446048fdaa64786fc0840cb9f8
+    ports:
+      - "36686:16686" # Jaeger UI
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:16686/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks: [comparison]
+
+  openobserve:
+    image: openobserve/openobserve:v1.0.0@sha256:d581789cb03b5f061ed56a3e864b5e4bbc86bbf6d317ec863372e98ee49b30d5
+    environment:
+      ZO_DATA_DIR: /data
+      # Single-node defaults; the OTLP exporter uses these credentials.
+      ZO_ROOT_USER_EMAIL: root@example.com
+      ZO_ROOT_USER_PASSWORD: Complexpass#123
+    ports:
+      - "5080:5080" # OpenObserve UI + OTLP/HTTP ingest
+    volumes:
+      - openobserve_data:/data
+    # No healthcheck: the v1.0.0 image is distroless (no /bin/sh, wget, or
+    # curl), so no in-container HTTP probe can run. Poll /healthz from the
+    # host instead. Dependents use `service_started` for this reason.
+    healthcheck:
+      disable: true
+    networks: [comparison]
+
+networks:
+  comparison:
+
+volumes:
+  openobserve_data:

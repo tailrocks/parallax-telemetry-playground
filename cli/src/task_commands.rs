@@ -601,22 +601,32 @@ pub(crate) async fn check_scenarios() -> anyhow::Result<i32> {
         let Some(name) = task.get("name").and_then(Value::as_str) else {
             continue;
         };
-        if !is_semantic_name(name) {
+        // The semantic-name contract belongs to the scenario catalog.
+        // Quality gates in mise.toml (build, check, lint, ...) predate it
+        // and are not scenarios.
+        let in_scenario_catalog = task
+            .get("source")
+            .and_then(Value::as_str)
+            .is_some_and(|source| source.ends_with("mise-scenarios.toml"));
+        if in_scenario_catalog && !is_semantic_name(name) {
             bail!("local mise task name must be exactly group:snake_case: {name}");
         }
-        if task
-            .get("description")
-            .and_then(Value::as_str)
-            .is_none_or(|description| description.trim().is_empty())
+        if in_scenario_catalog
+            && task
+                .get("description")
+                .and_then(Value::as_str)
+                .is_none_or(|description| description.trim().is_empty())
         {
             bail!("local mise task has no description: {name}");
         }
-        let aliases = task
-            .get("aliases")
-            .and_then(Value::as_array)
-            .context("mise task has no aliases array")?;
-        if !aliases.is_empty() {
-            bail!("opaque task alias remains for {name}");
+        if in_scenario_catalog {
+            let aliases = task
+                .get("aliases")
+                .and_then(Value::as_array)
+                .context("mise task has no aliases array")?;
+            if !aliases.is_empty() {
+                bail!("opaque task alias remains for {name}");
+            }
         }
         let invokes_scenario = task
             .get("run")
