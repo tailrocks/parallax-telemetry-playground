@@ -404,6 +404,11 @@ description = "External client edge without an invented server node"
 raw = true
 run = "cargo run --locked -p playground-cli -- scenario ecosystem:external_edge"
 
+["ecosystem:service_map"]
+description = "Typed service/database/queue/external map investigation with varied traffic and error edges"
+raw = true
+run = "cargo run --locked -p playground-cli -- scenario ecosystem:service_map"
+
 ["ecosystem:full"]
 description = "Complete CLI, browser, and service ecosystem corpus"
 raw = true

@@ -101,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
             "daemon" => daemon(rest).await,
             "enter" => enter(rest).await,
             "console" => console_sim::run(rest).await,
+            "shapes" => shapes::run(rest).await,
             _ => drive().await,
         }
     }
