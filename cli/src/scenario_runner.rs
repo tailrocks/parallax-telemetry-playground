@@ -4941,7 +4941,7 @@ async fn sentry_envelopes() -> anyhow::Result<i32> {
     )
     .await?;
     run_bun_script_with_env(
-        "scenarios/c8-emit-js.ts",
+        "web/scenarios/c8-emit-js.ts",
         &[],
         &[("SENTRY_DSN", dsn.as_str())],
     )
@@ -6514,10 +6514,16 @@ async fn run_bun_script_with_env(
     env: &[(&str, &str)],
 ) -> anyhow::Result<i32> {
     let root = repository_root();
-    let (cwd, script) = if relative == "scenarios/c8-emit-js.ts" {
-        (root.join("web"), "../scenarios/c8-emit-js.ts".to_owned())
-    } else {
-        (root.clone(), relative.to_owned())
+    let script_path = root.join(relative);
+    ensure!(
+        script_path.is_file(),
+        "bun script missing: {}",
+        script_path.display()
+    );
+    // Bun resolves node_modules from the cwd: scripts under web/ run there.
+    let (cwd, script) = match relative.strip_prefix("web/") {
+        Some(rest) => (root.join("web"), rest.to_owned()),
+        None => (root.clone(), relative.to_owned()),
     };
     let mut command_args = vec![script];
     command_args.extend(args.iter().map(|arg| (*arg).to_owned()));
