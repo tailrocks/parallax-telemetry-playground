@@ -68,7 +68,7 @@ standard 4317/4318 the collector targets. `FANOUT_OTLP_HTTP`, `JAEGER_URL`,
 | Same trace reaches Jaeger | pass (`traces:deep` trace `af226d30…0001`: 1 trace, 14/14 spans via `/api/traces`) |
 | Same trace reaches OpenObserve | pass (14/14 spans in stream `default`, `?type=traces` search) |
 | Parallax leg of the fan-out | pass 2026-09-13 (trace `b27530ab…0001`, 14/14 spans in Parallax, Jaeger, and OpenObserve; Parallax was a token-free serve with standard OTLP ports 4317/4318; proven by the `check-fanout.sh` predecessor, since migrated to `mise run check:fanout`) |
-| Same-workload UI comparison | **pending** (needs agent-browser passes over the fanned-out data) |
+| Same-workload UI comparison | pass 2026-09-13 (trace `23b34698…0001`, 14/14 spans rendered in Parallax, Jaeger 2.20.0, and OpenObserve v1.0.0; screenshots + factual comparison in [`UI_BAKEOFF.md`](UI_BAKEOFF.md)) |
 | SigNoz / Grafana stack / Uptrace | **not scaffolded** (heavier; next expansion) |
 
 Query notes: OTLP traces land in the OpenObserve stream literally named
