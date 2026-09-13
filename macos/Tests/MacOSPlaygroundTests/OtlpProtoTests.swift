@@ -160,8 +160,13 @@ final class OtlpProtoTests: XCTestCase {
         let dict = Dictionary(uniqueKeysWithValues: live)
         XCTAssertEqual(dict["service.name"], "svc")
         XCTAssertEqual(dict["os.type"], "darwin")
+        XCTAssertEqual(dict["os.name"], "macOS")
         XCTAssertEqual(dict["macos.scenario_id"], "sid")
         XCTAssertEqual(dict["service.instance.id"], "\(native.processName)-\(native.pid)")
+        XCTAssertEqual(dict["macos.build_uuid"], native.buildUUID)
+        XCTAssertEqual(dict["telemetry.sdk.language"], "swift")
+        XCTAssertFalse(dict["process.executable.build_id"]?.isEmpty ?? true)
+        XCTAssertFalse(dict["process.executable.build_id"]?.contains("-") ?? true)
         let frozen = native.resourceAttrs(serviceName: "svc", scenarioId: "sid", stableInstance: true)
         XCTAssertTrue(frozen.contains { $0.0 == "service.instance.id" && $0.1.hasSuffix("-frozen") })
     }
@@ -197,5 +202,61 @@ final class OtlpProtoTests: XCTestCase {
         XCTAssertFalse(n.deviceModel.isEmpty)
         XCTAssertGreaterThan(n.processorCount, 0)
         XCTAssertFalse(captureStackTrace().isEmpty)
+        XCTAssertEqual(n.buildUUID.count, 36, n.buildUUID)
+        XCTAssertTrue(n.buildUUID.contains("-"))
+        XCTAssertGreaterThan(n.physicalMemoryGB, 0)
+        XCTAssertGreaterThan(n.memoryResidentBytes, 0)
+        XCTAssertNotNil(currentExecutableUUID())
+    }
+
+    func testHistogramExemplarWire() {
+        let traceId = Data(repeating: 0xAB, count: 16)
+        let spanId = Data(repeating: 0xCD, count: 8)
+        let data = buildMetricsData(
+            resourceAttrs: [], scopeName: "s", scopeVersion: "1",
+            sums: [],
+            histograms: [(
+                name: "m", description: "d", unit: "ms",
+                points: [OtlpHistogramPoint(
+                    timeNanos: 1, startNanos: 0, count: 1, sum: 42,
+                    bounds: [10, 50], bucketCounts: [0, 1, 0],
+                    stringAttrs: [],
+                    exemplars: [OtlpExemplar(timeNanos: 1, value: 42, traceId: traceId, spanId: spanId)]
+                )]
+            )]
+        )
+        // HistogramDataPoint.exemplars field 8 wire 2 => 0x42.
+        XCTAssertTrue(data.range(of: Data([0x42])) != nil)
+        XCTAssertTrue(data.range(of: traceId) != nil)
+        XCTAssertTrue(data.range(of: spanId) != nil)
+    }
+
+    func testSpanLinkWire() {
+        let traceId = Data(repeating: 0x11, count: 16)
+        let spanId = Data(repeating: 0x22, count: 8)
+        let linkTrace = Data(repeating: 0x33, count: 16)
+        let linkSpan = Data(repeating: 0x44, count: 8)
+        let traces = buildTracesData(
+            resourceAttrs: [], scopeName: "s", scopeVersion: "1",
+            spans: [OtlpSpan(
+                traceId: traceId, spanId: spanId, parentSpanId: nil,
+                name: "op", kind: 1, startNanos: 1, endNanos: 2,
+                stringAttrs: [], intAttrs: [], events: [],
+                statusCode: 0, statusMessage: "",
+                links: [OtlpLink(traceId: linkTrace, spanId: linkSpan, stringAttrs: [("session.id", "x")])]
+            )]
+        )
+        // Span.links field 13 wire 2 => 0x6A.
+        XCTAssertTrue(traces.range(of: Data([0x6A])) != nil)
+        XCTAssertTrue(traces.range(of: linkTrace) != nil)
+        XCTAssertTrue(traces.range(of: linkSpan) != nil)
+    }
+
+    func testDurationBuckets() {
+        XCTAssertEqual(durationBuckets(185)[3], 1) // (100, 500]
+        XCTAssertEqual(durationBuckets(2400)[5], 1) // (1000, 5000]
+        XCTAssertEqual(durationBuckets(10)[0], 1)
+        XCTAssertEqual(durationBuckets(9000)[6], 1) // overflow
+        XCTAssertEqual(durationBuckets(185).reduce(0, +), 1)
     }
 }

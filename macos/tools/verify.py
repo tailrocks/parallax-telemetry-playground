@@ -5,21 +5,26 @@ Steps:
   1. swift build + swift test
   2. dry-run byte-determinism (same seed + frozen clock => identical output)
   3. live POST against stub receiver; parse OTLP protobuf (no deps) and assert
-     cross-signal correlation (one trace_id in traces+logs, error status,
-     resource attrs, histogram bucket)
-  4. unified-log proof via `log show`
-  5. real crash -> .ips report -> atos + dSYM symbolication proof
-  6. optional: live POST to Parallax + GraphQL correlation proof (--parallax)
+     cross-signal correlation (one trace_id in traces+logs+metric exemplars,
+     error status, session.id, resource attrs, histogram bucket)
+  4. real URLSession POST injects W3C traceparent into a local backend
+  5. unified-log proof via `log show`
+  6. unsigned .app Info.plist release context; MetricKit probe (honest 0)
+  7. real crash -> .ips report -> atos + dSYM symbolication proof
+  8. live Parallax ingest/query if a server is up (or --parallax)
 
 Exit nonzero on any failure. Prints PASS/FAIL per step.
 """
 import base64
+import http.server
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -107,17 +112,135 @@ def kv_string(kv):
     return (key.decode(), s.decode() if s is not None else None)
 
 
+def parse_resource_attrs(blob):
+    attrs = {}
+    for rs in all_of(blob, 1):
+        res = first(rs, 1)
+        if res:
+            for kv in all_of(res, 1):
+                kvp = kv_string(kv)
+                if kvp:
+                    attrs[kvp[0]] = kvp[1]
+    return attrs
+
+
+def parse_spans(blob):
+    spans = []
+    for rs in all_of(blob, 1):
+        for ss in all_of(rs, 2):
+            for sp in all_of(ss, 2):
+                spans.append(sp)
+    return spans
+
+
+def span_string_attrs(sp):
+    out = {}
+    for kv in all_of(sp, 9):
+        kvp = kv_string(kv)
+        if kvp and kvp[1] is not None:
+            out[kvp[0]] = kvp[1]
+    return out
+
+
+def parse_exemplar_ids(metrics_blobs):
+    """Return (trace_ids, histogram_ok_2400). Exemplars on hist field 8 and sum field 5."""
+    tids = set()
+    hist_ok = False
+    metric_names = set()
+    for blob in metrics_blobs:
+        for rm in all_of(blob, 1):
+            for sm in all_of(rm, 2):
+                for mm in all_of(sm, 2):
+                    name = first(mm, 1)
+                    if name:
+                        metric_names.add(name.decode())
+                    hist = first(mm, 9)
+                    if hist:
+                        for dp in all_of(hist, 1):
+                            counts = all_of(dp, 6)
+                            if len(counts) == 7 and sum(counts) == 1 and counts[5] == 1:
+                                hist_ok = True
+                            for ex in all_of(dp, 8):
+                                t = first(ex, 5)
+                                if t:
+                                    tids.add(t.hex())
+                    smetric = first(mm, 7)
+                    if smetric:
+                        for dp in all_of(smetric, 1):
+                            for ex in all_of(dp, 5):
+                                t = first(ex, 5)
+                                if t:
+                                    tids.add(t.hex())
+    return tids, hist_ok, metric_names
+
+
+class EchoHandler(http.server.BaseHTTPRequestHandler):
+    received = {}
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        self.rfile.read(length)
+        EchoHandler.received = {
+            "traceparent": self.headers.get("traceparent"),
+            "path": self.path,
+        }
+        self.send_response(502)
+        self.send_header("Content-Length", "0")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+    def log_message(self, *a):
+        pass
+
+
+def start_echo():
+    EchoHandler.received = {}
+    srv = http.server.HTTPServer(("127.0.0.1", 0), EchoHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+APP_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>MacOSPlayground</string>
+  <key>CFBundleIdentifier</key><string>com.tailrocks.macos-playground</string>
+  <key>CFBundleName</key><string>MacOSPlayground</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.2.3</string>
+  <key>CFBundleVersion</key><string>45</string>
+  <key>LSUIElement</key><true/>
+</dict>
+</plist>
+"""
+
+
+def make_unsigned_app(bin_path, work):
+    app = os.path.join(work, "MacOSPlayground.app")
+    macos = os.path.join(app, "Contents", "MacOS")
+    os.makedirs(macos)
+    dest = os.path.join(macos, "MacOSPlayground")
+    shutil.copy(bin_path, dest)
+    os.chmod(dest, 0o755)
+    with open(os.path.join(app, "Contents", "Info.plist"), "w") as f:
+        f.write(APP_PLIST)
+    run(["codesign", "-s", "-", "-f", app])
+    return app, dest
+
+
 def main():
-    with_parallax = "--parallax" in sys.argv
+    force_parallax = "--parallax" in sys.argv
 
     # 1. build + unit tests
     r = run(["swift", "build"], cwd=ROOT)
     if not check("swift build", r.returncode == 0, r.stderr[-300:] if r.returncode else ""):
         return 1
     r = run(["swift", "test"], cwd=ROOT)
-    m = re.search(r"Executed (\d+) tests.*with (\d+) failures", r.stdout + r.stderr)
-    ok = r.returncode == 0 and m and m.group(2) == "0"
-    if not check("swift test", ok, m.group(0) if m else r.stderr[-300:]):
+    combined = r.stdout + r.stderr
+    m = re.search(r"Test Suite 'All tests'[^\n]*\n\s*Executed (\d+) tests.*with (\d+) failures", combined)
+    ok = r.returncode == 0 and m and m.group(2) == "0" and int(m.group(1)) >= 20
+    if not check("swift test", ok, m.group(0).strip() if m else combined[-300:]):
         return 1
 
     # 2. determinism: payload bytes identical across runs (stack traces vary in
@@ -129,7 +252,6 @@ def main():
         if r.returncode != 0:
             check("dry-run determinism", False, r.stderr[-300:])
             return 1
-        # strip native pid-sensitive fields before comparing
         o = json.loads(r.stdout)
         o["native"] = {"redacted": True}
         for p in o["payloads"]:
@@ -139,10 +261,25 @@ def main():
     if not check("dry-run determinism", outs[0] == outs[1]):
         return 1
     summary = json.loads(run([BIN, "all", "--seed", SEED, "--frozen-time", FROZEN, "--dry-run"]).stdout)
+    names = {s["name"] for s in summary["scenarios"]}
+    if not check("dry-run scenarios", names == {"failure", "slow-op", "lifecycle"}, str(names)):
+        return 1
     fail = next(s for s in summary["scenarios"] if s["name"] == "failure")
     slow = next(s for s in summary["scenarios"] if s["name"] == "slow-op")
+    life = next(s for s in summary["scenarios"] if s["name"] == "lifecycle")
     check("traceparent shape", re.fullmatch(r"00-[0-9a-f]{32}-[0-9a-f]{16}-01", fail["traceparent"]) is not None,
           fail["traceparent"])
+    sids = {s["session_id"] for s in summary["scenarios"]}
+    check("dry-run shared session.id", len(sids) == 1 and fail["session_id"] == summary["session_id"],
+          str(sids))
+    native = summary["native"]
+    uuid_ok = bool(re.fullmatch(r"[0-9A-F-]{36}", native.get("build_uuid", ""), re.I))
+    check("dry-run native build_uuid", uuid_ok, str(native.get("build_uuid")))
+    dump = run(["dwarfdump", "--uuid", BIN]).stdout
+    dump_uuids = re.findall(r"[0-9A-Fa-f-]{36}", dump)
+    check("build_uuid matches dwarfdump LC_UUID",
+          bool(dump_uuids) and dump_uuids[0].lower() == native.get("build_uuid", "").lower(),
+          f"native={native.get('build_uuid')} dump={dump_uuids[:1]}")
 
     # 3. live stub: POST real protobuf, parse, assert correlation
     cap = tempfile.mktemp(prefix="macotel-stub-", suffix=".jsonl")
@@ -179,44 +316,59 @@ def main():
         ctype_ok = all(rec["content_type"] == "application/x-protobuf" for rec in recs)
         check("protobuf content-type", ctype_ok)
 
-        # parse: failure trace spans + logs share trace_id; span status ERROR=2
         traces_blobs = by_path["/v1/traces"]
         spans = []
         res_attrs = {}
         for blob in traces_blobs:
-            for rs in all_of(blob, 1):
-                res = first(rs, 1)
-                if res:
-                    for kv in all_of(res, 1):
-                        kvp = kv_string(kv)
-                        if kvp:
-                            res_attrs[kvp[0]] = kvp[1]
-                for ss in all_of(rs, 2):
-                    for sp in all_of(ss, 2):
-                        spans.append(sp)
+            res_attrs.update(parse_resource_attrs(blob))
+            spans.extend(parse_spans(blob))
         live = json.loads(r.stdout)
         live_fail = next(s for s in live["scenarios"] if s["name"] == "failure")
         live_slow = next(s for s in live["scenarios"] if s["name"] == "slow-op")
-        span_ids = {s["trace_id"]: s for s in (live_fail, live_slow)}
-        found = {}
+        live_life = next(s for s in live["scenarios"] if s["name"] == "lifecycle")
+        found_tids = set()
+        span_names = set()
         err_status = False
         exc_event = False
+        hang_event = False
+        session_ids = set()
         for sp in spans:
             tid = first(sp, 1).hex()
-            found[tid] = first(sp, 5).decode()
+            found_tids.add(tid)
+            span_names.add(first(sp, 5).decode())
             st = first(sp, 15)
             if st and first(st, 3) == 2:
                 err_status = True
             for ev in all_of(sp, 11):
-                if first(ev, 2) == b"exception":
+                name = first(ev, 2)
+                if name == b"exception":
                     exc_event = True
-        check("stub traces carry both scenario trace_ids",
-              live_fail["trace_id"] in found and live_slow["trace_id"] in found, str(found))
+                if name == b"macos.hang.stack":
+                    hang_event = True
+            attrs = span_string_attrs(sp)
+            if "session.id" in attrs:
+                session_ids.add(attrs["session.id"])
+        check("stub traces carry all scenario trace_ids",
+              live_fail["trace_id"] in found_tids and live_slow["trace_id"] in found_tids
+              and live_life["trace_id"] in found_tids,
+              str(sorted(found_tids)))
+        want_names = {"macos.checkout.submit", "HTTP POST", "macos.report.render",
+                      "macos.app.session", "macos.app.lifecycle.cold_start"}
+        check("span names cover failure+http+hang+lifecycle", want_names <= span_names, str(span_names))
         check("failure span status ERROR", err_status)
         check("exception span event present", exc_event)
+        check("hang stack event present", hang_event)
+        check("all spans share one session.id",
+              len(session_ids) == 1 and live_fail["session_id"] in session_ids, str(session_ids))
         check("resource attrs native",
               res_attrs.get("service.name") == "macos-playground" and res_attrs.get("os.type") == "darwin"
-              and "device.model.identifier" in res_attrs, json.dumps(res_attrs))
+              and res_attrs.get("os.name") == "macOS"
+              and "device.model.identifier" in res_attrs
+              and "macos.build_uuid" in res_attrs
+              and res_attrs.get("telemetry.sdk.language") == "swift",
+              json.dumps({k: res_attrs.get(k) for k in (
+                  "service.name", "os.type", "os.name", "device.model.identifier",
+                  "macos.build_uuid", "service.version", "telemetry.sdk.language")}))
 
         log_tids = set()
         severities = []
@@ -229,29 +381,46 @@ def main():
                             log_tids.add(t.hex())
                         severities.append(first(lr, 2))
         check("logs share scenario trace_ids",
-              live_fail["trace_id"] in log_tids and live_slow["trace_id"] in log_tids)
+              live_fail["trace_id"] in log_tids and live_slow["trace_id"] in log_tids
+              and live_life["trace_id"] in log_tids)
         check("log severities ERROR+WARN+INFO", set(severities) == {17, 13, 9}, str(sorted(set(severities))))
 
-        metric_names = set()
-        hist_ok = False
-        for blob in by_path["/v1/metrics"]:
-            for rm in all_of(blob, 1):
-                for sm in all_of(rm, 2):
-                    for mm in all_of(sm, 2):
-                        metric_names.add(first(mm, 1).decode())
-                        hist = first(mm, 9)
-                        if hist:
-                            for dp in all_of(hist, 1):
-                                counts = all_of(dp, 6)  # fixed64 -> ints
-                                if len(counts) == 7 and sum(counts) == 1 and counts[5] == 1:
-                                    hist_ok = True
-        check("metrics named", metric_names == {"macos.playground.failures", "macos.playground.operation.duration"},
+        ex_tids, hist_ok, metric_names = parse_exemplar_ids(by_path["/v1/metrics"])
+        check("metrics named",
+              metric_names == {"macos.playground.failures", "macos.playground.operation.duration",
+                               "macos.playground.sessions"},
               str(metric_names))
         check("histogram bucket holds the 2400ms sample", hist_ok)
+        check("metric exemplars carry failure+slow-op+lifecycle trace_ids",
+              live_fail["trace_id"] in ex_tids and live_slow["trace_id"] in ex_tids
+              and live_life["trace_id"] in ex_tids,
+              str(ex_tids))
     finally:
         stub.terminate()
 
-    # 4. unified log: emit marker, read back via `log show`
+    # 4. real URLSession injects traceparent into a local backend
+    echo = start_echo()
+    try:
+        echo_url = f"http://127.0.0.1:{echo.server_address[1]}/checkout"
+        r = run([BIN, "failure", "--seed", SEED, "--dry-run", "--backend-url", echo_url])
+        if r.returncode != 0:
+            check("URLSession backend-url", False, r.stderr[-300:])
+        else:
+            body = json.loads(r.stdout)
+            injected = failureClientTraceparentFromSummary(body)
+            got = EchoHandler.received.get("traceparent")
+            # dry-run still performs the URLSession POST when --backend-url is set
+            check("URLSession injected traceparent received by backend",
+                  got is not None and got.startswith("00-") and got.endswith("-01"),
+                  f"got={got} summary_tid={body['scenarios'][0]['trace_id']}")
+            check("injected traceparent shares failure trace_id",
+                  got is not None and body["scenarios"][0]["trace_id"] in got,
+                  f"got={got}")
+    finally:
+        echo.shutdown()
+
+
+    # 5. unified log: emit marker, read back via `log show`
     marker = f"macos-playground-verify-{int(time.time())}"
     r = run([BIN, "failure", "--seed", SEED, "--dry-run", "--unified-log", "--scenario-id", marker])
     time.sleep(1.5)
@@ -259,21 +428,50 @@ def main():
               'subsystem == "com.tailrocks.macos-playground"', "--style", "compact"])
     check("unified-log roundtrip", marker in r2.stdout, f"log-lines={len(r2.stdout.splitlines())}")
 
-    # 5. real crash -> .ips -> atos + dSYM
+    # 6. unsigned .app release context + MetricKit honest zero
+    if not verify_app_bundle_and_metrickit():
+        return 1
+
+    # 7. real crash -> .ips -> atos + dSYM
     crash_ok = verify_crash_symbolication()
     if not crash_ok:
         return 1
 
-    # 6. optional live parallax
-    if with_parallax:
-        if not verify_parallax_live():
-            return 1
-    else:
-        print("[SKIP] parallax live (pass --parallax with `parallax serve` running)")
+    # 8. live parallax if up, or required via --parallax
+    if not verify_parallax_live(required=force_parallax):
+        return 1
 
     failed = [n for n, ok in results if not ok]
     print(f"\n{len(results) - len(failed)}/{len(results)} checks passed")
     return 1 if failed else 0
+
+
+def verify_app_bundle_and_metrickit():
+    work = tempfile.mkdtemp(prefix="macotel-app-")
+    app, app_bin = make_unsigned_app(BIN, work)
+    r = run([app_bin, "failure", "--seed", SEED, "--dry-run"])
+    if r.returncode != 0:
+        return check("unsigned .app dry-run", False, r.stderr[-300:])
+    o = json.loads(r.stdout)
+    native = o["native"]
+    ok_ver = native.get("app_version") == "1.2.3 (45)" and native.get("app_version_source") == "bundle"
+    check("unsigned .app Info.plist -> service.version", ok_ver,
+          f"version={native.get('app_version')} source={native.get('app_version_source')}")
+
+    r = run([BIN, "failure", "--seed", SEED, "--dry-run", "--metrickit-probe-seconds", "2"])
+    if r.returncode != 0:
+        return check("MetricKit CLI probe", False, r.stderr[-300:])
+    mk = json.loads(r.stdout)["metrickit"]
+    check("MetricKit CLI probe receives 0 payloads (blocked without app identity)",
+          mk.get("metric_payloads") == 0 and mk.get("diagnostic_payloads") == 0, json.dumps(mk))
+
+    r = run([app_bin, "failure", "--seed", SEED, "--dry-run", "--metrickit-probe-seconds", "2"])
+    if r.returncode != 0:
+        return check("MetricKit unsigned .app probe", False, r.stderr[-300:])
+    mk = json.loads(r.stdout)["metrickit"]
+    check("MetricKit unsigned .app probe receives 0 payloads (needs signed GUI identity)",
+          mk.get("metric_payloads") == 0 and mk.get("diagnostic_payloads") == 0, json.dumps(mk))
+    return True
 
 
 def verify_crash_symbolication():
@@ -312,7 +510,6 @@ def verify_crash_symbolication():
             break
     if not check(".ips crash report written", ips is not None):
         return False
-    # .ips = one-line JSON header + pretty JSON body
     try:
         lines = open(ips).read().splitlines(keepends=True)
         header = json.loads(lines[0])
@@ -332,14 +529,9 @@ def verify_crash_symbolication():
     if not check(".ips has stripped-image frames", bool(frames), f"frames={len(frames)}"):
         return False
     unsym = [f for f in frames if "symbol" not in f]
-    # Informational: stripping usually defeats ReportCrash, but a Spotlight-
-    # indexed dSYM could still let the system symbolicate. Either way the
-    # atos+dSYM step below is the real proof.
     print(f"[INFO] frames needing dSYM: {len(unsym)}/{len(frames)}")
     target = unsym[0] if unsym else frames[0]
     addr = base + target["imageOffset"]
-    # Pass the dSYM's DWARF object itself to atos, so the proof cannot lean on
-    # symbols remaining in any binary.
     dwarf = os.path.join(dsym, "Contents", "Resources", "DWARF", "MacOSPlayground")
     if not check("dSYM contains DWARF object", os.path.isfile(dwarf), dwarf):
         return False
@@ -349,31 +541,27 @@ def verify_crash_symbolication():
     return check("atos+dSYM resolves harness symbol", ok, sym[:200])
 
 
-def verify_parallax_live():
-    # OTLP/API pairs: stock ports, sibling lab's shifted ports, or the
-    # isolated macOS stack (14000/14328). Override via env.
-    pairs = []
+def parallax_pairs():
     if os.environ.get("PARALLAX_OTLP") or os.environ.get("PARALLAX_API"):
-        pairs = [(os.environ.get("PARALLAX_OTLP", "http://127.0.0.1:4318"),
-                  os.environ.get("PARALLAX_API", "http://127.0.0.1:4000/graphql"))]
-    else:
-        pairs = [("http://127.0.0.1:4318", "http://127.0.0.1:4000/graphql"),
-                 ("http://127.0.0.1:14318", "http://127.0.0.1:4000/graphql"),
-                 ("http://127.0.0.1:14328", "http://127.0.0.1:14000/graphql")]
-    base = gql = None
-    for c, g in pairs:
+        return [(os.environ.get("PARALLAX_OTLP", "http://127.0.0.1:4318"),
+                 os.environ.get("PARALLAX_API", "http://127.0.0.1:4000/graphql"))]
+    return [("http://127.0.0.1:4318", "http://127.0.0.1:4000/graphql"),
+            ("http://127.0.0.1:14318", "http://127.0.0.1:4000/graphql"),
+            ("http://127.0.0.1:14328", "http://127.0.0.1:14000/graphql")]
+
+
+def find_parallax():
+    for c, g in parallax_pairs():
         try:
             urllib.request.urlopen(g.replace("/graphql", "/health"), timeout=3)
         except Exception:
             continue
         try:
             urllib.request.urlopen(c + "/v1/traces", data=b"", timeout=3)
-            otlp_ok = True
         except urllib.error.HTTPError:
-            otlp_ok = True  # HTTP error still proves a live OTLP listener
+            pass
         except Exception:
             continue
-        # GraphQL must be anonymously queryable (skip token-walled instances).
         try:
             req = urllib.request.Request(g, data=b'{"query":"{__typename}"}',
                                          headers={"Content-Type": "application/json"})
@@ -382,11 +570,17 @@ def verify_parallax_live():
                 continue
         except Exception:
             continue
-        if otlp_ok:
-            base, gql = c, g
-            break
+        return c, g
+    return None, None
+
+
+def verify_parallax_live(required):
+    base, gql = find_parallax()
     if base is None:
-        return check("parallax reachable", False, f"tried {pairs} (start `parallax serve` first)")
+        if required:
+            return check("parallax reachable", False, f"tried {parallax_pairs()} (start `parallax serve` first)")
+        print("[SKIP] parallax live (no listener; stub proof stands; server join is a separate step)")
+        return True
     print(f"[INFO] parallax pair: otlp={base} api={gql}")
     scenario = f"macos-live-{int(time.time())}"
     r = run([BIN, "failure", "--seed", SEED, "--endpoint", base, "--scenario-id", scenario])
@@ -395,7 +589,7 @@ def verify_parallax_live():
         return False
     trace_id = json.loads(r.stdout)["scenarios"][0]["trace_id"]
     time.sleep(2)
-    q = {"query": "{ trace(traceId: \"%s\") { traceId spans { traceId spanId name } } }" % trace_id}
+    q = "{ trace(traceId: \"%s\") { traceId spans { traceId spanId name } } }" % trace_id
 
     def gql_post(query):
         req = urllib.request.Request(gql, data=json.dumps({"query": query}).encode(),
@@ -405,7 +599,7 @@ def verify_parallax_live():
     last = ""
     for _ in range(15):
         try:
-            last = gql_post(q["query"])
+            last = gql_post(q)
             if last.strip() == "unauthorized":
                 return check("parallax trace query returns span", False,
                              f"{gql} needs a token this harness does not have; "
@@ -418,9 +612,9 @@ def verify_parallax_live():
         time.sleep(2)
     else:
         return check("parallax trace query returns span", False, last[:300])
-    span = json.loads(last)["data"]["trace"]["spans"][0]
-    if not check("parallax span is macos.checkout.submit", span["name"] == "macos.checkout.submit",
-                 json.dumps(span)):
+    span_names = [s["name"] for s in json.loads(last)["data"]["trace"]["spans"]]
+    if not check("parallax span is macos.checkout.submit",
+                 "macos.checkout.submit" in span_names, str(span_names)):
         return False
     try:
         logs = json.loads(gql_post("{ logsByTrace(traceId: \"%s\") { eventName service } }" % trace_id))
@@ -443,8 +637,24 @@ def verify_parallax_live():
         mine = [i for i in items if i.get("lastTraceId") == trace_id]
     except Exception as e:
         return check("parallax issues", False, str(e)[:200])
-    return check("parallax derived issue points at macOS trace", len(mine) >= 1,
-                 f"issues={len(mine)}")
+    if not check("parallax derived issue points at macOS trace", len(mine) >= 1, f"issues={len(mine)}"):
+        return False
+    to_nanos = str(int(time.time() * 1e9) + 10**15)
+    last_ex = ""
+    for _ in range(10):
+        try:
+            ex = json.loads(gql_post(
+                "{ metricExemplars(name: \"macos.playground.operation.duration\", "
+                "fromNanos: \"0\", toNanos: \"%s\", service: \"macos-playground\", limit: 20) "
+                "{ traceId spanId value } }" % to_nanos))
+            tids = [e.get("traceId") for e in (ex.get("data") or {}).get("metricExemplars") or []]
+            last_ex = str(tids[:8])
+            if trace_id in tids:
+                return check("parallax metricExemplars include macOS trace", True, last_ex)
+        except Exception as e:
+            last_ex = str(e)[:200]
+        time.sleep(1)
+    return check("parallax metricExemplars include macOS trace", False, last_ex)
 
 
 if __name__ == "__main__":
