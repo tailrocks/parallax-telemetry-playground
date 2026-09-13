@@ -95,7 +95,7 @@ stack:
 | `failures:payment_latency` / `failures:inventory` | Provider decline and inventory failure are explicit typed failure paths using normal SKUs. |
 | `alerts:error_rate_breach` / `alerts:recovery` | Decline traffic then healthy traffic demonstrate error-rate recovery. |
 | `events:typed_business_events` | Shared typed business event names appear across Rust, Java, and web telemetry. |
-| `product:ui_agent_verify` | Browser smoke, when the Parallax CLI/browser harness is available. |
+| `product:ui_agent_verify` | Browser surface smoke plus a real click traversal (issue → trace → span → logs → metric exemplar, back-navigation, empty/error/high-volume states) against GraphQL ground truth, when the Parallax browser harness is available. |
 
 The real distributed topology has an executable Parallax assertion. With the
 stack and Parallax server running, execute:

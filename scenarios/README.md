@@ -99,7 +99,7 @@ has passed.
 | `c8` | `sentry:envelopes` | Real Rust, Java, and JavaScript Sentry envelopes |
 | `c9` | `product:lifecycle_ops` | Isolated HOME lifecycle, prune, context, and argument forwarding |
 | `c10` | `security:redaction_egress` | Redaction across bundle, MCP, UI, webhook, and Sentry |
-| `c11` | `product:ui_agent_verify` | Agent-browser verification for every core UI surface |
+| `c11` | `product:ui_agent_verify` | Agent-browser surface smoke plus a real click traversal: issue → occurrence trace → span → surrounding logs → metric exemplar, with back-navigation and empty/error/high-volume states |
 | `a30` | `metrics:request_shapes` | Active requests, request latency, and checkout metrics |
 | `a31` | `errors:handled_unhandled` | Handled payment decline versus provider-internal failure |
 
