@@ -13,6 +13,24 @@ x-selene-otlp: &selene-otlp
   PLAYGROUND_ENV: "selene"
   PARALLAX_ENV: "selene"
 
+# Shared selene-observability network exposes multiple `postgres`/`redis` aliases
+# from other stacks — pin playground deps to container names.
+x-selene-deps: &selene-deps
+  DATABASE_URL: "postgres://postgres:${POSTGRES_PASSWORD:-playground}@selene-playground-postgres:5432/playground"
+  POSTGRES_HOST: selene-playground-postgres
+  REDIS_URL: "redis://selene-playground-redis:6379/0"
+  REDIS_HOST: selene-playground-redis
+  RABBITMQ_URL: "amqp://playground:${RABBITMQ_PASSWORD:-playground}@selene-playground-rabbitmq:5672/%2f"
+  AMQP_URL: "amqp://playground:${RABBITMQ_PASSWORD:-playground}@selene-playground-rabbitmq:5672/%2f"
+  RABBITMQ_HOST: selene-playground-rabbitmq
+  CLICKHOUSE_URL: "http://selene-playground-clickhouse:8123"
+  CLICKHOUSE_HTTP_URL: "http://selene-playground-clickhouse:8123"
+  CLICKHOUSE_HOST: selene-playground-clickhouse
+  CATALOG_DATABASE_URL: "jdbc:postgresql://selene-playground-postgres:5432/playground"
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://selene-playground-postgres:5432/playground"
+  PAYMENT_DATABASE_URL: "jdbc:postgresql://selene-playground-postgres:5432/playground"
+  FULFILLMENT_DATABASE_URL: "jdbc:postgresql://selene-playground-postgres:5432/playground"
+
 x-selene-service-networks: &selene-service-networks
   - pg
   - selene-observability
@@ -26,7 +44,7 @@ x-selene-logging: &selene-logging
 services:
   checkout:
     environment:
-      <<: *selene-otlp
+      <<: [*selene-otlp, *selene-deps]
     networks: *selene-service-networks
     logging: *selene-logging
     extra_hosts: []
@@ -34,63 +52,63 @@ services:
 
   pricing:
     environment:
-      <<: *selene-otlp
+      <<: [*selene-otlp, *selene-deps]
     networks: *selene-service-networks
     logging: *selene-logging
     extra_hosts: []
 
   inventory:
     environment:
-      <<: *selene-otlp
+      <<: [*selene-otlp, *selene-deps]
     networks: *selene-service-networks
     logging: *selene-logging
     extra_hosts: []
 
   recommendation:
     environment:
-      <<: *selene-otlp
+      <<: [*selene-otlp, *selene-deps]
     networks: *selene-service-networks
     logging: *selene-logging
     extra_hosts: []
 
   notifications:
     environment:
-      <<: *selene-otlp
+      <<: [*selene-otlp, *selene-deps]
     networks: *selene-service-networks
     logging: *selene-logging
     extra_hosts: []
 
   orders:
     environment:
-      <<: *selene-otlp
+      <<: [*selene-otlp, *selene-deps]
     networks: *selene-service-networks
     logging: *selene-logging
     extra_hosts: []
 
   storefront:
     environment:
-      <<: *selene-otlp
+      <<: [*selene-otlp, *selene-deps]
     networks: *selene-service-networks
     logging: *selene-logging
     extra_hosts: []
 
   catalog:
     environment:
-      <<: *selene-otlp
+      <<: [*selene-otlp, *selene-deps]
     networks: *selene-service-networks
     logging: *selene-logging
     extra_hosts: []
 
   payment:
     environment:
-      <<: *selene-otlp
+      <<: [*selene-otlp, *selene-deps]
     networks: *selene-service-networks
     logging: *selene-logging
     extra_hosts: []
 
   fulfillment:
     environment:
-      <<: *selene-otlp
+      <<: [*selene-otlp, *selene-deps]
     networks: *selene-service-networks
     logging: *selene-logging
     extra_hosts: []
@@ -103,13 +121,23 @@ services:
     logging: *selene-logging
     extra_hosts: []
 
+  postgres-migrate:
+    environment:
+      PGHOST: selene-playground-postgres
+
+  clickhouse-init:
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        clickhouse-client --host selene-playground-clickhouse --user "$$CLICKHOUSE_USER" --password "$$CLICKHOUSE_PASSWORD" --multiquery < /init/001-analytics.sql
+
   postgres:
     container_name: selene-playground-postgres
     ports: !override []
     networks: [pg]
     logging: *selene-logging
     volumes:
-      # PG 18+ expects the parent mount (see upstream docker-compose.yml).
       - /srv/observability/playground/postgres:/var/lib/postgresql
 
   redis:
