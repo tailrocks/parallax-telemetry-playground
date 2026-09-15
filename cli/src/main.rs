@@ -15,6 +15,7 @@ mod commerce_verify;
 mod console_sim;
 mod fanout;
 mod scenario_runner;
+mod selene;
 mod shapes;
 mod task_commands;
 mod test_report;
@@ -50,6 +51,7 @@ async fn main() -> anyhow::Result<()> {
             | "commerce-verify"
             | "check-scenarios"
             | "check-fanout"
+            | "selene-fixture"
             | "check-typescript"
             | "check-typescript-policy"
             | "postgres-migrate"
@@ -86,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
             "scenario" => scenario_runner::run(rest).await,
             "check-scenarios" => task_commands::check_scenarios().await,
             "check-fanout" => fanout::run(&rest).await,
+            "selene-fixture" => selene::run(&rest).await,
             "check-typescript" => task_commands::check_typescript().await,
             "check-typescript-policy" => task_commands::check_typescript_policy().await,
             "verify-stack" => task_commands::verify_stack(rest).await,
@@ -141,6 +144,7 @@ fn command_name(mode: &str) -> &'static str {
         "scenario" => "playground.scenario",
         "check-scenarios" => "playground.check.scenarios",
         "check-fanout" => "playground.check.fanout",
+        "selene-fixture" => "playground.selene.fixture",
         "check-typescript" => "playground.check.typescript",
         "check-typescript-policy" => "playground.check.typescript",
         "verify-stack" => "playground.verify.stack",
@@ -624,6 +628,11 @@ mod tests {
             (
                 "commerce-verify",
                 "playground.commerce.verify",
+                semconv::APP_MODE_ONE_SHOT,
+            ),
+            (
+                "selene-fixture",
+                "playground.selene.fixture",
                 semconv::APP_MODE_ONE_SHOT,
             ),
         ];

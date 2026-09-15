@@ -46,6 +46,10 @@ run = "cargo fmt --all -- --check"
 description = "Fan-out proof: one traces:deep trace arrives in Parallax, Jaeger, and OpenObserve"
 run = "cargo run --locked -p playground-cli -- check-fanout"
 
+[tasks."selene:fixture"]
+description = "Bounded Selene comparison fixture: one run_id through playground apps plus shared OTLP HTTP"
+run = "cargo run --locked -p playground-cli -- selene-fixture"
+
 [tasks."quality:java_catalog"]
 description = "Run the Catalog Spring test suite"
 dir = "services/catalog"
