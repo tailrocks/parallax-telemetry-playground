@@ -30,13 +30,19 @@ impl Config {
         let utc = utc_compact();
         let suffix = hex_id(4);
         Self {
-            run_id: env_or("SELENE_RUN_ID", &format!("selene-playground-fixture-{utc}-{suffix}")),
+            run_id: env_or(
+                "SELENE_RUN_ID",
+                &format!("selene-playground-fixture-{utc}-{suffix}"),
+            ),
             checkout_url: trim_slash(env_or("CHECKOUT_URL", "http://127.0.0.1:8088")),
             fulfillment_url: trim_slash(env_or("FULFILLMENT_URL", "http://127.0.0.1:8093")),
             catalog_url: trim_slash(env_or("CATALOG_URL", "http://127.0.0.1:8080")),
             storefront_url: trim_slash(env_or("STOREFRONT_URL", "http://127.0.0.1:8094")),
             web_url: trim_slash(env_or("WEB_URL", "http://127.0.0.1:5173")),
-            otlp_http: trim_slash(env_or("OTEL_EXPORTER_OTLP_HTTP_ENDPOINT", DEFAULT_OTLP_HTTP)),
+            otlp_http: trim_slash(env_or(
+                "OTEL_EXPORTER_OTLP_HTTP_ENDPOINT",
+                DEFAULT_OTLP_HTTP,
+            )),
             fulfillment_token: env_or(
                 "FULFILLMENT_INTERNAL_TOKEN",
                 "fulfillment-internal:research-secret",
@@ -368,7 +374,11 @@ async fn checkout(
     Ok((status, value))
 }
 
-async fn wait_for_fulfillment(client: &reqwest::Client, config: &Config, order_id: &str) -> Result<()> {
+async fn wait_for_fulfillment(
+    client: &reqwest::Client,
+    config: &Config,
+    order_id: &str,
+) -> Result<()> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
     loop {
         let url = format!(
