@@ -1,0 +1,21 @@
+schema = 1
+
+[generator]
+repository = "tailrocks/parallax-telemetry-playground"
+revision = "2c591728a70045dbfee49c9bb4ca0a4ee3612e74"
+
+[workflow]
+runners = "both"
+automatic = "both"
+default_dispatch_runner = "github"
+automatic_lanes = "github"
+github_runner = "ubuntu-24.04"
+velnor_labels = ["self-hosted", "velnor-target-mvp"]
+default_branch = "main"
+
+[[declare]]
+primitive = "swift-package-pipeline"
+units = ["swift-package-macos"]
+
+[declare.args]
+jobs = ["github"]
