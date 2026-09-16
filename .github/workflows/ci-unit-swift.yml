@@ -123,11 +123,11 @@ jobs:
           ref: ${{ inputs.head_sha }}
       - name: Set up Velnor workflow runtime
         if: ${{ runner.environment == 'github-hosted' }}
-        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@2c591728a70045dbfee49c9bb4ca0a4ee3612e74
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@e05aee6de1d1614d752b4d1b1d26a49ac2c5ef91
         with:
-          rev: 2c591728a70045dbfee49c9bb4ca0a4ee3612e74
+          rev: e05aee6de1d1614d752b4d1b1d26a49ac2c5ef91
       - name: Set trusted workflow policy revision
-        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=2c591728a70045dbfee49c9bb4ca0a4ee3612e74" >> "$GITHUB_ENV"
+        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=e05aee6de1d1614d752b4d1b1d26a49ac2c5ef91" >> "$GITHUB_ENV"
       - name: Mark runner setup end
         if: always()
         run: |
