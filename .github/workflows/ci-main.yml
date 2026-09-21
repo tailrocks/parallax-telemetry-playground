@@ -61,12 +61,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Set up Velnor workflow runtime
+        id: runtime
         if: ${{ runner.environment == 'github-hosted' }}
-        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@b9c3156cdb88e63c11b9e595a3e694b02238c09a
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
         with:
-          rev: b9c3156cdb88e63c11b9e595a3e694b02238c09a
+          rev: 4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
       - name: Set trusted workflow policy revision
-        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=b9c3156cdb88e63c11b9e595a3e694b02238c09a" >> "$GITHUB_ENV"
+        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d" >> "$GITHUB_ENV"
       - name: Select affected units
         id: plan
         env:
@@ -83,7 +84,7 @@ jobs:
       - name: Prepare Velnor workflow runtime
         shell: bash
         env:
-          EXPECTED_REVISION: b9c3156cdb88e63c11b9e595a3e694b02238c09a
+          EXPECTED_REVISION: 4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
         run: |
           set -euo pipefail
           stage="$RUNNER_TEMP/velnor-workflow-runtime"
@@ -95,13 +96,14 @@ jobs:
           policy_src="${VELNOR_WORKFLOW_PINNED_BINARY:-$src}"
           install -m 0755 "$policy_src" "$stage/velnor-workflow-policy"
           policy_revision="$("$stage/velnor-workflow-policy" --revision)"
-          [[ "$policy_revision" == "$EXPECTED_REVISION" ]] || { echo "::error::policy runtime reports revision $policy_revision, expected $EXPECTED_REVISION" >&2; exit 1; }
+          policy_closure="$("$stage/velnor-workflow-policy" --closure)"
+          [[ "$policy_closure" == "${{ steps.runtime.outputs.closure }}" ]] || { echo "::error::policy runtime reports closure $policy_closure, expected ${{ steps.runtime.outputs.closure }}" >&2; exit 1; }
           policy_digest="$(sha256sum "$stage/velnor-workflow-policy" | awk '{print $1}')"
-          jq -n --arg repository "$GITHUB_REPOSITORY" --arg revision "$EXPECTED_REVISION" --arg head_branch "${{ github.ref_name }}" --arg platform "${{ runner.os }}-${{ runner.arch }}" --arg run_id "$GITHUB_RUN_ID" --arg job_id "${{ github.job }}" --arg binary_sha256 "$digest" --arg policy_revision "$policy_revision" --arg policy_binary_sha256 "$policy_digest" '{repository: $repository, revision: $revision, head_branch: $head_branch, platform: $platform, run_id: $run_id, job_id: $job_id, binary_sha256: $binary_sha256, policy_revision: $policy_revision, policy_binary_sha256: $policy_binary_sha256}' > "$stage/manifest.json"
+          jq -n --arg repository "$GITHUB_REPOSITORY" --arg revision "$EXPECTED_REVISION" --arg closure "${{ steps.runtime.outputs.closure }}" --arg head_branch "${{ github.ref_name }}" --arg platform "${{ runner.os }}-${{ runner.arch }}" --arg run_id "$GITHUB_RUN_ID" --arg job_id "${{ github.job }}" --arg binary_sha256 "$digest" --arg policy_revision "$policy_revision" --arg policy_closure "$policy_closure" --arg policy_binary_sha256 "$policy_digest" '{repository: $repository, revision: $revision, closure: $closure, head_branch: $head_branch, platform: $platform, run_id: $run_id, job_id: $job_id, binary_sha256: $binary_sha256, policy_revision: $policy_revision, policy_closure: $policy_closure, policy_binary_sha256: $policy_binary_sha256}' > "$stage/manifest.json"
       - name: Publish Velnor workflow runtime
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: velnor-workflow-runtime-b9c3156cdb88e63c11b9e595a3e694b02238c09a-${{ runner.os }}-${{ runner.arch }}
+          name: velnor-workflow-runtime-4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d-${{ runner.os }}-${{ runner.arch }}
           path: ${{ runner.temp }}/velnor-workflow-runtime
           if-no-files-found: error
           retention-days: 7
@@ -118,11 +120,16 @@ jobs:
     name: Policy
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # Trust invariant: this job runs the base branch's validator against the
-    # audited tree under pull_request_target. It holds `contents: read` only,
-    # references no secrets, and its checkout persists no credentials, so
-    # building and running the tree's declared generator here is no more
-    # privileged than the pull_request lanes that already build the tree.
+    # Trust invariant: this job runs the base branch's Stage-0 validator
+    # product against the audited tree under pull_request_target. It holds
+    # `contents: read` only, references no secrets, persists no credentials,
+    # and never compiles. When the audited tree differs from the declared
+    # pin's render, it additionally EXECUTES the PR run's prebuilt
+    # candidate generator — PR-built code, same-repository runs only, bound
+    # to the audited tree by manifest closure plus binary digest before
+    # execution — with no secret references, no persisted credentials, the
+    # read-only github.token confined to the Acquire/Ruleset API steps,
+    # and both candidate exec points tokenless.
     permissions:
       contents: read
     steps:
@@ -143,39 +150,34 @@ jobs:
             git fetch --no-tags "$GITHUB_SERVER_URL/$HEAD_REPOSITORY" "$HEAD_SHA"
           fi
           git checkout --quiet --detach "$HEAD_SHA"
-      - name: Bound the Mr. Boxington store
-        shell: bash
-        run: echo "MBX_GC_MAX_SIZE=12GiB" >> "$GITHUB_ENV"
-      - name: Set up Mr. Boxington
-        uses: jdx/mr-boxington-action@7234d3dd1a6ca8f6c381eea8e4dfb03f18fcf777 # v1.3.0
+      - name: Set up Velnor workflow runtime
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
         with:
-          backend: github
-          version: 1.11.1
-          cache-key: velnor-policy-mbx-1.11.1-${{ runner.os }}-${{ runner.arch }}-b9c3156cdb88e63c11b9e595a3e694b02238c09a
-          restore-keys: |
-            velnor-policy-mbx-1.11.1-${{ runner.os }}-${{ runner.arch }}-
-      - name: Install pinned Velnor workflow runtime
-        env:
-          CARGO_HOME: ${{ runner.temp }}/velnor-workflow-cargo-home
-          CARGO_TARGET_DIR: ${{ runner.temp }}/velnor-workflow-cargo-target
-          VELNOR_WORKFLOW_INSTALL_DIR: ${{ runner.temp }}/velnor-workflow-install
-          VELNOR_WORKFLOW_ROOT: ${{ runner.temp }}/velnor-workflow
+          rev: 4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
+          checkout-path: ${{ github.workspace }}/policy-checkout
+      - name: Read declared generator pin
+        id: pin
+        working-directory: policy-checkout
         run: |
           set -euo pipefail
-          install -d -m 700 \
-            "$CARGO_HOME" \
-            "$CARGO_TARGET_DIR" \
-            "$VELNOR_WORKFLOW_INSTALL_DIR"
-          cd "$VELNOR_WORKFLOW_INSTALL_DIR"
-          env -u RUSTC_WRAPPER -u SCCACHE_GHA_ENABLED -u CARGO_INCREMENTAL -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
-            cargo install \
-            --locked \
-            --git https://github.com/tailrocks/velnor \
-            --rev b9c3156cdb88e63c11b9e595a3e694b02238c09a \
-            --root "$VELNOR_WORKFLOW_ROOT" \
-            velnor-workflow \
-            --bin velnor-workflow
-          echo "$VELNOR_WORKFLOW_ROOT/bin" >> "$GITHUB_PATH"
+          pin="$(sed -n -E 's/^[[:space:]]*revision[[:space:]]*=[[:space:]]*"([0-9a-f]{40})".*/\1/p' .github-gen/velnor-workflow.toml | head -n 1)"
+          test "$pin" != '' || pin="$(sed -n -E 's/^.*VELNOR_WORKFLOW_POLICY_REVISION:[[:space:]]*([0-9a-f]{40}).*/\1/p' .github/workflows/ci-policy.yml | head -n 1)"
+          test "$pin" != '' || { echo "::error::audited tree declares no generator pin" >&2; exit 1; }
+          echo "value=$pin" >> "$GITHUB_OUTPUT"
+      - name: Set up declared generator product
+        id: renderer
+        if: steps.pin.outputs.value != '4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d'
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
+        with:
+          rev: ${{ steps.pin.outputs.value }}
+          checkout-path: ${{ github.workspace }}/policy-checkout
+      - name: Resolve declared generator product
+        if: steps.pin.outputs.value != '4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d'
+        run: |
+          set -euo pipefail
+          binary="$HOME/.cache/velnor/workflow-runtime/${{ steps.renderer.outputs.closure }}/bin/velnor-workflow"
+          test -x "$binary"
+          echo "VELNOR_WORKFLOW_PINNED_BINARY=$binary" >> "$GITHUB_ENV"
       - name: Resolve required status checks
         env:
           GH_TOKEN: ${{ github.token }}
@@ -204,14 +206,16 @@ jobs:
           WORKFLOW_ROOT: ${{ github.workspace }}/policy-checkout
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-          VELNOR_WORKFLOW_POLICY_REVISION: b9c3156cdb88e63c11b9e595a3e694b02238c09a
+          VELNOR_WORKFLOW_POLICY_REVISION: 4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
         run: |
           set -euo pipefail
           velnor-workflow policy \
             --workflow-root "$WORKFLOW_ROOT" \
             --head-sha "$HEAD_SHA" \
             --base-sha "$BASE_SHA" \
+            --candidate-manifest "${VELNOR_WORKFLOW_CANDIDATE_MANIFEST:-}" \
             --ruleset-contexts "$RULESET_CONTEXTS"
+
       - name: Set up actionlint
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
@@ -219,10 +223,12 @@ jobs:
           cache: false
       - name: Lint caller workflows
         working-directory: policy-checkout
+        env:
+          MISE_NO_CONFIG: "1"
         run: mise exec actionlint@1.7.12 -- actionlint
   github-bun-playground-web:
     name: "Bun · Bun package (playground-web)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',bun-playground-web,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',bun-playground-web,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-bun.yml
     with:
@@ -237,9 +243,10 @@ jobs:
       cache_key_files: |
         web/package.json
         web/bun.lock
+      unit_admission: github
   velnor-bun-playground-web:
     name: "Bun · Bun package (playground-web)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',bun-playground-web,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',bun-playground-web,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-bun.yml
     with:
@@ -251,9 +258,10 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       host_warm_layers: cargo
+      unit_admission: velnor
   github-docker-deploy:
     name: "Docker · Docker (deploy)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',docker-deploy,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',docker-deploy,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-docker.yml
     with:
@@ -264,9 +272,10 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
+      unit_admission: github
   velnor-docker-deploy:
     name: "Docker · Docker (deploy)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',docker-deploy,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',docker-deploy,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-docker.yml
     with:
@@ -277,9 +286,10 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
+      unit_admission: velnor
   github-gradle-services-catalog:
     name: "Gradle · Gradle (services/catalog)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-catalog,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-catalog,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-gradle.yml
     with:
@@ -296,9 +306,10 @@ jobs:
       cache_key_files: |
         services/catalog/gradle/wrapper/gradle-wrapper.properties
         services/catalog/gradle/libs.versions.toml
+      unit_admission: github
   velnor-gradle-services-catalog:
     name: "Gradle · Gradle (services/catalog)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-catalog,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-catalog,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-gradle.yml
     with:
@@ -315,9 +326,10 @@ jobs:
       cache_key_files: |
         services/catalog/gradle/wrapper/gradle-wrapper.properties
         services/catalog/gradle/libs.versions.toml
+      unit_admission: velnor
   github-gradle-services-fulfillment:
     name: "Gradle · Gradle (services/fulfillment)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-fulfillment,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-fulfillment,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-gradle.yml
     with:
@@ -334,9 +346,10 @@ jobs:
       cache_key_files: |
         services/fulfillment/gradle/wrapper/gradle-wrapper.properties
         services/fulfillment/gradle/libs.versions.toml
+      unit_admission: github
   velnor-gradle-services-fulfillment:
     name: "Gradle · Gradle (services/fulfillment)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-fulfillment,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-fulfillment,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-gradle.yml
     with:
@@ -353,9 +366,10 @@ jobs:
       cache_key_files: |
         services/fulfillment/gradle/wrapper/gradle-wrapper.properties
         services/fulfillment/gradle/libs.versions.toml
+      unit_admission: velnor
   github-gradle-services-payment:
     name: "Gradle · Gradle (services/payment)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-payment,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-payment,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-gradle.yml
     with:
@@ -372,9 +386,10 @@ jobs:
       cache_key_files: |
         services/payment/gradle/wrapper/gradle-wrapper.properties
         services/payment/gradle/libs.versions.toml
+      unit_admission: github
   velnor-gradle-services-payment:
     name: "Gradle · Gradle (services/payment)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-payment,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-payment,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-gradle.yml
     with:
@@ -391,9 +406,10 @@ jobs:
       cache_key_files: |
         services/payment/gradle/wrapper/gradle-wrapper.properties
         services/payment/gradle/libs.versions.toml
+      unit_admission: velnor
   prepare-cargo:
     name: "Control / Prepare Cargo"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-checkout,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (contains(format(',{0},', needs.plan.outputs.units), ',rust-checkout,') || contains(format(',{0},', needs.plan.outputs.units), ',rust-inventory,') || contains(format(',{0},', needs.plan.outputs.units), ',rust-notifications,') || contains(format(',{0},', needs.plan.outputs.units), ',rust-orders,') || contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-cli,') || contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-proto,') || contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-telemetry,') || contains(format(',{0},', needs.plan.outputs.units), ',rust-pricing,') || contains(format(',{0},', needs.plan.outputs.units), ',rust-recommendation,') || contains(format(',{0},', needs.plan.outputs.units), ',rust-storefront,')) && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -406,7 +422,7 @@ jobs:
       head_sha: ${{ needs.plan.outputs.head_sha }}
   github-rust-checkout:
     name: "Rust · checkout"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-checkout,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-checkout,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -418,7 +434,8 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
-      mbx_compat: "880029750ad4"
+      mbx_enabled: true
+      mbx_compat: "62c8b033e996"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -452,9 +469,11 @@ jobs:
         rust-toolchain
       cargo_root: "services/checkout"
       cargo_net_offline: true
+      unit_dependencies: "rust-playground-proto,rust-playground-telemetry"
+      unit_admission: github
   velnor-rust-checkout:
     name: "Rust · checkout"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-checkout,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-checkout,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy, prepare-cargo]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -466,11 +485,14 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mbx_enabled: true
       cargo_net_offline: true
       host_warm_layers: "rustup,mold,mbx,cargo"
+      unit_dependencies: "rust-playground-proto,rust-playground-telemetry"
+      unit_admission: velnor
   github-rust-inventory:
     name: "Rust · inventory"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-inventory,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-inventory,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -482,7 +504,8 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
-      mbx_compat: "530e6be7ec7f"
+      mbx_enabled: true
+      mbx_compat: "1e2f0baeaf5a"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -510,9 +533,11 @@ jobs:
         rust-toolchain
       cargo_root: "services/inventory"
       cargo_net_offline: true
+      unit_dependencies: rust-playground-telemetry
+      unit_admission: github
   velnor-rust-inventory:
     name: "Rust · inventory"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-inventory,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-inventory,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy, prepare-cargo]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -524,11 +549,14 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mbx_enabled: true
       cargo_net_offline: true
       host_warm_layers: "rustup,mold,mbx,cargo"
+      unit_dependencies: rust-playground-telemetry
+      unit_admission: velnor
   github-rust-notifications:
     name: "Rust · notifications"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-notifications,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-notifications,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -540,7 +568,8 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
-      mbx_compat: d3f456883479
+      mbx_enabled: true
+      mbx_compat: "00834eca0aa3"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -568,9 +597,11 @@ jobs:
         rust-toolchain
       cargo_root: "services/notifications"
       cargo_net_offline: true
+      unit_dependencies: rust-playground-telemetry
+      unit_admission: github
   velnor-rust-notifications:
     name: "Rust · notifications"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-notifications,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-notifications,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy, prepare-cargo]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -582,11 +613,14 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mbx_enabled: true
       cargo_net_offline: true
       host_warm_layers: "rustup,mold,mbx,cargo"
+      unit_dependencies: rust-playground-telemetry
+      unit_admission: velnor
   github-rust-orders:
     name: "Rust · orders"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-orders,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-orders,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -598,7 +632,8 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
-      mbx_compat: "61b2eaa827cc"
+      mbx_enabled: true
+      mbx_compat: "7d5f21857bfa"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -626,9 +661,11 @@ jobs:
         rust-toolchain
       cargo_root: "services/orders"
       cargo_net_offline: true
+      unit_dependencies: rust-playground-telemetry
+      unit_admission: github
   velnor-rust-orders:
     name: "Rust · orders"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-orders,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-orders,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy, prepare-cargo]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -640,11 +677,14 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mbx_enabled: true
       cargo_net_offline: true
       host_warm_layers: "rustup,mold,mbx,cargo"
+      unit_dependencies: rust-playground-telemetry
+      unit_admission: velnor
   github-rust-playground-cli:
     name: "Rust · playground-cli"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-cli,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-cli,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -656,7 +696,8 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
-      mbx_compat: "731520d407a9"
+      mbx_enabled: true
+      mbx_compat: "830a2796631d"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -684,9 +725,11 @@ jobs:
         rust-toolchain
       cargo_root: cli
       cargo_net_offline: true
+      unit_dependencies: rust-playground-telemetry
+      unit_admission: github
   velnor-rust-playground-cli:
     name: "Rust · playground-cli"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-cli,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-cli,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy, prepare-cargo]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -698,11 +741,14 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mbx_enabled: true
       cargo_net_offline: true
       host_warm_layers: "rustup,mold,mbx,cargo"
+      unit_dependencies: rust-playground-telemetry
+      unit_admission: velnor
   github-rust-playground-proto:
     name: "Rust · playground-proto"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-proto,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-proto,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -714,7 +760,8 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
-      mbx_compat: "69bb2cc4b679"
+      mbx_enabled: true
+      mbx_compat: a47f9a8ea0fc
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -738,9 +785,10 @@ jobs:
         rust-toolchain
       cargo_root: proto
       cargo_net_offline: true
+      unit_admission: github
   velnor-rust-playground-proto:
     name: "Rust · playground-proto"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-proto,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-proto,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy, prepare-cargo]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -752,11 +800,13 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mbx_enabled: true
       cargo_net_offline: true
       host_warm_layers: "rustup,mold,mbx,cargo"
+      unit_admission: velnor
   github-rust-playground-telemetry:
     name: "Rust · playground-telemetry"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-telemetry,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-telemetry,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -768,7 +818,8 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
-      mbx_compat: "4d71271ed8e9"
+      mbx_enabled: true
+      mbx_compat: b142eea82782
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -791,9 +842,10 @@ jobs:
         rust-toolchain
       cargo_root: "libs/playground-telemetry"
       cargo_net_offline: true
+      unit_admission: github
   velnor-rust-playground-telemetry:
     name: "Rust · playground-telemetry"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-telemetry,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-telemetry,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy, prepare-cargo]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -805,11 +857,13 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mbx_enabled: true
       cargo_net_offline: true
       host_warm_layers: "rustup,mold,mbx,cargo"
+      unit_admission: velnor
   github-rust-pricing:
     name: "Rust · pricing"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-pricing,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-pricing,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -821,7 +875,8 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
-      mbx_compat: "3ba81df4bf01"
+      mbx_enabled: true
+      mbx_compat: "79d403216c4d"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -855,9 +910,11 @@ jobs:
         rust-toolchain
       cargo_root: "services/pricing"
       cargo_net_offline: true
+      unit_dependencies: "rust-playground-proto,rust-playground-telemetry"
+      unit_admission: github
   velnor-rust-pricing:
     name: "Rust · pricing"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-pricing,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-pricing,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy, prepare-cargo]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -869,11 +926,14 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mbx_enabled: true
       cargo_net_offline: true
       host_warm_layers: "rustup,mold,mbx,cargo"
+      unit_dependencies: "rust-playground-proto,rust-playground-telemetry"
+      unit_admission: velnor
   github-rust-recommendation:
     name: "Rust · recommendation"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-recommendation,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-recommendation,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -885,7 +945,8 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
-      mbx_compat: "0ed13843766f"
+      mbx_enabled: true
+      mbx_compat: "645521e926f0"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -913,9 +974,11 @@ jobs:
         rust-toolchain
       cargo_root: "services/recommendation"
       cargo_net_offline: true
+      unit_dependencies: rust-playground-telemetry
+      unit_admission: github
   velnor-rust-recommendation:
     name: "Rust · recommendation"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-recommendation,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-recommendation,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy, prepare-cargo]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -927,11 +990,14 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mbx_enabled: true
       cargo_net_offline: true
       host_warm_layers: "rustup,mold,mbx,cargo"
+      unit_dependencies: rust-playground-telemetry
+      unit_admission: velnor
   github-rust-storefront:
     name: "Rust · storefront"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-storefront,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-storefront,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -943,7 +1009,8 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
-      mbx_compat: "82b32b258a55"
+      mbx_enabled: true
+      mbx_compat: "639075f20403"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -977,9 +1044,11 @@ jobs:
         rust-toolchain
       cargo_root: "services/storefront"
       cargo_net_offline: true
+      unit_dependencies: "rust-playground-proto,rust-playground-telemetry"
+      unit_admission: github
   velnor-rust-storefront:
     name: "Rust · storefront"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-storefront,') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && (needs.prepare-cargo.result == 'success' || needs.prepare-cargo.result == 'skipped') && contains(format(',{0},', needs.plan.outputs.units), ',rust-storefront,') && ((github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy, prepare-cargo]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
@@ -991,11 +1060,14 @@ jobs:
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mbx_enabled: true
       cargo_net_offline: true
       host_warm_layers: "rustup,mold,mbx,cargo"
+      unit_dependencies: "rust-playground-proto,rust-playground-telemetry"
+      unit_admission: velnor
   github-swift-package-macos:
     name: "Swift · Apple · Swift package (macos)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',swift-package-macos,') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',swift-package-macos,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-swift.yml
     with:
@@ -1011,6 +1083,7 @@ jobs:
         macos/Package.swift
         macos/Package.resolved
         macos/.swiftpm/Package.resolved
+      unit_admission: github
   ci-required:
     name: ci-required
     if: ${{ always() }}
@@ -1022,7 +1095,8 @@ jobs:
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
           SELECTED_UNITS: ${{ needs.plan.outputs.units }}
-          FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+          LANE_ADMITTED_GITHUB: ${{ github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == '')) }}
+          LANE_ADMITTED_VELNOR: ${{ (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'velnor' || github.event.inputs.runner == 'both' || github.event.inputs.runner == '')) }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1047,10 +1121,17 @@ jobs:
           selected=",$SELECTED_UNITS,"
           if [[ "$selected" == *",bun-playground-web,"* ]]; then
             result="$(result_for_job github-bun-playground-web)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-bun-playground-web did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-bun-playground-web did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-bun-playground-web ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-bun-playground-web)"
             case "$result" in
@@ -1060,15 +1141,15 @@ jobs:
           fi
           if [[ "$selected" == *",bun-playground-web,"* ]]; then
             result="$(result_for_job velnor-bun-playground-web)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-bun-playground-web did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-bun-playground-web did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-bun-playground-web ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1080,10 +1161,17 @@ jobs:
           fi
           if [[ "$selected" == *",docker-deploy,"* ]]; then
             result="$(result_for_job github-docker-deploy)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-docker-deploy did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-docker-deploy did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-docker-deploy ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-docker-deploy)"
             case "$result" in
@@ -1093,15 +1181,15 @@ jobs:
           fi
           if [[ "$selected" == *",docker-deploy,"* ]]; then
             result="$(result_for_job velnor-docker-deploy)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-docker-deploy did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-docker-deploy did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-docker-deploy ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1113,10 +1201,17 @@ jobs:
           fi
           if [[ "$selected" == *",gradle-services-catalog,"* ]]; then
             result="$(result_for_job github-gradle-services-catalog)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-gradle-services-catalog did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-gradle-services-catalog did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-gradle-services-catalog ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-gradle-services-catalog)"
             case "$result" in
@@ -1126,15 +1221,15 @@ jobs:
           fi
           if [[ "$selected" == *",gradle-services-catalog,"* ]]; then
             result="$(result_for_job velnor-gradle-services-catalog)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-gradle-services-catalog did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-gradle-services-catalog did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-gradle-services-catalog ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1146,10 +1241,17 @@ jobs:
           fi
           if [[ "$selected" == *",gradle-services-fulfillment,"* ]]; then
             result="$(result_for_job github-gradle-services-fulfillment)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-gradle-services-fulfillment did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-gradle-services-fulfillment did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-gradle-services-fulfillment ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-gradle-services-fulfillment)"
             case "$result" in
@@ -1159,15 +1261,15 @@ jobs:
           fi
           if [[ "$selected" == *",gradle-services-fulfillment,"* ]]; then
             result="$(result_for_job velnor-gradle-services-fulfillment)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-gradle-services-fulfillment did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-gradle-services-fulfillment did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-gradle-services-fulfillment ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1179,10 +1281,17 @@ jobs:
           fi
           if [[ "$selected" == *",gradle-services-payment,"* ]]; then
             result="$(result_for_job github-gradle-services-payment)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-gradle-services-payment did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-gradle-services-payment did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-gradle-services-payment ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-gradle-services-payment)"
             case "$result" in
@@ -1192,15 +1301,15 @@ jobs:
           fi
           if [[ "$selected" == *",gradle-services-payment,"* ]]; then
             result="$(result_for_job velnor-gradle-services-payment)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-gradle-services-payment did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-gradle-services-payment did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-gradle-services-payment ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1210,11 +1319,18 @@ jobs:
               *) echo "unselected CI job velnor-gradle-services-payment failed unexpectedly: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",rust-checkout,"* ]]; then
+          if [[ "$selected" == *",rust-checkout,"* || "$selected" == *",rust-inventory,"* || "$selected" == *",rust-notifications,"* || "$selected" == *",rust-orders,"* || "$selected" == *",rust-playground-cli,"* || "$selected" == *",rust-playground-proto,"* || "$selected" == *",rust-playground-telemetry,"* || "$selected" == *",rust-pricing,"* || "$selected" == *",rust-recommendation,"* || "$selected" == *",rust-storefront,"* ]]; then
             result="$(result_for_job prepare-cargo)"
-            if [[ "$result" != success ]]; then
-              echo "selected CI prerequisite prepare-cargo did not pass: $result" >&2
-              exit 1
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI prerequisite prepare-cargo did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI prerequisite prepare-cargo ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
+              esac
             fi
           else
             result="$(result_for_job prepare-cargo)"
@@ -1225,10 +1341,17 @@ jobs:
           fi
           if [[ "$selected" == *",rust-checkout,"* ]]; then
             result="$(result_for_job github-rust-checkout)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-rust-checkout did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-rust-checkout did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-rust-checkout ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-rust-checkout)"
             case "$result" in
@@ -1238,15 +1361,15 @@ jobs:
           fi
           if [[ "$selected" == *",rust-checkout,"* ]]; then
             result="$(result_for_job velnor-rust-checkout)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-rust-checkout did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-rust-checkout did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-rust-checkout ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1258,10 +1381,17 @@ jobs:
           fi
           if [[ "$selected" == *",rust-inventory,"* ]]; then
             result="$(result_for_job github-rust-inventory)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-rust-inventory did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-rust-inventory did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-rust-inventory ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-rust-inventory)"
             case "$result" in
@@ -1271,15 +1401,15 @@ jobs:
           fi
           if [[ "$selected" == *",rust-inventory,"* ]]; then
             result="$(result_for_job velnor-rust-inventory)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-rust-inventory did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-rust-inventory did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-rust-inventory ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1291,10 +1421,17 @@ jobs:
           fi
           if [[ "$selected" == *",rust-notifications,"* ]]; then
             result="$(result_for_job github-rust-notifications)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-rust-notifications did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-rust-notifications did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-rust-notifications ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-rust-notifications)"
             case "$result" in
@@ -1304,15 +1441,15 @@ jobs:
           fi
           if [[ "$selected" == *",rust-notifications,"* ]]; then
             result="$(result_for_job velnor-rust-notifications)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-rust-notifications did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-rust-notifications did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-rust-notifications ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1324,10 +1461,17 @@ jobs:
           fi
           if [[ "$selected" == *",rust-orders,"* ]]; then
             result="$(result_for_job github-rust-orders)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-rust-orders did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-rust-orders did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-rust-orders ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-rust-orders)"
             case "$result" in
@@ -1337,15 +1481,15 @@ jobs:
           fi
           if [[ "$selected" == *",rust-orders,"* ]]; then
             result="$(result_for_job velnor-rust-orders)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-rust-orders did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-rust-orders did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-rust-orders ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1357,10 +1501,17 @@ jobs:
           fi
           if [[ "$selected" == *",rust-playground-cli,"* ]]; then
             result="$(result_for_job github-rust-playground-cli)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-rust-playground-cli did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-rust-playground-cli did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-rust-playground-cli ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-rust-playground-cli)"
             case "$result" in
@@ -1370,15 +1521,15 @@ jobs:
           fi
           if [[ "$selected" == *",rust-playground-cli,"* ]]; then
             result="$(result_for_job velnor-rust-playground-cli)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-rust-playground-cli did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-rust-playground-cli did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-rust-playground-cli ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1390,10 +1541,17 @@ jobs:
           fi
           if [[ "$selected" == *",rust-playground-proto,"* ]]; then
             result="$(result_for_job github-rust-playground-proto)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-rust-playground-proto did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-rust-playground-proto did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-rust-playground-proto ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-rust-playground-proto)"
             case "$result" in
@@ -1403,15 +1561,15 @@ jobs:
           fi
           if [[ "$selected" == *",rust-playground-proto,"* ]]; then
             result="$(result_for_job velnor-rust-playground-proto)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-rust-playground-proto did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-rust-playground-proto did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-rust-playground-proto ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1423,10 +1581,17 @@ jobs:
           fi
           if [[ "$selected" == *",rust-playground-telemetry,"* ]]; then
             result="$(result_for_job github-rust-playground-telemetry)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-rust-playground-telemetry did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-rust-playground-telemetry did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-rust-playground-telemetry ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-rust-playground-telemetry)"
             case "$result" in
@@ -1436,15 +1601,15 @@ jobs:
           fi
           if [[ "$selected" == *",rust-playground-telemetry,"* ]]; then
             result="$(result_for_job velnor-rust-playground-telemetry)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-rust-playground-telemetry did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-rust-playground-telemetry did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-rust-playground-telemetry ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1456,10 +1621,17 @@ jobs:
           fi
           if [[ "$selected" == *",rust-pricing,"* ]]; then
             result="$(result_for_job github-rust-pricing)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-rust-pricing did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-rust-pricing did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-rust-pricing ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-rust-pricing)"
             case "$result" in
@@ -1469,15 +1641,15 @@ jobs:
           fi
           if [[ "$selected" == *",rust-pricing,"* ]]; then
             result="$(result_for_job velnor-rust-pricing)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-rust-pricing did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-rust-pricing did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-rust-pricing ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1489,10 +1661,17 @@ jobs:
           fi
           if [[ "$selected" == *",rust-recommendation,"* ]]; then
             result="$(result_for_job github-rust-recommendation)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-rust-recommendation did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-rust-recommendation did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-rust-recommendation ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-rust-recommendation)"
             case "$result" in
@@ -1502,15 +1681,15 @@ jobs:
           fi
           if [[ "$selected" == *",rust-recommendation,"* ]]; then
             result="$(result_for_job velnor-rust-recommendation)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-rust-recommendation did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-rust-recommendation did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-rust-recommendation ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1522,10 +1701,17 @@ jobs:
           fi
           if [[ "$selected" == *",rust-storefront,"* ]]; then
             result="$(result_for_job github-rust-storefront)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-rust-storefront did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-rust-storefront did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-rust-storefront ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-rust-storefront)"
             case "$result" in
@@ -1535,15 +1721,15 @@ jobs:
           fi
           if [[ "$selected" == *",rust-storefront,"* ]]; then
             result="$(result_for_job velnor-rust-storefront)"
-            if [[ "$FORK_PR" == true ]]; then
+            if [[ "$LANE_ADMITTED_VELNOR" == true ]]; then
               case "$result" in
-                success|skipped) ;;
+                success) ;;
                 *) echo "selected CI job velnor-rust-storefront did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
-                success) ;;
-                *) echo "selected CI job velnor-rust-storefront did not pass: $result" >&2; exit 1 ;;
+                skipped) ;;
+                *) echo "selected CI job velnor-rust-storefront ran outside its lane admission (LANE_ADMITTED_VELNOR=$LANE_ADMITTED_VELNOR): $result" >&2; exit 1 ;;
               esac
             fi
           else
@@ -1555,10 +1741,17 @@ jobs:
           fi
           if [[ "$selected" == *",swift-package-macos,"* ]]; then
             result="$(result_for_job github-swift-package-macos)"
-            case "$result" in
-              success) ;;
-              *) echo "selected CI job github-swift-package-macos did not pass: $result" >&2; exit 1 ;;
-            esac
+            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+              case "$result" in
+                success) ;;
+                *) echo "selected CI job github-swift-package-macos did not pass: $result" >&2; exit 1 ;;
+              esac
+            else
+              case "$result" in
+                skipped) ;;
+                *) echo "selected CI job github-swift-package-macos ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+              esac
+            fi
           else
             result="$(result_for_job github-swift-package-macos)"
             case "$result" in
