@@ -4,7 +4,7 @@ repository = "tailrocks/parallax-telemetry-playground"
 profile = "generic"
 verified = true
 default_branch = "main"
-runners = "both"
+runners = "github"
 
 [analysis]
 method = "static-filesystem-and-manifest-inspection"
@@ -15,7 +15,7 @@ limitations = ["Project code, build scripts, task runners, and commands are neve
 github_runner = "ubuntu-24.04"
 velnor_labels = ["self-hosted", "velnor-target-mvp"]
 files = ["ci-main.yml", "ci-policy.yml", "ci-pr.yml", "ci-unit-bun.yml", "ci-unit-docker.yml", "ci-unit-gradle.yml", "ci-unit-rust.yml", "ci-unit-swift.yml", "maintenance.yml", "nightly.yml"]
-notes = ["Rust verification uses Mr. Boxington 1.12.0 by default on both lanes. GitHub-hosted jobs use its GitHub cache backend with bounded snapshot keys (a key names the toolchain/image/linker compatibility class and the hashed source state, so a new source state saves a new snapshot and retention keeps generations bounded). Velnor jobs use an explicit local-backend setup step against the image/runner-provided local store.", "Swift units render on the default executor: swift-package-macos (no Apple requirement detected; if Apple-bound, declare `capabilities = [\"xcode\"]` or `[\"xcframework\"]` on a [[units]] row, otherwise ensure a Swift toolchain provisions on ubuntu-24.04)."]
+notes = ["Rust verification uses Mr. Boxington 1.12.0 with its GitHub cache backend and bounded snapshot keys (a key names the toolchain/image/linker compatibility class and the hashed source state, so a new source state saves a new snapshot and retention keeps generations bounded).", "Swift units render on the default executor: swift-package-macos (no Apple requirement detected; if Apple-bound, declare `capabilities = [\"xcode\"]` or `[\"xcframework\"]` on a [[units]] row, otherwise ensure a Swift toolchain provisions on ubuntu-24.04)."]
 
 [release]
 enabled = false

@@ -9,8 +9,8 @@ revision = "4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d"
 ruleset_required_status_checks = ["ci-required"]
 ruleset_external_status_checks = ["DCO"]
 [workflow]
-runners = "both"
-automatic = "both"
+runners = "github"
+automatic = "github"
 default_dispatch_runner = "github"
 automatic_lanes = "github"
 github_runner = "ubuntu-24.04"
