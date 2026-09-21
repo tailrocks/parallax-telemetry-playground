@@ -1,33 +1,31 @@
-schema = 1
+schema = 2
 
 [generator]
 repository = "tailrocks/parallax-telemetry-playground"
-revision = "4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d"
+revision = "bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0"
 
+[workflow]
+providers = ["github-hosted"]
+automatic_providers = ["github-hosted"]
+default_branch = "main"
+
+[workflow.selectors.github-hosted]
+runs_on = ["ubuntu-24.04"]
 
 [policy]
-ruleset_required_status_checks = ["ci-required"]
+ruleset_required_status_checks = ["ci-required", "Policy"]
 ruleset_external_status_checks = ["DCO"]
-[workflow]
-runners = "github"
-automatic = "github"
-default_dispatch_runner = "github"
-automatic_lanes = "github"
-github_runner = "ubuntu-24.04"
-velnor_labels = ["self-hosted", "velnor-target-mvp"]
-default_branch = "main"
 
 [[declare]]
 primitive = "swift-package-pipeline"
 units = ["swift-package-macos"]
 
 [declare.args]
-jobs = ["github"]
+jobs = ["github-hosted"]
 
 # Every Rust unit compiles protobuf codegen: playground-proto runs
 # tonic-prost-build directly, and the other nine link playground-telemetry,
-# which builds open-feature-flagd. The scanner cannot see build-script system
-# dependencies, so each unit declares the locked protoc explicitly.
+# which builds open-feature-flagd.
 [[units]]
 id = "rust-checkout"
 mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
@@ -70,8 +68,7 @@ mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
 
 # The Gradle builds run their daemon on the runner JVM (17), but the
 # opentelemetry-gradle-plugin buildscript requires 21+. Each service declares
-# the locked JDK (GraalVM 25, matching the Gradle toolchains) so mise
-# provisions it before setup-gradle runs.
+# the locked JDK (GraalVM 25, matching the Gradle toolchains).
 [[units]]
 id = "gradle-services-catalog"
 mise_tools = ["java"]
@@ -84,8 +81,7 @@ mise_tools = ["java"]
 id = "gradle-services-payment"
 mise_tools = ["java"]
 
-# The Swift package imports Darwin/MachO/MetricKit: genuinely Apple-only code
-# that cannot compile on linux. It renders onto the macOS executor.
+# The Swift package imports Darwin/MachO/MetricKit: genuinely Apple-only code.
 [[units]]
 id = "swift-package-macos"
-os = "macos"
+platform = "macos-arm64"

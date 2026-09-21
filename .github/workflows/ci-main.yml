@@ -7,13 +7,6 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      runner:
-        description: Execution backend
-        required: false
-        default: github
-        type: choice
-        options:
-          - github
       scope:
         description: Verification scope
         required: true
@@ -46,12 +39,21 @@ jobs:
       base_sha: ${{ steps.plan.outputs.base_sha }}
       head_sha: ${{ steps.plan.outputs.head_sha }}
       units: ${{ steps.plan.outputs.units }}
+      unit_ids: ${{ steps.plan.outputs.unit_ids }}
       full_units: ${{ steps.plan.outputs.full_units }}
+      plan_digest: ${{ steps.plan.outputs.plan_digest }}
+      excluded: ${{ steps.plan.outputs.excluded }}
       bun_matrix: ${{ steps.plan.outputs.bun_matrix }}
       docker_matrix: ${{ steps.plan.outputs.docker_matrix }}
       gradle_matrix: ${{ steps.plan.outputs.gradle_matrix }}
       rust_matrix: ${{ steps.plan.outputs.rust_matrix }}
       swift_matrix: ${{ steps.plan.outputs.swift_matrix }}
+      # Presence-only no-work marker: `planned_no_work` is `true` or absent,
+      # never `false`. Consumers MUST branch
+      # `needs.plan.outputs.planned_no_work == 'true'` for the no-work path;
+      # any other value (including absent) means the plan selected work.
+      planned_no_work: ${{ steps.plan.outputs.planned_no_work }}
+      no_work_reason: ${{ steps.plan.outputs.no_work_reason }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,12 +62,11 @@ jobs:
           persist-credentials: false
       - name: Set up Velnor workflow runtime
         id: runtime
-        if: ${{ runner.environment == 'github-hosted' }}
-        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0
         with:
-          rev: 4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
+          rev: bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0
       - name: Set trusted workflow policy revision
-        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d" >> "$GITHUB_ENV"
+        run: echo "VELNOR_WORKFLOW_POLICY_REVISION=bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0" >> "$GITHUB_ENV"
       - name: Select affected units
         id: plan
         env:
@@ -73,15 +74,26 @@ jobs:
           CI_SCOPE_OVERRIDE: ${{ github.event.inputs.scope || '' }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.base_sha || github.event.before || 'refs/heads/main' }}
           HEAD_SHA: ${{ github.sha }}
+          VELNOR_PROVIDERS: github-hosted
+          VELNOR_EVENT_TRUSTED: ${{ (!(github.event_name == 'pull_request' && (github.event.pull_request.head.repo.fork || github.event.pull_request.user.type == 'Bot'))) && 'true' || 'false' }}
+          VELNOR_EXPECTED_WORK_FILE: .velnor-ci-expected-work/expected-work.json
         run: |
           set -euo pipefail
           if [[ -z "${CI_SCOPE_OVERRIDE:-}" ]]; then unset CI_SCOPE_OVERRIDE; fi
+          mkdir -p .velnor-ci-expected-work
           velnor-workflow plan --config .github/ci/project.toml
 
+      - name: Publish expected work
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: velnor-expected-work
+          path: .velnor-ci-expected-work/expected-work.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Prepare Velnor workflow runtime
         shell: bash
         env:
-          EXPECTED_REVISION: 4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
+          EXPECTED_REVISION: bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0
         run: |
           set -euo pipefail
           stage="$RUNNER_TEMP/velnor-workflow-runtime"
@@ -100,7 +112,7 @@ jobs:
       - name: Publish Velnor workflow runtime
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: velnor-workflow-runtime-4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d-${{ runner.os }}-${{ runner.arch }}
+          name: velnor-workflow-runtime-bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0-${{ runner.os }}-${{ runner.arch }}
           path: ${{ runner.temp }}/velnor-workflow-runtime
           if-no-files-found: error
           retention-days: 7
@@ -139,9 +151,9 @@ jobs:
           fi
           git checkout --quiet --detach "$HEAD_SHA"
       - name: Set up Velnor workflow runtime
-        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0
         with:
-          rev: 4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
+          rev: bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0
           checkout-path: ${{ github.workspace }}/policy-checkout
       - name: Read declared generator pin
         id: pin
@@ -154,13 +166,13 @@ jobs:
           echo "value=$pin" >> "$GITHUB_OUTPUT"
       - name: Set up declared generator product
         id: renderer
-        if: steps.pin.outputs.value != '4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d'
-        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
+        if: steps.pin.outputs.value != 'bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0'
+        uses: tailrocks/velnor/.github/actions/setup-velnor-workflow@bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0
         with:
           rev: ${{ steps.pin.outputs.value }}
           checkout-path: ${{ github.workspace }}/policy-checkout
       - name: Resolve declared generator product
-        if: steps.pin.outputs.value != '4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d'
+        if: steps.pin.outputs.value != 'bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0'
         run: |
           set -euo pipefail
           binary="$HOME/.cache/velnor/workflow-runtime/${{ steps.renderer.outputs.closure }}/bin/velnor-workflow"
@@ -194,7 +206,7 @@ jobs:
           WORKFLOW_ROOT: ${{ github.workspace }}/policy-checkout
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-          VELNOR_WORKFLOW_POLICY_REVISION: 4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d
+          VELNOR_WORKFLOW_POLICY_REVISION: bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0
         run: |
           set -euo pipefail
           velnor-workflow policy \
@@ -214,49 +226,59 @@ jobs:
         env:
           MISE_NO_CONFIG: "1"
         run: mise exec actionlint@1.7.12 -- actionlint
-  github-bun-playground-web:
-    name: "Bun · Bun package (playground-web)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',bun-playground-web,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+  github-hosted-bun-playground-web:
+    name: "Bun · Bun package (playground-web) · github-hosted — bun-playground-web"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"bun-playground-web"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-bun.yml
     with:
       unit: bun-playground-web
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       cache_paths: "~/.bun/install/cache"
       cache_key_files: |
         web/package.json
         web/bun.lock
-      unit_admission: github
-  github-docker:
-    name: "Docker · Docker"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',docker,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
+      unit_admission: github-hosted
+  github-hosted-docker:
+    name: "Docker · Docker · github-hosted — docker"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"docker"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-docker.yml
     with:
       unit: docker
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      unit_admission: github
-  github-gradle-services-catalog:
-    name: "Gradle · Gradle (services/catalog)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-catalog,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
+      unit_admission: github-hosted
+  github-hosted-gradle-services-catalog:
+    name: "Gradle · Gradle (services/catalog) · github-hosted — gradle-services-catalog"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"gradle-services-catalog"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-gradle.yml
     with:
       unit: gradle-services-catalog
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: java
@@ -266,18 +288,22 @@ jobs:
       cache_key_files: |
         services/catalog/gradle/wrapper/gradle-wrapper.properties
         services/catalog/gradle/libs.versions.toml
-      unit_admission: github
-  github-gradle-services-fulfillment:
-    name: "Gradle · Gradle (services/fulfillment)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-fulfillment,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
+      unit_admission: github-hosted
+  github-hosted-gradle-services-fulfillment:
+    name: "Gradle · Gradle (services/fulfillment) · github-hosted — gradle-services-fulfillment"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"gradle-services-fulfillment"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-gradle.yml
     with:
       unit: gradle-services-fulfillment
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: java
@@ -287,18 +313,22 @@ jobs:
       cache_key_files: |
         services/fulfillment/gradle/wrapper/gradle-wrapper.properties
         services/fulfillment/gradle/libs.versions.toml
-      unit_admission: github
-  github-gradle-services-payment:
-    name: "Gradle · Gradle (services/payment)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',gradle-services-payment,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
+      unit_admission: github-hosted
+  github-hosted-gradle-services-payment:
+    name: "Gradle · Gradle (services/payment) · github-hosted — gradle-services-payment"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"gradle-services-payment"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-gradle.yml
     with:
       unit: gradle-services-payment
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: java
@@ -308,23 +338,27 @@ jobs:
       cache_key_files: |
         services/payment/gradle/wrapper/gradle-wrapper.properties
         services/payment/gradle/libs.versions.toml
-      unit_admission: github
-  github-rust-checkout:
-    name: "Rust · checkout"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-checkout,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
+      unit_admission: github-hosted
+  github-hosted-rust-checkout:
+    name: "Rust · checkout · github-hosted — rust-checkout"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"rust-checkout"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
       unit: rust-checkout
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
-      mbx_compat: "62c8b033e996"
+      mbx_compat: "0e84c59566e8"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -358,24 +392,29 @@ jobs:
         rust-toolchain
       cargo_root: "services/checkout"
       cargo_net_offline: true
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
       unit_dependencies: "rust-playground-proto,rust-playground-telemetry"
-      unit_admission: github
-  github-rust-inventory:
-    name: "Rust · inventory"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-inventory,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_admission: github-hosted
+      validation_phases: "fmt,clippy,test"
+  github-hosted-rust-inventory:
+    name: "Rust · inventory · github-hosted — rust-inventory"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"rust-inventory"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
       unit: rust-inventory
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
-      mbx_compat: "1e2f0baeaf5a"
+      mbx_compat: "69f07d72bb84"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -403,24 +442,29 @@ jobs:
         rust-toolchain
       cargo_root: "services/inventory"
       cargo_net_offline: true
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
       unit_dependencies: rust-playground-telemetry
-      unit_admission: github
-  github-rust-notifications:
-    name: "Rust · notifications"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-notifications,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_admission: github-hosted
+      validation_phases: "fmt,clippy,test,doctest"
+  github-hosted-rust-notifications:
+    name: "Rust · notifications · github-hosted — rust-notifications"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"rust-notifications"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
       unit: rust-notifications
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
-      mbx_compat: "00834eca0aa3"
+      mbx_compat: "487241659da9"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -448,24 +492,29 @@ jobs:
         rust-toolchain
       cargo_root: "services/notifications"
       cargo_net_offline: true
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
       unit_dependencies: rust-playground-telemetry
-      unit_admission: github
-  github-rust-orders:
-    name: "Rust · orders"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-orders,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_admission: github-hosted
+      validation_phases: "fmt,clippy,test"
+  github-hosted-rust-orders:
+    name: "Rust · orders · github-hosted — rust-orders"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"rust-orders"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
       unit: rust-orders
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
-      mbx_compat: "7d5f21857bfa"
+      mbx_compat: e3f9716ce5da
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -493,24 +542,29 @@ jobs:
         rust-toolchain
       cargo_root: "services/orders"
       cargo_net_offline: true
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
       unit_dependencies: rust-playground-telemetry
-      unit_admission: github
-  github-rust-playground-cli:
-    name: "Rust · playground-cli"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-cli,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_admission: github-hosted
+      validation_phases: "fmt,clippy,test"
+  github-hosted-rust-playground-cli:
+    name: "Rust · playground-cli · github-hosted — rust-playground-cli"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"rust-playground-cli"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
       unit: rust-playground-cli
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
-      mbx_compat: "830a2796631d"
+      mbx_compat: ddb7183dd77b
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -538,24 +592,29 @@ jobs:
         rust-toolchain
       cargo_root: cli
       cargo_net_offline: true
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
       unit_dependencies: rust-playground-telemetry
-      unit_admission: github
-  github-rust-playground-proto:
-    name: "Rust · playground-proto"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-proto,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_admission: github-hosted
+      validation_phases: "fmt,clippy,test"
+  github-hosted-rust-playground-proto:
+    name: "Rust · playground-proto · github-hosted — rust-playground-proto"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"rust-playground-proto"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
       unit: rust-playground-proto
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
-      mbx_compat: a47f9a8ea0fc
+      mbx_compat: "540476d4a592"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -579,23 +638,28 @@ jobs:
         rust-toolchain
       cargo_root: proto
       cargo_net_offline: true
-      unit_admission: github
-  github-rust-playground-telemetry:
-    name: "Rust · playground-telemetry"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-playground-telemetry,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
+      unit_admission: github-hosted
+      validation_phases: "fmt,clippy,test,doctest"
+  github-hosted-rust-playground-telemetry:
+    name: "Rust · playground-telemetry · github-hosted — rust-playground-telemetry"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"rust-playground-telemetry"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
       unit: rust-playground-telemetry
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
-      mbx_compat: b142eea82782
+      mbx_compat: "6cbfd72f39ec"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -618,23 +682,28 @@ jobs:
         rust-toolchain
       cargo_root: "libs/playground-telemetry"
       cargo_net_offline: true
-      unit_admission: github
-  github-rust-pricing:
-    name: "Rust · pricing"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-pricing,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
+      unit_admission: github-hosted
+      validation_phases: "fmt,clippy,test,doctest"
+  github-hosted-rust-pricing:
+    name: "Rust · pricing · github-hosted — rust-pricing"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"rust-pricing"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
       unit: rust-pricing
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
-      mbx_compat: "79d403216c4d"
+      mbx_compat: "343a30fa9c91"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -668,24 +737,29 @@ jobs:
         rust-toolchain
       cargo_root: "services/pricing"
       cargo_net_offline: true
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
       unit_dependencies: "rust-playground-proto,rust-playground-telemetry"
-      unit_admission: github
-  github-rust-recommendation:
-    name: "Rust · recommendation"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-recommendation,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_admission: github-hosted
+      validation_phases: "fmt,clippy,test,doctest"
+  github-hosted-rust-recommendation:
+    name: "Rust · recommendation · github-hosted — rust-recommendation"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"rust-recommendation"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
       unit: rust-recommendation
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
-      mbx_compat: "645521e926f0"
+      mbx_compat: "9df1f7fd63a7"
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -713,24 +787,29 @@ jobs:
         rust-toolchain
       cargo_root: "services/recommendation"
       cargo_net_offline: true
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
       unit_dependencies: rust-playground-telemetry
-      unit_admission: github
-  github-rust-storefront:
-    name: "Rust · storefront"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',rust-storefront,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_admission: github-hosted
+      validation_phases: "fmt,clippy,test"
+  github-hosted-rust-storefront:
+    name: "Rust · storefront · github-hosted — rust-storefront"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"rust-storefront"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-rust.yml
     with:
       unit: rust-storefront
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
-      mbx_compat: "639075f20403"
+      mbx_compat: a31b3ebc62c1
       mbx_dependency_files: |
         .cargo/**
         Cargo.lock
@@ -764,46 +843,154 @@ jobs:
         rust-toolchain
       cargo_root: "services/storefront"
       cargo_net_offline: true
+      unit_platform: linux-x64
+      unit_trust: untrusted-ok
       unit_dependencies: "rust-playground-proto,rust-playground-telemetry"
-      unit_admission: github
-  github-swift-package-macos:
-    name: "Swift · Apple · Swift package (macos)"
-    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',swift-package-macos,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+      unit_admission: github-hosted
+      validation_phases: "fmt,clippy,test"
+  github-hosted-swift-package-macos:
+    name: "Swift · Apple · Swift package (macos) · github-hosted — swift-package-macos"
+    if: ${{ always() && needs.plan.result == 'success' && needs.policy.result == 'success' && contains(needs.plan.outputs.units, '"unit_id":"swift-package-macos"') && (true) }}
     needs: [plan, policy]
     uses: ./.github/workflows/ci-unit-swift.yml
     with:
       unit: swift-package-macos
-      lane: github
+      provider: github-hosted
       selected_units: ${{ needs.plan.outputs.units }}
+      selected_unit_ids: ${{ needs.plan.outputs.unit_ids }}
       scope: ${{ needs.plan.outputs.scope }}
       full_units: ${{ needs.plan.outputs.full_units }}
+      plan_digest: ${{ needs.plan.outputs.plan_digest }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
       cache_paths: "~/.swiftpm"
       cache_key_files: |
-        macos/Package.swift
-        macos/Package.resolved
+        .swift-version
+        .xcode-version
         macos/.swiftpm/Package.resolved
+        macos/Package.resolved
+        macos/Package.swift
+        mise.lock
       apple_executor: true
-      unit_admission: github
+      unit_platform: macos-arm64
+      unit_trust: untrusted-ok
+      unit_admission: github-hosted
   ci-required:
     name: ci-required
     if: ${{ always() }}
-    needs: [plan, policy, github-bun-playground-web, github-docker, github-gradle-services-catalog, github-gradle-services-fulfillment, github-gradle-services-payment, github-rust-checkout, github-rust-inventory, github-rust-notifications, github-rust-orders, github-rust-playground-cli, github-rust-playground-proto, github-rust-playground-telemetry, github-rust-pricing, github-rust-recommendation, github-rust-storefront, github-swift-package-macos]
+    needs: [plan, policy, github-hosted-bun-playground-web, github-hosted-docker, github-hosted-gradle-services-catalog, github-hosted-gradle-services-fulfillment, github-hosted-gradle-services-payment, github-hosted-rust-checkout, github-hosted-rust-inventory, github-hosted-rust-notifications, github-hosted-rust-orders, github-hosted-rust-playground-cli, github-hosted-rust-playground-proto, github-hosted-rust-playground-telemetry, github-hosted-rust-pricing, github-hosted-rust-recommendation, github-hosted-rust-storefront, github-hosted-swift-package-macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Download Velnor workflow runtime
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: velnor-workflow-runtime-bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0-${{ runner.os }}-${{ runner.arch }}
+          path: .velnor-workflow-runtime
+      - name: Verify Velnor workflow runtime
+        shell: bash
+        env:
+          EXPECTED_REVISION: bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0
+        run: |
+          set -euo pipefail
+          manifest=.velnor-workflow-runtime/manifest.json
+          jq -e --arg revision "$EXPECTED_REVISION" --arg repository "$GITHUB_REPOSITORY" --arg platform "${RUNNER_OS}-${RUNNER_ARCH}" --arg run_id "$GITHUB_RUN_ID" '.revision == $revision and .repository == $repository and .platform == $platform and .run_id == $run_id and (.run_id | test("^[0-9]+$")) and .job_id != "" and (.binary_sha256 | test("^[0-9a-f]{64}$")) and (.policy_binary_sha256 | test("^[0-9a-f]{64}$")) and (.closure | test("^[0-9a-f]{64}$")) and (.policy_closure | test("^[0-9a-f]{64}$"))' "$manifest" >/dev/null
+          expected="$(jq -er '.binary_sha256' "$manifest")"
+          actual="$(sha256sum .velnor-workflow-runtime/velnor-workflow | awk '{print $1}')"
+          [[ "$actual" == "$expected" ]] || { echo "::error::runtime digest mismatch" >&2; exit 1; }
+          expected="$(jq -er '.policy_binary_sha256' "$manifest")"
+          actual="$(sha256sum .velnor-workflow-runtime/velnor-workflow-policy | awk '{print $1}')"
+          [[ "$actual" == "$expected" ]] || { echo "::error::policy runtime digest mismatch" >&2; exit 1; }
+      - name: Add Velnor workflow runtime to PATH
+        shell: bash
+        env:
+          EXPECTED_REVISION: bdffa8f492f1e9e17133fbd428c6ff17a80ac4a0
+        run: |
+          set -euo pipefail
+          home="$RUNNER_TEMP/velnor-workflow-runtime-artifact"
+          install -Dm0755 .velnor-workflow-runtime/velnor-workflow "$home/bin/velnor-workflow"
+          install -Dm0755 .velnor-workflow-runtime/velnor-workflow-policy "$home/bin/velnor-workflow-policy"
+          expected_closure="$(jq -er '.policy_closure' .velnor-workflow-runtime/manifest.json)"
+          reported="$("$home/bin/velnor-workflow-policy" --closure)"
+          [[ "$reported" == "$expected_closure" ]] || { echo "::error::policy runtime reports closure $reported, expected $expected_closure" >&2; exit 1; }
+          echo "$home/bin" >> "$GITHUB_PATH"
+          echo "VELNOR_WORKFLOW_PINNED_BINARY=$home/bin/velnor-workflow-policy" >> "$GITHUB_ENV"
+      - name: Download expected work
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: velnor-expected-work
+          path: .velnor-ci-expected-work
+      - name: Download reported unit results
+        # A no-work plan runs no unit jobs, so zero result artifacts is the
+        # expected case there — and the aggregate fails a real-work plan with
+        # zero records anyway. Tolerate the empty download; never the verdict.
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: velnor-result-*
+          merge-multiple: true
+          path: .velnor-ci-results
+      - name: Collect reported unit results
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p .velnor-ci-results
+          files=(.velnor-ci-results/result-*.json)
+          for file in "${files[@]}"; do
+            if jq -e 'any(.results[]?; has("reused_from"))' "$file" >/dev/null; then
+              echo "::error::$file carries reused_from without a validate_reuse decision; render emits no reused results" >&2
+              exit 1
+            fi
+          done
+          if (( ${#files[@]} == 0 )); then
+            printf '{"results":[]}\n' > .velnor-ci-results.json
+          else
+            jq -s '{results: ([.[].results // empty] | add // [])}' "${files[@]}" > .velnor-ci-results.json
+          fi
+          echo "collected $(jq '.results | length' .velnor-ci-results.json) reported result(s) from ${#files[@]} record file(s)"
+      - name: Score expected work against reported results
+        env:
+          BASE_SHA: ${{ needs.plan.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.plan.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          velnor-workflow aggregate --expected .velnor-ci-expected-work/expected-work.json --results .velnor-ci-results.json
       - name: Validate generated stack results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
           SELECTED_UNITS: ${{ needs.plan.outputs.units }}
-          LANE_ADMITTED_GITHUB: ${{ github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == '')) }}
+          PLAN_DIGEST: ${{ needs.plan.outputs.plan_digest }}
+          EXCLUDED: ${{ needs.plan.outputs.excluded }}
+          EXPECTED_CALLERS: "[{\"job_id\":\"github-hosted-bun-playground-web\",\"provider\":\"github-hosted\",\"unit_id\":\"bun-playground-web\"},{\"job_id\":\"github-hosted-docker\",\"provider\":\"github-hosted\",\"unit_id\":\"docker\"},{\"job_id\":\"github-hosted-gradle-services-catalog\",\"provider\":\"github-hosted\",\"unit_id\":\"gradle-services-catalog\"},{\"job_id\":\"github-hosted-gradle-services-fulfillment\",\"provider\":\"github-hosted\",\"unit_id\":\"gradle-services-fulfillment\"},{\"job_id\":\"github-hosted-gradle-services-payment\",\"provider\":\"github-hosted\",\"unit_id\":\"gradle-services-payment\"},{\"job_id\":\"github-hosted-rust-checkout\",\"provider\":\"github-hosted\",\"unit_id\":\"rust-checkout\"},{\"job_id\":\"github-hosted-rust-inventory\",\"provider\":\"github-hosted\",\"unit_id\":\"rust-inventory\"},{\"job_id\":\"github-hosted-rust-notifications\",\"provider\":\"github-hosted\",\"unit_id\":\"rust-notifications\"},{\"job_id\":\"github-hosted-rust-orders\",\"provider\":\"github-hosted\",\"unit_id\":\"rust-orders\"},{\"job_id\":\"github-hosted-rust-playground-cli\",\"provider\":\"github-hosted\",\"unit_id\":\"rust-playground-cli\"},{\"job_id\":\"github-hosted-rust-playground-proto\",\"provider\":\"github-hosted\",\"unit_id\":\"rust-playground-proto\"},{\"job_id\":\"github-hosted-rust-playground-telemetry\",\"provider\":\"github-hosted\",\"unit_id\":\"rust-playground-telemetry\"},{\"job_id\":\"github-hosted-rust-pricing\",\"provider\":\"github-hosted\",\"unit_id\":\"rust-pricing\"},{\"job_id\":\"github-hosted-rust-recommendation\",\"provider\":\"github-hosted\",\"unit_id\":\"rust-recommendation\"},{\"job_id\":\"github-hosted-rust-storefront\",\"provider\":\"github-hosted\",\"unit_id\":\"rust-storefront\"},{\"job_id\":\"github-hosted-swift-package-macos\",\"provider\":\"github-hosted\",\"unit_id\":\"swift-package-macos\"}]"
+          PROVIDER_ADMITTED_GITHUB_HOSTED: ${{ true }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "$PLAN_DIGEST" ]]; then
+            echo "plan did not freeze a plan digest: the expected set has no identity" >&2
+            exit 1
+          fi
+          echo "verdict binds plan digest $PLAN_DIGEST"
           result_for_job() {
             jq -r --arg job "$1" '.[$job].result // empty' <<<"$NEEDS_JSON"
           }
+          plan_expects() {
+            [[ "$(jq -r --arg unit "$1" --arg provider "$2" '[.[] | select(.unit_id == $unit) | .providers[] | select(. == $provider)] | length' <<<"$SELECTED_UNITS")" -gt 0 ]]
+          }
+          if ! jq -e --argjson expected "$EXPECTED_CALLERS" '($expected | type == "array") and all($expected[]; type == "object" and (.unit_id | type) == "string" and (.provider | type) == "string" and (.job_id | type) == "string")' -n; then
+            echo "generated required-caller contract is malformed" >&2
+            exit 1
+          fi
+          if ! jq -e --argjson expected "$EXPECTED_CALLERS" 'type == "array" and (map(.unit_id) | unique | length) == length and all(.[]; . as $entry | ($entry | type) == "object" and ($entry.unit_id | type) == "string" and ($entry.unit_id | length) > 0 and ($entry.providers | type) == "array" and ($entry.providers | length) > 0 and (($entry.providers | map(type == "string" and length > 0) | all)) and (($entry.providers | unique | length) == ($entry.providers | length)) and all($entry.providers[]; . as $provider | any($expected[]; .unit_id == $entry.unit_id and .provider == $provider)))' <<<"$SELECTED_UNITS" >/dev/null; then
+            echo "plan selected-unit output contains an unknown, duplicate, empty, or unmapped obligation" >&2
+            exit 1
+          fi
+          if ! jq -e 'type == "object"' <<<"$NEEDS_JSON" >/dev/null; then
+            echo "workflow needs output is malformed" >&2
+            exit 1
+          fi
           result="$(result_for_job plan)"
           if [[ "$result" != success ]]; then
             echo "required CI prerequisite plan did not pass: $result" >&2
@@ -814,325 +1001,372 @@ jobs:
             echo "required CI prerequisite policy did not pass: $result" >&2
             exit 1
           fi
-          selected=",$SELECTED_UNITS,"
-          if [[ "$selected" == *",bun-playground-web,"* ]]; then
-            result="$(result_for_job github-bun-playground-web)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "bun-playground-web" "github-hosted"; then
+            result="$(result_for_job github-hosted-bun-playground-web)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-bun-playground-web did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-bun-playground-web was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-bun-playground-web was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-bun-playground-web did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-bun-playground-web ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-bun-playground-web ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-bun-playground-web)"
+            result="$(result_for_job github-hosted-bun-playground-web)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-bun-playground-web failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-bun-playground-web succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-bun-playground-web ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",docker,"* ]]; then
-            result="$(result_for_job github-docker)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "docker" "github-hosted"; then
+            result="$(result_for_job github-hosted-docker)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-docker did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-docker was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-docker was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-docker did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-docker ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-docker ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-docker)"
+            result="$(result_for_job github-hosted-docker)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-docker failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-docker succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-docker ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",gradle-services-catalog,"* ]]; then
-            result="$(result_for_job github-gradle-services-catalog)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "gradle-services-catalog" "github-hosted"; then
+            result="$(result_for_job github-hosted-gradle-services-catalog)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-gradle-services-catalog did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-gradle-services-catalog was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-gradle-services-catalog was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-gradle-services-catalog did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-gradle-services-catalog ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-gradle-services-catalog ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-gradle-services-catalog)"
+            result="$(result_for_job github-hosted-gradle-services-catalog)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-gradle-services-catalog failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-gradle-services-catalog succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-gradle-services-catalog ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",gradle-services-fulfillment,"* ]]; then
-            result="$(result_for_job github-gradle-services-fulfillment)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "gradle-services-fulfillment" "github-hosted"; then
+            result="$(result_for_job github-hosted-gradle-services-fulfillment)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-gradle-services-fulfillment did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-gradle-services-fulfillment was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-gradle-services-fulfillment was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-gradle-services-fulfillment did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-gradle-services-fulfillment ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-gradle-services-fulfillment ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-gradle-services-fulfillment)"
+            result="$(result_for_job github-hosted-gradle-services-fulfillment)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-gradle-services-fulfillment failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-gradle-services-fulfillment succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-gradle-services-fulfillment ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",gradle-services-payment,"* ]]; then
-            result="$(result_for_job github-gradle-services-payment)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "gradle-services-payment" "github-hosted"; then
+            result="$(result_for_job github-hosted-gradle-services-payment)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-gradle-services-payment did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-gradle-services-payment was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-gradle-services-payment was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-gradle-services-payment did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-gradle-services-payment ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-gradle-services-payment ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-gradle-services-payment)"
+            result="$(result_for_job github-hosted-gradle-services-payment)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-gradle-services-payment failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-gradle-services-payment succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-gradle-services-payment ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",rust-checkout,"* ]]; then
-            result="$(result_for_job github-rust-checkout)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "rust-checkout" "github-hosted"; then
+            result="$(result_for_job github-hosted-rust-checkout)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-rust-checkout did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-rust-checkout was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-rust-checkout was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-rust-checkout did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-rust-checkout ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-rust-checkout ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-rust-checkout)"
+            result="$(result_for_job github-hosted-rust-checkout)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-rust-checkout failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-rust-checkout succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-rust-checkout ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",rust-inventory,"* ]]; then
-            result="$(result_for_job github-rust-inventory)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "rust-inventory" "github-hosted"; then
+            result="$(result_for_job github-hosted-rust-inventory)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-rust-inventory did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-rust-inventory was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-rust-inventory was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-rust-inventory did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-rust-inventory ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-rust-inventory ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-rust-inventory)"
+            result="$(result_for_job github-hosted-rust-inventory)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-rust-inventory failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-rust-inventory succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-rust-inventory ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",rust-notifications,"* ]]; then
-            result="$(result_for_job github-rust-notifications)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "rust-notifications" "github-hosted"; then
+            result="$(result_for_job github-hosted-rust-notifications)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-rust-notifications did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-rust-notifications was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-rust-notifications was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-rust-notifications did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-rust-notifications ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-rust-notifications ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-rust-notifications)"
+            result="$(result_for_job github-hosted-rust-notifications)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-rust-notifications failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-rust-notifications succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-rust-notifications ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",rust-orders,"* ]]; then
-            result="$(result_for_job github-rust-orders)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "rust-orders" "github-hosted"; then
+            result="$(result_for_job github-hosted-rust-orders)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-rust-orders did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-rust-orders was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-rust-orders was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-rust-orders did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-rust-orders ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-rust-orders ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-rust-orders)"
+            result="$(result_for_job github-hosted-rust-orders)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-rust-orders failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-rust-orders succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-rust-orders ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",rust-playground-cli,"* ]]; then
-            result="$(result_for_job github-rust-playground-cli)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "rust-playground-cli" "github-hosted"; then
+            result="$(result_for_job github-hosted-rust-playground-cli)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-rust-playground-cli did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-rust-playground-cli was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-rust-playground-cli was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-rust-playground-cli did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-rust-playground-cli ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-rust-playground-cli ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-rust-playground-cli)"
+            result="$(result_for_job github-hosted-rust-playground-cli)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-rust-playground-cli failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-rust-playground-cli succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-rust-playground-cli ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",rust-playground-proto,"* ]]; then
-            result="$(result_for_job github-rust-playground-proto)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "rust-playground-proto" "github-hosted"; then
+            result="$(result_for_job github-hosted-rust-playground-proto)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-rust-playground-proto did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-rust-playground-proto was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-rust-playground-proto was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-rust-playground-proto did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-rust-playground-proto ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-rust-playground-proto ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-rust-playground-proto)"
+            result="$(result_for_job github-hosted-rust-playground-proto)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-rust-playground-proto failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-rust-playground-proto succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-rust-playground-proto ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",rust-playground-telemetry,"* ]]; then
-            result="$(result_for_job github-rust-playground-telemetry)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "rust-playground-telemetry" "github-hosted"; then
+            result="$(result_for_job github-hosted-rust-playground-telemetry)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-rust-playground-telemetry did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-rust-playground-telemetry was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-rust-playground-telemetry was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-rust-playground-telemetry did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-rust-playground-telemetry ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-rust-playground-telemetry ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-rust-playground-telemetry)"
+            result="$(result_for_job github-hosted-rust-playground-telemetry)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-rust-playground-telemetry failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-rust-playground-telemetry succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-rust-playground-telemetry ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",rust-pricing,"* ]]; then
-            result="$(result_for_job github-rust-pricing)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "rust-pricing" "github-hosted"; then
+            result="$(result_for_job github-hosted-rust-pricing)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-rust-pricing did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-rust-pricing was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-rust-pricing was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-rust-pricing did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-rust-pricing ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-rust-pricing ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-rust-pricing)"
+            result="$(result_for_job github-hosted-rust-pricing)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-rust-pricing failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-rust-pricing succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-rust-pricing ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",rust-recommendation,"* ]]; then
-            result="$(result_for_job github-rust-recommendation)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "rust-recommendation" "github-hosted"; then
+            result="$(result_for_job github-hosted-rust-recommendation)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-rust-recommendation did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-rust-recommendation was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-rust-recommendation was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-rust-recommendation did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-rust-recommendation ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-rust-recommendation ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-rust-recommendation)"
+            result="$(result_for_job github-hosted-rust-recommendation)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-rust-recommendation failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-rust-recommendation succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-rust-recommendation ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",rust-storefront,"* ]]; then
-            result="$(result_for_job github-rust-storefront)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "rust-storefront" "github-hosted"; then
+            result="$(result_for_job github-hosted-rust-storefront)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-rust-storefront did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-rust-storefront was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-rust-storefront was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-rust-storefront did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-rust-storefront ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-rust-storefront ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-rust-storefront)"
+            result="$(result_for_job github-hosted-rust-storefront)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-rust-storefront failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-rust-storefront succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-rust-storefront ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",swift-package-macos,"* ]]; then
-            result="$(result_for_job github-swift-package-macos)"
-            if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
+          if plan_expects "swift-package-macos" "github-hosted"; then
+            result="$(result_for_job github-hosted-swift-package-macos)"
+            if [[ "$PROVIDER_ADMITTED_GITHUB_HOSTED" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-swift-package-macos did not pass: $result" >&2; exit 1 ;;
+                skipped) echo "expected CI job github-hosted-swift-package-macos was skipped: a skipped expected result cannot pass" >&2; exit 1 ;;
+                cancelled) echo "expected CI job github-hosted-swift-package-macos was cancelled: a cancelled expected result cannot pass" >&2; exit 1 ;;
+                *) echo "expected CI job github-hosted-swift-package-macos did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-swift-package-macos ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-hosted-swift-package-macos ran outside its provider admission (PROVIDER_ADMITTED_GITHUB_HOSTED=$PROVIDER_ADMITTED_GITHUB_HOSTED): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-swift-package-macos)"
+            result="$(result_for_job github-hosted-swift-package-macos)"
             case "$result" in
-              success|skipped) ;;
-              *) echo "unselected CI job github-swift-package-macos failed unexpectedly: $result" >&2; exit 1 ;;
+              skipped) ;;
+              success) echo "unexpected CI job github-hosted-swift-package-macos succeeded outside the expected set: the plan did not declare it" >&2; exit 1 ;;
+              *) echo "unexpected CI job github-hosted-swift-package-macos ran outside the expected set: $result" >&2; exit 1 ;;
             esac
           fi
   required:
