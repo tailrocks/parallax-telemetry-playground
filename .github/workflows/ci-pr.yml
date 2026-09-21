@@ -121,13 +121,13 @@ jobs:
         web/package.json
         web/bun.lock
       unit_admission: github
-  github-docker-deploy:
-    name: "Docker · Docker (deploy)"
-    if: ${{ always() && needs.plan.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',docker-deploy,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
+  github-docker:
+    name: "Docker · Docker"
+    if: ${{ always() && needs.plan.result == 'success' && contains(format(',{0},', needs.plan.outputs.units), ',docker,') && (github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')) || (github.event_name == 'workflow_dispatch' && (github.event.inputs.runner == 'github' || github.event.inputs.runner == 'both' || github.event.inputs.runner == ''))) }}
     needs: [plan]
     uses: ./.github/workflows/ci-unit-docker.yml
     with:
-      unit: docker-deploy
+      unit: docker
       lane: github
       selected_units: ${{ needs.plan.outputs.units }}
       scope: ${{ needs.plan.outputs.scope }}
@@ -148,6 +148,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
+      mise_tools: java
       cache_paths: |
         ~/.gradle/caches
         ~/.gradle/wrapper
@@ -168,6 +169,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
+      mise_tools: java
       cache_paths: |
         ~/.gradle/caches
         ~/.gradle/wrapper
@@ -188,6 +190,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
+      mise_tools: java
       cache_paths: |
         ~/.gradle/caches
         ~/.gradle/wrapper
@@ -208,7 +211,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
       mbx_compat: "62c8b033e996"
       mbx_dependency_files: |
@@ -259,7 +262,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
       mbx_compat: "1e2f0baeaf5a"
       mbx_dependency_files: |
@@ -304,7 +307,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
       mbx_compat: "00834eca0aa3"
       mbx_dependency_files: |
@@ -349,7 +352,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
       mbx_compat: "7d5f21857bfa"
       mbx_dependency_files: |
@@ -394,7 +397,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
       mbx_compat: "830a2796631d"
       mbx_dependency_files: |
@@ -439,7 +442,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
       mbx_compat: a47f9a8ea0fc
       mbx_dependency_files: |
@@ -479,7 +482,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
       mbx_compat: b142eea82782
       mbx_dependency_files: |
@@ -518,7 +521,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
       mbx_compat: "79d403216c4d"
       mbx_dependency_files: |
@@ -569,7 +572,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
       mbx_compat: "645521e926f0"
       mbx_dependency_files: |
@@ -614,7 +617,7 @@ jobs:
       full_units: ${{ needs.plan.outputs.full_units }}
       base_sha: ${{ needs.plan.outputs.base_sha }}
       head_sha: ${{ needs.plan.outputs.head_sha }}
-      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest"
+      mise_tools: "aqua:nextest-rs/nextest/cargo-nextest aqua:protocolbuffers/protobuf/protoc"
       mbx_enabled: true
       mbx_compat: "639075f20403"
       mbx_dependency_files: |
@@ -670,11 +673,12 @@ jobs:
         macos/Package.swift
         macos/Package.resolved
         macos/.swiftpm/Package.resolved
+      apple_executor: true
       unit_admission: github
   ci-required:
     name: ci-required
     if: ${{ always() }}
-    needs: [plan, github-bun-playground-web, github-docker-deploy, github-gradle-services-catalog, github-gradle-services-fulfillment, github-gradle-services-payment, github-rust-checkout, github-rust-inventory, github-rust-notifications, github-rust-orders, github-rust-playground-cli, github-rust-playground-proto, github-rust-playground-telemetry, github-rust-pricing, github-rust-recommendation, github-rust-storefront, github-swift-package-macos]
+    needs: [plan, github-bun-playground-web, github-docker, github-gradle-services-catalog, github-gradle-services-fulfillment, github-gradle-services-payment, github-rust-checkout, github-rust-inventory, github-rust-notifications, github-rust-orders, github-rust-playground-cli, github-rust-playground-proto, github-rust-playground-telemetry, github-rust-pricing, github-rust-recommendation, github-rust-storefront, github-swift-package-macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -715,24 +719,24 @@ jobs:
               *) echo "unselected CI job github-bun-playground-web failed unexpectedly: $result" >&2; exit 1 ;;
             esac
           fi
-          if [[ "$selected" == *",docker-deploy,"* ]]; then
-            result="$(result_for_job github-docker-deploy)"
+          if [[ "$selected" == *",docker,"* ]]; then
+            result="$(result_for_job github-docker)"
             if [[ "$LANE_ADMITTED_GITHUB" == true ]]; then
               case "$result" in
                 success) ;;
-                *) echo "selected CI job github-docker-deploy did not pass: $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-docker did not pass: $result" >&2; exit 1 ;;
               esac
             else
               case "$result" in
                 skipped) ;;
-                *) echo "selected CI job github-docker-deploy ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
+                *) echo "selected CI job github-docker ran outside its lane admission (LANE_ADMITTED_GITHUB=$LANE_ADMITTED_GITHUB): $result" >&2; exit 1 ;;
               esac
             fi
           else
-            result="$(result_for_job github-docker-deploy)"
+            result="$(result_for_job github-docker)"
             case "$result" in
               success|skipped) ;;
-              *) echo "unselected CI job github-docker-deploy failed unexpectedly: $result" >&2; exit 1 ;;
+              *) echo "unselected CI job github-docker failed unexpectedly: $result" >&2; exit 1 ;;
             esac
           fi
           if [[ "$selected" == *",gradle-services-catalog,"* ]]; then
