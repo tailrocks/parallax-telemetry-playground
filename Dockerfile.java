@@ -1,6 +1,7 @@
 # Shared Dockerfile for the Spring Boot (Java) services. Parameterized by SERVICE
 # (the services/<SERVICE> directory). Each service is its own Gradle build with
-# its own wrapper.
+# its own wrapper. Lives at the repo root so the build context is the workspace
+# it copies from. The default builds the catalog; compose pins each service.
 #
 # Instrumentation: the UPSTREAM OpenTelemetry Java agent (OTLP export to the
 # lab's Rotel → fan-out to every backend). We deliberately do NOT use Sentry's
@@ -8,7 +9,7 @@
 # the fan-out backends from seeing Java signals. Each service instead includes
 # the Spring Boot 4-compatible Sentry SDK starter, which emits Sentry envelopes
 # while this upstream agent remains the sole OTLP instrumentation/export path.
-ARG SERVICE
+ARG SERVICE=catalog
 ARG OTEL_AGENT_VERSION=2.30.0
 ARG OTEL_AGENT_SHA256=9d6bc2ad8dd8fb7f730984988e57b8ac0a82d81c7b3b8ae795378718733a509d
 ARG GRPC_HEALTH_PROBE_VERSION=v0.4.56

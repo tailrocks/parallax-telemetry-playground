@@ -8,8 +8,8 @@
 # Status: Rust services (checkout, pricing, inventory, recommendation,
 # notifications, orders, storefront GraphQL) + Java (catalog GraphQL, payment gRPC, fulfillment
 # RabbitMQ) + web (TanStack Start) all wired. Java uses the upstream OTel agent
-# plus the Spring Sentry SDK (deploy/Dockerfile.java); web is the Nitro server
-# (deploy/Dockerfile.web). All external image references are digest-pinned.
+# plus the Spring Sentry SDK (Dockerfile.java); web is the Nitro server
+# (Dockerfile.web). All external image references are digest-pinned.
 
 x-otlp: &otlp
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://host.docker.internal:4317"
@@ -64,7 +64,7 @@ x-clickhouse-env: &clickhouse-env
 
 services:
   checkout:
-    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: checkout } }
+    build: { context: .., dockerfile: Dockerfile.rust, args: { BIN: checkout } }
     restart: unless-stopped
     environment:
       # Checkout owns only the PostgreSQL transaction. Redis and ClickHouse
@@ -117,7 +117,7 @@ services:
     networks: [pg]
 
   pricing:
-    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: pricing } }
+    build: { context: .., dockerfile: Dockerfile.rust, args: { BIN: pricing } }
     restart: unless-stopped
     environment:
       <<: [*otlp, *postgres-env, *redis-env]
@@ -150,7 +150,7 @@ services:
     networks: [pg]
 
   inventory:
-    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: inventory } }
+    build: { context: .., dockerfile: Dockerfile.rust, args: { BIN: inventory } }
     restart: unless-stopped
     environment:
       <<: [*otlp, *postgres-env]
@@ -176,7 +176,7 @@ services:
     networks: [pg]
 
   recommendation:
-    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: recommendation } }
+    build: { context: .., dockerfile: Dockerfile.rust, args: { BIN: recommendation } }
     restart: unless-stopped
     environment:
       <<: *otlp
@@ -205,7 +205,7 @@ services:
     networks: [pg]
 
   notifications:
-    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: notifications } }
+    build: { context: .., dockerfile: Dockerfile.rust, args: { BIN: notifications } }
     restart: unless-stopped
     environment:
       <<: [*otlp, *postgres-env]
@@ -233,7 +233,7 @@ services:
     networks: [pg]
 
   orders:
-    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: orders } }
+    build: { context: .., dockerfile: Dockerfile.rust, args: { BIN: orders } }
     restart: unless-stopped
     environment:
       <<: [*otlp, *postgres-env, *rabbitmq-env, *clickhouse-env]
@@ -267,7 +267,7 @@ services:
     networks: [pg]
 
   storefront:
-    build: { context: .., dockerfile: deploy/Dockerfile.rust, args: { BIN: storefront } }
+    build: { context: .., dockerfile: Dockerfile.rust, args: { BIN: storefront } }
     restart: unless-stopped
     environment:
       <<: [*otlp, *postgres-env, *redis-env, *clickhouse-env]
@@ -332,7 +332,7 @@ services:
   postgres-migrate:
     build:
       context: ..
-      dockerfile: deploy/Dockerfile.migrations
+      dockerfile: Dockerfile.migrations
     command: ["postgres-migrate"]
     environment:
       PGHOST: "postgres"
@@ -460,7 +460,7 @@ services:
 
   # --- Java (upstream OTel javaagent + Sentry Spring SDK) ---
   catalog:
-    build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: catalog } }
+    build: { context: .., dockerfile: Dockerfile.java, args: { SERVICE: catalog } }
     restart: unless-stopped
     environment:
       <<: [*otlp, *postgres-env, *redis-env]
@@ -521,7 +521,7 @@ services:
     networks: [pg]
 
   payment:
-    build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: payment } }
+    build: { context: .., dockerfile: Dockerfile.java, args: { SERVICE: payment } }
     restart: unless-stopped
     environment:
       <<: *otlp
@@ -564,7 +564,7 @@ services:
     networks: [pg]
 
   fulfillment:
-    build: { context: .., dockerfile: deploy/Dockerfile.java, args: { SERVICE: fulfillment } }
+    build: { context: .., dockerfile: Dockerfile.java, args: { SERVICE: fulfillment } }
     restart: unless-stopped
     environment:
       <<: [*otlp, *postgres-env, *rabbitmq-env, *clickhouse-env]
@@ -622,7 +622,7 @@ services:
   web:
     build:
       context: ..
-      dockerfile: deploy/Dockerfile.web
+      dockerfile: Dockerfile.web
       args:
         # The web adapter proxies this same-origin path to the container-only
         # STOREFRONT_URL, so disposable host-port remaps need no rebuild-time

@@ -2,15 +2,15 @@ schema = 1
 
 [generator]
 repository = "tailrocks/parallax-telemetry-playground"
-revision = "b9c3156cdb88e63c11b9e595a3e694b02238c09a"
+revision = "4fa7a3a85f141a6bb95bc9bdf0eef9e3ddde165d"
 
 
 [policy]
 ruleset_required_status_checks = ["ci-required"]
 ruleset_external_status_checks = ["DCO"]
 [workflow]
-runners = "both"
-automatic = "both"
+runners = "github"
+automatic = "github"
 default_dispatch_runner = "github"
 automatic_lanes = "github"
 github_runner = "ubuntu-24.04"
@@ -23,3 +23,69 @@ units = ["swift-package-macos"]
 
 [declare.args]
 jobs = ["github"]
+
+# Every Rust unit compiles protobuf codegen: playground-proto runs
+# tonic-prost-build directly, and the other nine link playground-telemetry,
+# which builds open-feature-flagd. The scanner cannot see build-script system
+# dependencies, so each unit declares the locked protoc explicitly.
+[[units]]
+id = "rust-checkout"
+mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
+
+[[units]]
+id = "rust-inventory"
+mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
+
+[[units]]
+id = "rust-notifications"
+mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
+
+[[units]]
+id = "rust-orders"
+mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
+
+[[units]]
+id = "rust-playground-cli"
+mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
+
+[[units]]
+id = "rust-playground-proto"
+mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
+
+[[units]]
+id = "rust-playground-telemetry"
+mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
+
+[[units]]
+id = "rust-pricing"
+mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
+
+[[units]]
+id = "rust-recommendation"
+mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
+
+[[units]]
+id = "rust-storefront"
+mise_tools = ["aqua:protocolbuffers/protobuf/protoc"]
+
+# The Gradle builds run their daemon on the runner JVM (17), but the
+# opentelemetry-gradle-plugin buildscript requires 21+. Each service declares
+# the locked JDK (GraalVM 25, matching the Gradle toolchains) so mise
+# provisions it before setup-gradle runs.
+[[units]]
+id = "gradle-services-catalog"
+mise_tools = ["java"]
+
+[[units]]
+id = "gradle-services-fulfillment"
+mise_tools = ["java"]
+
+[[units]]
+id = "gradle-services-payment"
+mise_tools = ["java"]
+
+# The Swift package imports Darwin/MachO/MetricKit: genuinely Apple-only code
+# that cannot compile on linux. It renders onto the macOS executor.
+[[units]]
+id = "swift-package-macos"
+os = "macos"

@@ -4,18 +4,18 @@ repository = "tailrocks/parallax-telemetry-playground"
 profile = "generic"
 verified = true
 default_branch = "main"
-runners = "both"
+runners = "github"
 
 [analysis]
 method = "static-filesystem-and-manifest-inspection"
-detected = ["cargo-lockfile", "cargo-nextest-policy", "mise-present", "package-manager:bun:web", "package-script:web:build", "package-script:web:test", "package-script:web:typecheck", "renovate-configuration", "rust-binaries:playground-cli:1", "rust-build-script:playground-proto", "rust-test-targets:playground-cli:1", "rust-test-targets:playground-telemetry:1", "rust-workspace-members:10", "swift-package:macos"]
+detected = ["cargo-lockfile", "cargo-nextest-policy", "mise-present", "package-manager:bun:web", "package-script:web:build", "package-script:web:test", "renovate-configuration", "rust-binaries:playground-cli:1", "rust-build-script:playground-proto", "rust-test-targets:playground-cli:1", "rust-test-targets:playground-telemetry:1", "rust-workspace-members:10", "swift-package:macos"]
 limitations = ["Project code, build scripts, task runners, and commands are never executed during analysis.", "Release, signing, registry, deployment, branch-protection, and runner-capability contracts remain explicit manual inputs.", "Renovate credentials, runner placement, and write permissions cannot be inferred from repository files.", "Rust build scripts are watched but their system dependencies and generated outputs are not inferred."]
 
 [workflow]
 github_runner = "ubuntu-24.04"
 velnor_labels = ["self-hosted", "velnor-target-mvp"]
 files = ["ci-main.yml", "ci-policy.yml", "ci-pr.yml", "ci-unit-bun.yml", "ci-unit-docker.yml", "ci-unit-gradle.yml", "ci-unit-rust.yml", "ci-unit-swift.yml", "maintenance.yml", "nightly.yml"]
-notes = ["Rust verification uses Mr. Boxington 1.11.1 by default on both lanes. GitHub-hosted jobs use its GitHub cache backend with bounded snapshot keys (a key names the toolchain/image/linker compatibility class and the hashed source state, so a new source state saves a new snapshot and retention keeps generations bounded). Velnor jobs use an explicit local-backend setup step against the image/runner-provided local store."]
+notes = ["Rust verification uses Mr. Boxington 1.12.0 with its GitHub cache backend and bounded snapshot keys (a key names the toolchain/image/linker compatibility class and the hashed source state, so a new source state saves a new snapshot and retention keeps generations bounded)."]
 
 [release]
 enabled = false
@@ -27,24 +27,24 @@ label = "Bun package (playground-web)"
 kind = "bun"
 root = "web"
 watch = ["web/**/*.js", "web/**/*.json", "web/**/*.jsx", "web/**/*.ts", "web/**/*.tsx", "web/bun.lock", "web/bun.lockb", "web/package-lock.json", "web/package.json"]
-github_pr_commands = ["cd -- 'web' && bun install --frozen-lockfile", "cd -- 'web' && bun run typecheck", "cd -- 'web' && bun run build", "cd -- 'web' && bun run test"]
-github_full_commands = ["cd -- 'web' && bun install --frozen-lockfile", "cd -- 'web' && bun run typecheck", "cd -- 'web' && bun run build", "cd -- 'web' && bun run test"]
-velnor_pr_commands = ["cd -- 'web' && bun install --frozen-lockfile", "cd -- 'web' && bun run typecheck", "cd -- 'web' && bun run build", "cd -- 'web' && bun run test"]
-velnor_full_commands = ["cd -- 'web' && bun install --frozen-lockfile", "cd -- 'web' && bun run typecheck", "cd -- 'web' && bun run build", "cd -- 'web' && bun run test"]
+github_pr_commands = ["cd -- 'web' && bun install --frozen-lockfile", "cd -- 'web' && bun run build", "cd -- 'web' && bun run test"]
+github_full_commands = ["cd -- 'web' && bun install --frozen-lockfile", "cd -- 'web' && bun run build", "cd -- 'web' && bun run test"]
+velnor_pr_commands = ["cd -- 'web' && bun install --frozen-lockfile", "cd -- 'web' && bun run build", "cd -- 'web' && bun run test"]
+velnor_full_commands = ["cd -- 'web' && bun install --frozen-lockfile", "cd -- 'web' && bun run build", "cd -- 'web' && bun run test"]
 [unit.cache]
 key_files = ["web/package.json", "web/bun.lock"]
 paths = ["~/.bun/install/cache"]
 
 [[unit]]
-id = "docker-deploy"
-label = "Docker (deploy)"
+id = "docker"
+label = "Docker"
 kind = "docker"
-root = "deploy"
-watch = ["deploy/**"]
-github_pr_commands = ["docker build --file 'deploy/Dockerfile.java' --tag local-ci:deploy-dockerfile-java 'deploy'", "docker build --file 'deploy/Dockerfile.migrations' --tag local-ci:deploy-dockerfile-migrations 'deploy'", "docker build --file 'deploy/Dockerfile.rust' --tag local-ci:deploy-dockerfile-rust 'deploy'", "docker build --file 'deploy/Dockerfile.web' --tag local-ci:deploy-dockerfile-web 'deploy'"]
-github_full_commands = ["docker build --file 'deploy/Dockerfile.java' --tag local-ci:deploy-dockerfile-java 'deploy'", "docker build --file 'deploy/Dockerfile.migrations' --tag local-ci:deploy-dockerfile-migrations 'deploy'", "docker build --file 'deploy/Dockerfile.rust' --tag local-ci:deploy-dockerfile-rust 'deploy'", "docker build --file 'deploy/Dockerfile.web' --tag local-ci:deploy-dockerfile-web 'deploy'"]
-velnor_pr_commands = ["docker build --file 'deploy/Dockerfile.java' --tag local-ci:deploy-dockerfile-java 'deploy'", "docker build --file 'deploy/Dockerfile.migrations' --tag local-ci:deploy-dockerfile-migrations 'deploy'", "docker build --file 'deploy/Dockerfile.rust' --tag local-ci:deploy-dockerfile-rust 'deploy'", "docker build --file 'deploy/Dockerfile.web' --tag local-ci:deploy-dockerfile-web 'deploy'"]
-velnor_full_commands = ["docker build --file 'deploy/Dockerfile.java' --tag local-ci:deploy-dockerfile-java 'deploy'", "docker build --file 'deploy/Dockerfile.migrations' --tag local-ci:deploy-dockerfile-migrations 'deploy'", "docker build --file 'deploy/Dockerfile.rust' --tag local-ci:deploy-dockerfile-rust 'deploy'", "docker build --file 'deploy/Dockerfile.web' --tag local-ci:deploy-dockerfile-web 'deploy'"]
+root = "."
+watch = ["**"]
+github_pr_commands = ["docker build --file 'Dockerfile.java' --tag local-ci:dockerfile-java '.'", "docker build --file 'Dockerfile.migrations' --tag local-ci:dockerfile-migrations '.'", "docker build --file 'Dockerfile.rust' --tag local-ci:dockerfile-rust '.'", "docker build --file 'Dockerfile.web' --tag local-ci:dockerfile-web '.'"]
+github_full_commands = ["docker build --file 'Dockerfile.java' --tag local-ci:dockerfile-java '.'", "docker build --file 'Dockerfile.migrations' --tag local-ci:dockerfile-migrations '.'", "docker build --file 'Dockerfile.rust' --tag local-ci:dockerfile-rust '.'", "docker build --file 'Dockerfile.web' --tag local-ci:dockerfile-web '.'"]
+velnor_pr_commands = ["docker build --file 'Dockerfile.java' --tag local-ci:dockerfile-java '.'", "docker build --file 'Dockerfile.migrations' --tag local-ci:dockerfile-migrations '.'", "docker build --file 'Dockerfile.rust' --tag local-ci:dockerfile-rust '.'", "docker build --file 'Dockerfile.web' --tag local-ci:dockerfile-web '.'"]
+velnor_full_commands = ["docker build --file 'Dockerfile.java' --tag local-ci:dockerfile-java '.'", "docker build --file 'Dockerfile.migrations' --tag local-ci:dockerfile-migrations '.'", "docker build --file 'Dockerfile.rust' --tag local-ci:dockerfile-rust '.'", "docker build --file 'Dockerfile.web' --tag local-ci:dockerfile-web '.'"]
 
 [[unit]]
 id = "gradle-services-catalog"

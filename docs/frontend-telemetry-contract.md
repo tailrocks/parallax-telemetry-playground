@@ -9,7 +9,7 @@ the distributed trace.
 ## Build-time configuration
 
 `VITE_*` values are compiled into the client bundle by Vite during the web
-image build. The build stage in `deploy/Dockerfile.web` declares the supported
+image build. The build stage in `Dockerfile.web` declares the supported
 build arguments and supplies their defaults; changing `VITE_*` variables only
 in the running container cannot change an already-built browser bundle.
 
