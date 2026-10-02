@@ -67,10 +67,10 @@ run = "java -cp gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapp
 
 [tasks."quality:java"]
 description = "Run all Spring service test suites"
-run = [
-  { task = "quality:java_catalog" },
-  { task = "quality:java_payment" },
-  { task = "quality:java_fulfillment" },
+depends = [
+  "quality:java_catalog",
+  "quality:java_payment",
+  "quality:java_fulfillment",
 ]
 
 [tasks."quality:web"]
