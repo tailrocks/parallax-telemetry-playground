@@ -374,6 +374,7 @@ where
     future.with_context(inbound_context).await
 }
 
+#[allow(clippy::result_large_err)]
 async fn process_delivery(
     state: &App,
     channel: &lapin::Channel,
@@ -577,6 +578,7 @@ async fn process_delivery(
     Ok(())
 }
 
+#[allow(clippy::result_large_err)]
 async fn publish_or_fail(
     channel: &lapin::Channel,
     payload: &[u8],

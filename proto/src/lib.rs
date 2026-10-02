@@ -11,3 +11,15 @@ pub mod pricing {
         include!("gen/playground.pricing.v1.rs");
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contracts_present() {
+        let _ = payment::v1::AuthorizeRequest::default();
+        let _ = pricing::v1::QuoteRequest::default();
+    }
+}
