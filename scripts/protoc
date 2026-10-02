@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -e
+
+if command -v protoc >/dev/null 2>&1; then
+    if protoc --version >/dev/null 2>&1; then
+        exec protoc "$@"
+    fi
+fi
+
+CACHE_DIR="${RUNNER_TEMP:-/tmp}/velnor-protoc-cache"
+if [ ! -x "$CACHE_DIR/bin/protoc" ]; then
+    mkdir -p "$CACHE_DIR"
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64|amd64) PROTOC_ARCH="x86_64" ;;
+        aarch64|arm64) PROTOC_ARCH="aarch_64" ;;
+        *) PROTOC_ARCH="x86_64" ;;
+    esac
+    case "$OS" in
+        darwin) PROTOC_OS="osx" ;;
+        linux) PROTOC_OS="linux" ;;
+        *) PROTOC_OS="linux" ;;
+    esac
+    URL="https://github.com/protocolbuffers/protobuf/releases/download/v29.5/protoc-29.5-${PROTOC_OS}-${PROTOC_ARCH}.zip"
+    curl -fsSL "$URL" -o "$CACHE_DIR/protoc.zip"
+    unzip -q -o "$CACHE_DIR/protoc.zip" -d "$CACHE_DIR"
+    chmod +x "$CACHE_DIR/bin/protoc"
+fi
+
+exec "$CACHE_DIR/bin/protoc" "$@"
