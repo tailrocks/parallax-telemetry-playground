@@ -3143,6 +3143,7 @@ version = "0.1.0"
 dependencies = [
  "prost",
  "prost-types",
+ "protobuf-src",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
@@ -3369,6 +3370,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
 dependencies = [
  "prost",
+]
+
+[[package]]
+name = "protobuf-src"
+version = "2.1.1+27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6217c3504da19b85a3a4b2e9a5183d635822d83507ba0986624b5c05b83bfc40"
+dependencies = [
+ "cmake",
 ]
 
 [[package]]
