@@ -1,6 +1,7 @@
 # web (TanStack Start). Build with Bun (repo policy: Bun-only for JS/TS), run the
 # TanStack Start server output. The same-origin /v1/traces proxy forwards browser
 # OTLP to Rotel server-side (ROTEL_OTLP_HTTP_ENDPOINT).
+# Lives at the repo root so the build context is the workspace it copies from.
 FROM oven/bun:1@sha256:9e123d5fc069e29d519fd4c981afb61b8542ac80274771961136db1e4538d53e AS build
 WORKDIR /app
 COPY web/package.json web/bun.lock ./

@@ -1,7 +1,7 @@
 # Rust-owned PostgreSQL migration/verification task.
+# Lives at the repo root so the build context is the workspace it compiles.
+# Cargo uses its default parallelism, matching the repo's own `mise run build`.
 FROM rust:1-slim@sha256:17d1ba895198f9934c6314ec5346a0d5115372f3243390c3d731e242f35c2f27 AS build
-ARG CARGO_BUILD_JOBS=1
-ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 RUN apt-get update && apt-get install -y --no-install-recommends \
     protobuf-compiler libprotobuf-dev pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*

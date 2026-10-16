@@ -150,15 +150,22 @@ func emitUnifiedLog(scenario: String, traceIdHex: String, marker: String) {
 
 /// Honest MetricKit probe: subscribes and waits. CLI processes without an
 /// installed app identity receive no payloads; the probe records that fact
-/// instead of faking diagnostics.
+/// instead of faking diagnostics. Metric payloads are iOS-only API
+/// (unavailable on macOS SDKs, deprecated where present); diagnostics arrive
+/// on both platforms.
 final class MetricKitProbe: NSObject, MXMetricManagerSubscriber {
     private var metricCount = 0
     private var diagnosticCount = 0
     private let lock = NSLock()
 
+    // MXMetricPayload delivery is iOS-only API: hard-unavailable on macOS in
+    // older SDKs, deprecated wherever present. The requirement is optional,
+    // so macOS builds simply omit the witness.
+    #if os(iOS)
     func didReceive(_ payloads: [MXMetricPayload]) {
         lock.lock(); metricCount += payloads.count; lock.unlock()
     }
+    #endif
 
     func didReceive(_ payloads: [MXDiagnosticPayload]) {
         lock.lock(); diagnosticCount += payloads.count; lock.unlock()

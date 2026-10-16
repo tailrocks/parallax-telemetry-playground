@@ -5,13 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "bunx --bun --no-install vite dev",
-    "build": "bunx --bun --no-install vite build && bun run typecheck",
+    "build": "bunx --bun --no-install vite build && bunx --bun --no-install tsc --noEmit",
     "test": "bunx --bun --no-install vitest run",
     "e2e": "bun run e2e:compose",
     "e2e:mock": "PLAYGROUND_MOCK_E2E=1 bunx --bun --no-install playwright test e2e/journey.spec.ts",
     "e2e:compose": "PLAYGROUND_COMPOSE_E2E=1 bunx --bun --no-install playwright test e2e/compose.smoke.spec.ts",
     "preview": "bunx --bun --no-install vite preview",
-    "typecheck": "bunx --bun --no-install tsc --noEmit",
     "start": "bun server.ts"
   },
   "dependencies": {
